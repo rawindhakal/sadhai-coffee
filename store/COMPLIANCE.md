@@ -5,7 +5,7 @@ How the app meets the Google Play and Apple App Store rules that apply to it. "D
 | Requirement | Where | Status |
 |---|---|---|
 | **Account deletion inside the app** (Apple 5.1.1(v), Google Play account deletion policy) | App: Account, Profile, Delete my account. Web: `/delete-account`. API: `DELETE /me` (password required, blocked while an order is in progress, erases personal data, keeps pseudonymised order records) | Done |
-| **Web page for account deletion** (Google requires a public URL) | `https://<your-web-domain>/delete-account` | Done. You: put the URL in Play Console, App content, Data safety |
+| **Web page for account deletion** (Google requires a public URL) | `https://sadhaicoffee.com/delete-account` | Done. You: put the URL in Play Console, App content, Data safety |
 | **Privacy policy URL** in both stores and inside the app | `/privacy`, linked from sign-up, Profile and the web footer | Done. You: have it reviewed and set company details in `web/src/lib/site.ts` |
 | **Terms of use** and consent at sign-up | `/terms`, required checkbox on register (app and web) | Done |
 | **Data export** (good practice, privacy law) | Profile, Copy my data / Download my data. API: `GET /me/export` | Done |

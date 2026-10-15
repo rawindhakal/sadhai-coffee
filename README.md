@@ -113,6 +113,7 @@ Test the sandbox values against each provider's current documentation before goi
 
 ## Things to do before launch
 
+- **Domain `sadhaicoffee.com`:** web app and legal pages at `https://sadhaicoffee.com` (also `www`), API at `https://api.sadhaicoffee.com`. Set `PUBLIC_WEB_URL`, `PUBLIC_API_URL` and `CORS_ORIGINS` to match (see `backend/.env.example`), build the web app with `NEXT_PUBLIC_API_URL=https://api.sadhaicoffee.com`, and build the mobile apps with `--dart-define=API_URL=https://api.sadhaicoffee.com --dart-define=WEB_URL=https://sadhaicoffee.com`. The support and privacy addresses default to `support@sadhaicoffee.com` and `privacy@sadhaicoffee.com`; create those mailboxes. The same values can be saved under Settings and keys. Privacy policy URL for the stores: `https://sadhaicoffee.com/privacy`.
 - Set a strong `JWT_SECRET`, `PAYMENT_MODE=live`, `IGNORE_STATION_HOURS=0`, HTTPS, and tight `CORS_ORIGINS`.
 - Sign-up uses phone and password. Add SMS OTP (Sparrow SMS or Aakash SMS) in `routes/auth.js`, and push delivery (FCM) in `lib/notify.js`; hooks are marked.
 - The SSE hub is in memory. For more than one API instance, replace `lib/hub.js` with Postgres `LISTEN/NOTIFY` or Redis.

@@ -2,7 +2,7 @@
 const appVersion = '1.4.0';
 const appBuild = 5;
 
-/// Where legal pages live. Override: --dart-define=WEB_URL=https://sadhai.example
+/// Where legal pages live. Override: --dart-define=WEB_URL=https://sadhaicoffee.com
 const webUrl = String.fromEnvironment('WEB_URL', defaultValue: 'http://localhost:3000');
 
 /// True when [a] is older than [b], comparing dotted numeric versions.

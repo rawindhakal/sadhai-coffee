@@ -6,7 +6,7 @@ Use these to fill in Google Play Console (App content, Data safety) and App Stor
 
 - **Does your app collect or share user data?** Collects: yes. Shares: no (service providers acting for us, and payment providers the user chooses, are not "sharing" under Google's definition).
 - **Is all data encrypted in transit?** Yes (HTTPS).
-- **Can users request data deletion?** Yes. In app: Account, Profile, Delete my account. Web link: `https://<your-web-domain>/delete-account`.
+- **Can users request data deletion?** Yes. In app: Account, Profile, Delete my account. Web link: `https://sadhaicoffee.com/delete-account`.
 
 | Data type | Collected | Shared | Optional | Purpose |
 |---|---|---|---|---|
@@ -26,7 +26,7 @@ Use these to fill in Google Play Console (App content, Data safety) and App Stor
 - **Data used to track you:** none.
 - **Data linked to you:** Name, Phone Number, Email Address (optional), Purchase History, User ID: all for **App Functionality**. Coarse and precise location are used for App Functionality, are not stored, and are not linked to the account.
 - **Data not collected:** contacts, browsing history, search history, diagnostics, advertising data, health, financial info.
-- Privacy policy URL: `https://<your-web-domain>/privacy`.
+- Privacy policy URL: `https://sadhaicoffee.com/privacy`.
 
 ## Play Console declarations
 

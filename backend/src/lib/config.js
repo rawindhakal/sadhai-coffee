@@ -28,5 +28,5 @@ export const push = {
   fcmJson: process.env.FCM_SERVICE_ACCOUNT_JSON || '',
   vapidPublic: process.env.VAPID_PUBLIC_KEY || '',
   vapidPrivate: process.env.VAPID_PRIVATE_KEY || '',
-  vapidSubject: process.env.VAPID_SUBJECT || 'mailto:support@sadhai.example',
+  vapidSubject: process.env.VAPID_SUBJECT || 'mailto:support@sadhaicoffee.com',
 };

@@ -22,7 +22,7 @@ function providers() {
   fcm = null; fcmToken = { value: null, exp: 0 };
   try { const raw = rt('fcm_service_account_json'); if (raw) fcm = JSON.parse(raw.trim().startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8')); } catch (e) { console.error('Firebase key is not valid JSON:', e.message); }
   webReady = !!(rt('vapid_public_key') && rt('vapid_private_key'));
-  if (webReady) { try { webpush.setVapidDetails(rt('vapid_subject') || 'mailto:support@sadhai.example', rt('vapid_public_key'), rt('vapid_private_key')); } catch (e) { webReady = false; console.error('Web push keys rejected:', e.message); } }
+  if (webReady) { try { webpush.setVapidDetails(rt('vapid_subject') || 'mailto:support@sadhaicoffee.com', rt('vapid_public_key'), rt('vapid_private_key')); } catch (e) { webReady = false; console.error('Web push keys rejected:', e.message); } }
 }
 export const pushStatus = () => { providers(); const mode = rt('push_mode'); return { mode, fcm: !!fcm, web: webReady, dry_run: mode !== 'off' && !(fcm || webReady) }; };
 export const vapidPublicKey = () => rt('vapid_public_key') || null;
