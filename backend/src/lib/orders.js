@@ -247,13 +247,45 @@ async function discountFor(db, user, input, lines, subtotal, stationId) {
   return out;
 }
 
+const roundUp5 = (ms) => Math.ceil(ms / 300000) * 300000;
+
+/**
+ * Pickup later. Same day only, inside opening hours, at least preorder_min_minutes from now, and not in the last 5 minutes before closing.
+ * Returns the validated pickup time, or null for "as soon as possible". Kiosk and counter orders are always immediate.
+ */
+export async function pickupWindow(db, station) {
+  const s = await getSettings(db);
+  if (!s.preorder_enabled) return null;
+  const { rows } = await db.query(
+    `SELECT (now() AT TIME ZONE 'Asia/Kathmandu')::date AS d,
+            (((now() AT TIME ZONE 'Asia/Kathmandu')::date + $1::time) AT TIME ZONE 'Asia/Kathmandu') AS opens_at,
+            (((now() AT TIME ZONE 'Asia/Kathmandu')::date + $2::time) AT TIME ZONE 'Asia/Kathmandu') - interval '5 minutes' AS last_at`, [station.opens, station.closes]);
+  const earliest = roundUp5(Date.now() + s.preorder_min_minutes * 60000);
+  const latest = new Date(rows[0].last_at).getTime();
+  const first = Math.max(earliest, new Date(rows[0].opens_at).getTime());
+  return first <= latest ? { earliest: new Date(first).toISOString(), latest: new Date(latest).toISOString(), min_minutes: s.preorder_min_minutes, step_minutes: 5 } : null;
+}
+
+async function checkSchedule(db, station, input, channel) {
+  if (!input.scheduled_for) return null;
+  if (!['app', 'qr', 'web'].includes(channel)) return null;
+  const w = await pickupWindow(db, station);
+  if (!w) throw conflict('Pickup later is not available at this station right now. Choose as soon as possible.', 'preorder_unavailable');
+  const t = new Date(input.scheduled_for).getTime();
+  if (Number.isNaN(t)) throw bad('Choose a pickup time');
+  if (t < new Date(w.earliest).getTime() - 60000) throw bad(`Pickup must be at least ${w.min_minutes} minutes from now`);
+  if (t > new Date(w.latest).getTime() + 60000) throw bad('That time is after this station closes. Choose an earlier time.');
+  return new Date(t);
+}
+
 export async function quote(db, user, input) {
   const station = await loadStationForOrder(db, input.station_id, input.channel || 'app');
+  const scheduledFor = await checkSchedule(db, station, input, input.channel || 'app');
   const { lines, drops, offerUse } = await priceLines(db, station.id, input.items);
   const subtotal = lines.reduce((a, l) => a + l.line_total, 0);
   const d = await discountFor(db, user, input, lines, subtotal, station.id);
   const discount = Math.min(d.discount, subtotal);
-  return { station, lines, drops, offerUse, subtotal, discount, total: subtotal - discount, discount_label: d.label, coupon_id: d.coupon_id, promo_code_id: d.promo_code_id, pass_id: d.pass_id, pass_plan: d.pass_plan || [], cups: lines.reduce((a, l) => a + l.qty, 0) };
+  return { station, scheduledFor, lines, drops, offerUse, subtotal, discount, total: subtotal - discount, discount_label: d.label, coupon_id: d.coupon_id, promo_code_id: d.promo_code_id, pass_id: d.pass_id, pass_plan: d.pass_plan || [], cups: lines.reduce((a, l) => a + l.qty, 0) };
 }
 
 /* ------------------------------------------------------------- inventory */
@@ -340,7 +372,8 @@ function emitOrder(order, event = 'order') {
 async function placeOrder(db, order, items, actorId) {
   const needs = await needsFor(db, items);
   const low = await deductStock(db, order.station_id, needs, order.id, actorId);
-  await db.query(`UPDATE orders SET status='placed' WHERE id=$1`, [order.id]);
+  const prep = (await getSettings(db)).preorder_prep_minutes;
+  await db.query(`UPDATE orders SET status='placed', released_at = CASE WHEN scheduled_for IS NULL OR scheduled_for <= now() + make_interval(mins => $2) THEN now() END WHERE id=$1`, [order.id, prep]);
   return low;
 }
 
@@ -360,7 +393,7 @@ export async function createOrder(user, input) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
       [q.station.id, user?.id || null, input.customer_name || null, code, channel, digital ? 'awaiting_payment' : 'placed',
         q.subtotal, q.discount, q.total, q.discount_label, method, paidNow ? 'paid' : 'unpaid', q.coupon_id, q.promo_code_id, q.pass_id,
-        [...q.drops.keys()][0] || null, input.note?.slice(0, 200) || null, input.scheduled_for || null, input.customer_phone || null, String(crypto.randomInt(1000, 10000))],
+        [...q.drops.keys()][0] || null, input.note?.slice(0, 200) || null, q.scheduledFor, input.customer_phone || null, String(crypto.randomInt(1000, 10000))],
     );
     const order = rows[0];
     for (const l of q.lines) {
@@ -409,7 +442,7 @@ export async function createOrder(user, input) {
 
   const order = await fullOrder(result.id, undefined, { reveal: true });
   if (order.status === 'placed') {
-    emitOrder(order, 'order_new');
+    emitOrder(order, order.scheduled_for && !order.released_at ? 'order' : 'order_new');
     if (order.user_id) await notify(order.user_id, { kind: 'order', title: `Order ${order.pickup_code} received`, body: `${order.station_name} is on it. Your coffee in 90 seconds.`, data: { order_id: order.id } });
     alertLowStock(result.stationId, result.low).catch(() => {});
   }
@@ -460,7 +493,7 @@ export async function confirmPayment(paymentId, { ref, raw, outcome = 'paid' } =
   if (res.orderId) {
     const order = await fullOrder(res.orderId);
     if (order.status === 'placed') {
-      emitOrder(order, 'order_new');
+      emitOrder(order, order.scheduled_for && !order.released_at ? 'order' : 'order_new');
       if (order.user_id) await notify(order.user_id, { kind: 'order', title: `Order ${order.pickup_code} received`, body: 'Payment confirmed. Your coffee in 90 seconds.', data: { order_id: order.id } });
       alertLowStock(order.station_id, res.low || []).catch(() => {});
     } else if (order.status === 'cancelled') {
@@ -678,4 +711,17 @@ export async function issueSignupLadder(userId, db = { query }) {
       [userId, `${s.ladder_pct}% off · cup ${i + 1}`, s.ladder_pct, String(s.ladder_days)],
     );
   }
+}
+
+/** Moves scheduled orders onto the station queue shortly before their pickup time. Run every 30 seconds. */
+export async function releaseDueOrders() {
+  const prep = (await getSettings()).preorder_prep_minutes;
+  const { rows } = await query(
+    `UPDATE orders SET released_at = now() WHERE status='placed' AND scheduled_for IS NOT NULL AND released_at IS NULL AND scheduled_for <= now() + make_interval(mins => $1) RETURNING id`, [prep]);
+  for (const r of rows) {
+    const order = await fullOrder(r.id);
+    emitOrder(order, 'order_new');
+    if (order.user_id) await notify(order.user_id, { kind: 'order', title: `Order ${order.pickup_code} is with the barista`, body: 'Your coffee is being lined up for your pickup time.', data: { order_id: order.id } });
+  }
+  return rows.length;
 }

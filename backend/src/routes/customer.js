@@ -102,8 +102,8 @@ customer.get('/orders/:id', wrap(async (req, res) => {
   const o = await fullOrder(req.params.id, undefined, { reveal: true });
   if (!o || (o.user_id !== req.user.id && req.user.role === 'customer')) throw notFound('Order not found');
   if (o.user_id !== req.user.id) delete o.handover_code;
-  const ahead = ['placed', 'preparing'].includes(o.status)
-    ? (await query(`SELECT count(*)::int AS n FROM orders WHERE station_id=$1 AND status IN ('placed','preparing') AND created_at < $2`, [o.station_id, o.created_at])).rows[0].n
+  const ahead = ['placed', 'preparing'].includes(o.status) && !(o.scheduled_for && !o.released_at)
+    ? (await query(`SELECT count(*)::int AS n FROM orders WHERE station_id=$1 AND status IN ('placed','preparing') AND (scheduled_for IS NULL OR released_at IS NOT NULL) AND created_at < $2`, [o.station_id, o.created_at])).rows[0].n
     : 0;
   res.json({ ...o, ahead, eta_seconds: (ahead + 1) * 90 });
 }));

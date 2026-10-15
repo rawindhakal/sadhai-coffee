@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { query } from '../lib/db.js';
 import { wrap, notFound } from '../lib/http.js';
-import { stationMenu, bestSellers, liveOffers } from '../lib/orders.js';
+import { stationMenu, bestSellers, liveOffers, pickupWindow } from '../lib/orders.js';
 import { getSettings } from '../lib/settings.js';
 import { vapidPublicKey } from '../lib/push.js';
 import { rt } from '../lib/runtime.js';
@@ -37,13 +37,14 @@ pub.get('/stations', wrap(async (req, res) => {
   const { rows } = await query(
     `SELECT id, code, name, name_ne, address, district, lat, lng, opens, closes, is_open, accepting_orders, prep_target_seconds, operator_type, partner_name,
             ((now() AT TIME ZONE 'Asia/Kathmandu')::time BETWEEN opens AND closes) AS within_hours,
-            (SELECT count(*)::int FROM orders o WHERE o.station_id=stations.id AND o.status IN ('placed','preparing')) AS queue
+            (SELECT count(*)::int FROM orders o WHERE o.station_id=stations.id AND o.status IN ('placed','preparing') AND (o.scheduled_for IS NULL OR o.released_at IS NOT NULL)) AS queue
        FROM stations WHERE active ORDER BY name`,
   );
   const lat = parseFloat(req.query.lat), lng = parseFloat(req.query.lng);
   const out = rows.map((s) => ({
     ...s,
     open_now: s.is_open && s.within_hours,
+    can_order: s.is_open && s.within_hours && s.accepting_orders,
     wait_minutes: Math.max(1, Math.ceil((s.queue * s.prep_target_seconds) / 60)),
     distance_km: Number.isFinite(lat) && Number.isFinite(lng) && s.lat ? Math.round(km(lat, lng, Number(s.lat), Number(s.lng)) * 10) / 10 : null,
   }));
@@ -65,6 +66,16 @@ pub.get('/drops/active', wrap(async (_req, res) => {
   res.json(rows.map((d) => ({ ...d, remaining: Math.max(0, d.cap - d.sold), live: new Date(d.starts_at) <= new Date() && d.sold < d.cap })));
 }));
 
+// Is this station taking orders, and what pickup times can a customer choose? Small, so the cart can poll it.
+pub.get('/stations/:id/pickup-times', wrap(async (req, res) => {
+  const { rows } = await query(
+    `SELECT id, name, opens, closes, is_open, accepting_orders, ((now() AT TIME ZONE 'Asia/Kathmandu')::time BETWEEN opens AND closes) AS within_hours FROM stations WHERE id=$1 AND active`, [req.params.id]);
+  const st = rows[0];
+  if (!st) throw notFound('Station not found');
+  const can = st.is_open && st.within_hours && st.accepting_orders;
+  res.json({ can_order: can, open_now: st.is_open && st.within_hours, paused: st.is_open && st.within_hours && !st.accepting_orders, opens: st.opens, closes: st.closes, preorder: can ? await pickupWindow({ query }, st) : null });
+}));
+
 // One call for the customer home screen: menu, best sellers, offers of the day and live drops for a station.
 pub.get('/stations/:id/home', wrap(async (req, res) => {
   const { rows } = await query(
@@ -78,7 +89,8 @@ pub.get('/stations/:id/home', wrap(async (req, res) => {
   ]);
   const products = categories.flatMap((c) => c.products);
   res.json({
-    station: { ...st, open_now: st.is_open && st.within_hours },
+    station: { ...st, open_now: st.is_open && st.within_hours, can_order: st.is_open && st.within_hours && st.accepting_orders },
+    preorder: st.is_open && st.within_hours && st.accepting_orders ? await pickupWindow({ query }, st) : null,
     categories,
     best_sellers: best.map((id) => products.find((p) => p.id === id)).filter((p) => p && p.available),
     offers: offers.map((o) => {

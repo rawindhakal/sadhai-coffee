@@ -1,4 +1,5 @@
 import { query } from './db.js';
+import { releaseDueOrders } from './orders.js';
 import { notify } from './notify.js';
 import { getSettings } from './settings.js';
 import { normalizePhone } from './http.js';
@@ -143,6 +144,7 @@ export function startScheduler() {
   const tick = () => runDueCampaigns().catch((e) => console.error('scheduler', e.message));
   const auto = () => runAutomations().catch((e) => console.error('automations', e.message));
   setInterval(tick, 30_000).unref();
+  setInterval(() => releaseDueOrders().catch((e) => console.error('release', e.message)), 30_000).unref();
   setInterval(auto, 10 * 60_000).unref();
   setTimeout(auto, 20_000).unref();
 }

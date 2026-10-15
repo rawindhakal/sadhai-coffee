@@ -38,6 +38,13 @@ Everything below is available on the web (`/owner`, `/manager`, `/station`) and 
 
 Public pages `/partners` and `/investors` show the model, the standard prices and an enquiry form. Enquiries arrive under *Enquiries* in the owner dashboard. Their text and pictures are edited under *Home page and pictures*.
 
+## Closed outlets and pickup later
+
+- **Closed means closed.** A station that is switched to closed, outside its opening hours, or paused cannot take any order: the station list greys it out, its menu cannot be ordered from, the cart refuses it, and the API rejects the order and the price quote. Kiosks follow the same rule.
+- **Pickup later.** Under *Pickup time* in the cart, a customer chooses **Later today** and a time. Times start 15 minutes from now (setting) in 5-minute steps and end 5 minutes before closing. Same day only. Not offered while the station is closed or paused. Cash, passes, coupons and Fonepay all work; a Fonepay order is still held until it is paid.
+- **At the station.** A pickup-later order waits under *Later today* (staff can decline it with a reason, and paid orders are refunded). A few minutes before the pickup time (setting, 10 by default) it moves to *New* with a pickup-time badge, staff are alerted, and the customer is told it is with the barista. From there it is the normal accept, prepare, hand over with code. The customer can cancel until the barista starts.
+- Late-order alerts and wait estimates ignore scheduled orders until they are released. Settings: *Pickup later* in Settings and keys.
+
 ## From order to cup (every channel)
 
 1. **Order.** The customer orders in the app or web (QR at the counter, or the app), at the kiosk, or the counter staff key it in.

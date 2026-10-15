@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show SnackBar, Text;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
+import 'push.dart' show messengerKey;
 
 class CartLine {
   CartLine({required this.product, required this.qty, required this.optionIds, required this.optionNames, required this.unit});
@@ -66,7 +68,11 @@ class CartState extends ChangeNotifier {
     _changed();
   }
 
+  /// Set from the station home screen: a closed or paused station cannot take orders.
+  bool ordersBlocked = false;
+
   void add(CartLine l) {
+    if (ordersBlocked) { messengerKey.currentState?..hideCurrentSnackBar()..showSnackBar(const SnackBar(content: Text('This station is not taking orders right now. Choose another station to order.'))); return; }
     final i = lines.indexWhere((x) => x.key == l.key);
     if (i >= 0) { lines[i].qty = (lines[i].qty + l.qty).clamp(1, 10); lines[i].unit = l.unit; } else { lines.add(l); }
     _changed();

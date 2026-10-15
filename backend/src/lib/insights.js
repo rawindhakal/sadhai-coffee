@@ -74,7 +74,7 @@ export async function alerts(stationIds, isOwner) {
 
   const late = await query(
     `SELECT s.name AS station, count(*)::int AS n, max(extract(epoch FROM (now() - o.created_at)))::int AS oldest
-       FROM orders o JOIN stations s ON s.id=o.station_id WHERE o.station_id = ANY($1) AND o.status IN ('placed','preparing') AND now() - o.created_at > make_interval(secs => s.prep_target_seconds * 2)
+       FROM orders o JOIN stations s ON s.id=o.station_id WHERE o.station_id = ANY($1) AND o.status IN ('placed','preparing') AND (o.scheduled_for IS NULL OR o.released_at IS NOT NULL) AND now() - COALESCE(o.released_at, o.created_at) > make_interval(secs => s.prep_target_seconds * 2)
       GROUP BY s.name`, [stationIds]);
   for (const r of late.rows) push('critical', 'late', `${r.n} order${r.n > 1 ? 's' : ''} running late at ${r.station}`, `The oldest has waited ${Math.round(r.oldest / 60)} min.`, 'live');
 

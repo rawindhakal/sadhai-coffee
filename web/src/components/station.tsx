@@ -82,6 +82,8 @@ function Queue({ q, target, onChange }: { q: string; target: number; onChange: (
     try { setFound(await api(`/station/orders/lookup${q ? q + '&' : '?'}code=${encodeURIComponent(find)}`)); } catch (e: any) { toast(e.message, true); }
   }
 
+  const later = useData<any[]>(`/station/orders${q ? q + '&' : '?'}view=later`);
+  useEvents((ev) => { if (['order_new', 'order'].includes(ev)) later.reload(); });
   const cols = [['placed', 'New'], ['preparing', 'Making'], ['ready', 'Ready for pickup']] as const;
   return (
     <>
@@ -99,6 +101,15 @@ function Queue({ q, target, onChange }: { q: string; target: number; onChange: (
           );
         })}
       </div>
+      {(later.data?.length || 0) > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="row between"><h4>Later today</h4><span className="chip">{later.data!.length}</span></div>
+          <p className="small muted">Pickup-later orders. Each moves to New a few minutes before its pickup time. You can cancel one if you cannot make it.</p>
+          <div className="col" style={{ gap: 8, marginTop: 8 }}>{later.data!.map((o) => (
+            <div key={o.id} className="row between wrap card flat"><span><strong>{o.pickup_code}</strong> · {o.items.map((i: any) => `${i.qty} × ${i.name}`).join(', ')}<span className="small muted" style={{ display: 'block' }}>{o.customer_name || o.user_name || 'Customer'} · <Status s={o.payment_status} /></span></span>
+              <span className="row"><strong>{fmtTime(o.scheduled_for)}</strong><button className="btn danger sm" onClick={() => { const r = prompt(`Why are you declining ${o.pickup_code}? The customer is told, and paid orders are refunded.`); if (r && r.trim().length >= 3) move(o.id, 'cancelled', { reason: r.trim() }).then(() => later.reload()); }}>Decline</button></span></div>))}</div>
+        </div>
+      )}
       {found && (
         <Modal title={`Order ${found.pickup_code}`} onClose={() => setFound(null)}>
           <Ticket o={found} target={target} move={move} pay={pay} handover={startHandover} bare />
@@ -126,13 +137,13 @@ function Queue({ q, target, onChange }: { q: string; target: number; onChange: (
 }
 
 function Ticket({ o, target, move, pay, handover, bare }: any) {
-  const secs = Math.floor((Date.now() - new Date(o.status === 'ready' ? o.ready_at : o.created_at).getTime()) / 1000);
+  const secs = Math.floor((Date.now() - new Date(o.status === 'ready' ? o.ready_at : (o.released_at || o.created_at)).getTime()) / 1000);
   const late = ['placed', 'preparing'].includes(o.status) && secs > target;
   const next: Record<string, [string, string]> = { placed: ['preparing', 'Accept and start'], preparing: ['ready', 'Mark prepared'], ready: ['picked_up', 'Hand over'] };
   return (
     <div className={`ticket ${late ? 'late' : ''}`} style={bare ? { border: 0, padding: 0 } : undefined}>
       <div className="row between">
-        <span className="code">{o.pickup_code}</span>
+        <span className="code">{o.pickup_code}{o.scheduled_for && <span className="chip marigold" style={{ marginLeft: 8, fontSize: 12 }}>Pickup {fmtTime(o.scheduled_for)}</span>}</span>
         <div className="right">
           {['placed', 'preparing', 'ready'].includes(o.status) && <div className="price" style={{ color: late ? 'var(--cherry)' : undefined }}>{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}{late ? ' late' : ''}</div>}
           <div className="small muted">{o.channel} · {fmtTime(o.created_at)}</div>

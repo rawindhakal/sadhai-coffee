@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../api.dart';
 import '../state.dart';
@@ -110,6 +111,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 const Text('PICKUP NUMBER', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: Brand.inkMuted)),
                 Text(o['pickup_code'], style: display(96, color: Brand.cherry)),
                 Chip2.status(o['status']),
+                if (o['scheduled_for'] != null && o['status'] != 'picked_up' && o['status'] != 'cancelled') Padding(padding: const EdgeInsets.only(top: 8), child: Text('Pickup at ${DateFormat('h:mm a').format(DateTime.parse(o['scheduled_for']).toLocal())}', style: const TextStyle(fontWeight: FontWeight.w700))),
                 const SizedBox(height: 12),
                 if (o['handover_code'] != null && ['placed', 'preparing', 'ready'].contains(o['status'])) Container(
                   margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),

@@ -136,10 +136,11 @@ class _StationTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final open = s['open_now'] == true;
+    final can = s['can_order'] != false;
     final km = s['distance_km'];
-    return Card(child: InkWell(
+    return Opacity(opacity: can ? 1 : 0.55, child: Card(child: InkWell(
       borderRadius: BorderRadius.circular(Brand.radiusLg),
-      onTap: () => context.read<CartState>().setStation({'id': s['id'], 'name': s['name'], 'name_ne': s['name_ne'], 'address': s['address'], 'open_now': open}),
+      onTap: !can ? null : () => context.read<CartState>().setStation({'id': s['id'], 'name': s['name'], 'name_ne': s['name_ne'], 'address': s['address'], 'open_now': open}),
       child: Padding(padding: const EdgeInsets.all(14), child: Row(children: [
         Container(width: 44, height: 44, decoration: const BoxDecoration(color: Brand.surfaceSunk, shape: BoxShape.circle), child: const Icon(Icons.location_on_outlined, color: Brand.cherry)),
         const SizedBox(width: 12),
@@ -150,11 +151,11 @@ class _StationTile extends StatelessWidget {
             if (s['operator_type'] == 'partner') const Chip2('Partner cafe'),
           ]),
           Text('${s['address']} · ${(s['opens'] as String).substring(0, 5)}–${(s['closes'] as String).substring(0, 5)}', style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
-          Text('${km != null ? '$km km · about ${((km as num) * 12).round().clamp(1, 999)} min walk · ' : ''}${open ? 'Wait ~${s['wait_minutes']} min' : 'Closed'}', style: const TextStyle(fontSize: 13)),
+          Text('${km != null ? '$km km · about ${((km as num) * 12).round().clamp(1, 999)} min walk · ' : ''}${!can ? (open ? 'Not taking orders for a moment' : 'Closed · opens ${(s['opens'] as String).substring(0, 5)}') : 'Wait ~${s['wait_minutes']} min'}', style: const TextStyle(fontSize: 13)),
         ])),
-        Chip2(open ? 'Open now' : 'Closed', bg: open ? Brand.hill : Brand.surfaceSunk, fg: open ? Brand.onCherry : Brand.ink),
+        Chip2(!can ? (open ? 'Paused' : 'Closed') : 'Open now', bg: can ? Brand.hill : Brand.surfaceSunk, fg: can ? Brand.onCherry : Brand.ink),
       ])),
-    ));
+    )));
   }
 }
 
@@ -184,7 +185,7 @@ class _StoreFrontState extends State<StoreFront> {
     final id = context.read<CartState>().station!['id'];
     try {
       final h = await Api.instance.get('/stations/$id/home');
-      if (mounted) setState(() { _home = Map<String, dynamic>.from(h); _error = null; });
+      if (mounted) { context.read<CartState>().ordersBlocked = h['station']['can_order'] == false; setState(() { _home = Map<String, dynamic>.from(h); _error = null; }); }
     } on ApiException catch (e) { if (mounted) setState(() => _error = e.message); }
     try {
       final c = await Api.instance.get('/coupons') as List;
@@ -253,7 +254,10 @@ class _StoreFrontState extends State<StoreFront> {
           )),
           IconButton(tooltip: 'Inbox', onPressed: () => widget.goTab(4), icon: Badge(isLabelVisible: _unread > 0, label: Text('$_unread'), child: const Icon(Icons.notifications_none))),
         ]),
-        if (st['open_now'] != true) Container(margin: const EdgeInsets.only(top: 8), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Brand.surfaceSunk, borderRadius: BorderRadius.circular(Brand.radiusMd)), child: Text('This station is closed right now. It opens at ${(st['opens'] as String).substring(0, 5)}.')),
+        if (st['can_order'] == false) Container(margin: const EdgeInsets.only(top: 8), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Brand.surfaceSunk, borderRadius: BorderRadius.circular(Brand.radiusMd), border: Border.all(color: Brand.cherry)), child: Row(children: [
+          Expanded(child: Text(st['open_now'] == true ? 'This station is not taking orders for a moment. You can look at the menu, but not order here.' : 'This station is closed right now. It opens at ${(st['opens'] as String).substring(0, 5)}. You can look at the menu, but not order here.', style: const TextStyle(fontWeight: FontWeight.w600))),
+          TextButton(onPressed: () => context.read<CartState>().setStation(null), child: const Text('Change')),
+        ])),
         const SizedBox(height: 8),
         TextField(decoration: InputDecoration(prefixIcon: const Icon(Icons.search), hintText: 'Search coffee, bites, merch', suffixIcon: _q.isEmpty ? null : IconButton(tooltip: 'Clear', icon: const Icon(Icons.close), onPressed: () { _search.clear(); setState(() => _q = ''); }), contentPadding: const EdgeInsets.symmetric(vertical: 12), border: OutlineInputBorder(borderRadius: BorderRadius.circular(99), borderSide: const BorderSide(color: Brand.inkMuted, width: 1.5)), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(99), borderSide: const BorderSide(color: Brand.inkMuted, width: 1.5))),
             controller: _search, onChanged: (v) => setState(() => _q = v)),

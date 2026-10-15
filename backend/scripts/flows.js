@@ -1,6 +1,8 @@
 // End-to-end business flows, as the owner described them. Needs a freshly seeded database and a running API:
 //   npm run seed && API_URL=http://localhost:4747 node scripts/flows.js
 import crypto from 'node:crypto';
+import { query as sql, } from '../src/lib/db.js';
+import { releaseDueOrders } from '../src/lib/orders.js';
 const API = process.env.API_URL || 'http://localhost:4000';
 let failed = 0, n = 0;
 const ok = (c, m) => { n++; console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) failed++; };
@@ -22,6 +24,8 @@ const stations = (await call('GET', '/stations')).body;
 const tu = stations.find((s) => s.code === 'TU-GATE'), kal = stations.find((s) => s.code === 'KALANKI'), road = stations.find((s) => s.code === 'NEWROAD');
 ok(kal.operator_type === 'partner' && tu.operator_type === 'company', 'a station is either Sadhai-run or partner-run');
 
+// Stations are open all day for the tests, so they do not depend on the time the suite runs.
+for (const s of stations) await call('PATCH', `/admin/stations/${s.id}`, { opens: '00:00', closes: '23:59', is_open: true, accepting_orders: true }, tok(owner));
 const homeOf = async (st) => (await call('GET', `/stations/${st.id}/home`)).body;
 const home = await homeOf(tu);
 const all = home.categories.flatMap((c) => c.products);
@@ -295,5 +299,71 @@ section('8. Owner and managers supervise every outlet');
   ok(users.length === 2, 'the owner manages partner logins');
 }
 
+/* ---------------------------------------------------------------- 9 */
+section('9. Closed outlets and pickup later');
+{
+  const c = await newCustomer();
+  const body = (extra = {}) => ({ station_id: tu.id, items: [line(ame)], payment_method: 'cash', ...extra });
+  // closed by the manager
+  await call('PATCH', `/admin/stations/${tu.id}`, { is_open: false }, tok(mgrCo));
+  const closed = await call('POST', '/orders', body(), c.token);
+  ok(closed.status === 409 && closed.body.code === 'station_closed', 'a closed outlet refuses an order');
+  ok((await call('POST', '/orders/quote', body(), c.token)).status === 409, 'and refuses a quote, so the cart cannot be priced either');
+  ok((await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Guest', customer_phone: '9801234501', payment: 'counter', consent: true }, tok(tuStaff))).status === 409, 'the kiosk refuses too');
+  const list = (await call('GET', '/stations')).body.find((s) => s.id === tu.id);
+  const h = (await homeOf(tu));
+  ok(list.can_order === false && list.open_now === false && h.station.can_order === false && h.preorder === null, 'the station list and home say it cannot take orders and offer no pickup times');
+  await call('PATCH', `/admin/stations/${tu.id}`, { is_open: true }, tok(mgrCo));
+  // outside opening hours
+  await call('PATCH', `/admin/stations/${tu.id}`, { opens: '00:00', closes: '00:01' }, tok(mgrCo));
+  const late = await call('POST', '/orders', body(), c.token);
+  ok(late.status === 409 && late.body.code === 'station_closed', 'outside opening hours it refuses an order');
+  await call('PATCH', `/admin/stations/${tu.id}`, { opens: '00:00', closes: '23:59' }, tok(mgrCo));
+  // paused
+  await call('PATCH', `/admin/stations/${tu.id}`, { accepting_orders: false }, tok(mgrCo));
+  ok((await call('POST', '/orders', body(), c.token)).body.code === 'station_busy', 'a paused outlet refuses new orders');
+  await call('PATCH', `/admin/stations/${tu.id}`, { accepting_orders: true }, tok(mgrCo));
+  ok((await call('POST', '/orders', body(), c.token)).status === 201, 'and works again when reopened');
+
+  // pickup later
+  const home = await homeOf(tu);
+  const w = home.preorder;
+  ok(w && w.min_minutes === 15 && new Date(w.earliest) > new Date(Date.now() + 14 * 60000) && new Date(w.latest) > new Date(w.earliest), 'an open outlet offers pickup times from 15 minutes ahead until just before closing');
+  const at = new Date(Math.max(new Date(w.earliest).getTime(), Date.now() + 30 * 60000));
+  const later = at.toISOString();
+  const tooSoon = await call('POST', '/orders', body({ scheduled_for: new Date(Date.now() + 5 * 60000).toISOString() }), c.token);
+  ok(tooSoon.status === 400, 'a pickup time less than 15 minutes away is refused');
+  const tooLate = await call('POST', '/orders', body({ scheduled_for: new Date(new Date(w.latest).getTime() + 30 * 60000).toISOString() }), c.token);
+  ok(tooLate.status === 400, 'a pickup time after closing is refused');
+  ok((await call('POST', '/orders', body({ scheduled_for: new Date(Date.now() + 864e5).toISOString() }), c.token)).status === 400, 'tomorrow is refused: pickup later is for today');
+  const q = await call('POST', '/orders/quote', body({ scheduled_for: later }), c.token);
+  ok(q.status === 200, 'the quote accepts a valid pickup time');
+  const o = await call('POST', '/orders', body({ scheduled_for: later }), c.token);
+  ok(o.status === 201 && o.body.order.status === 'placed' && new Date(o.body.order.scheduled_for).getTime() === at.getTime(), 'a valid pickup-later order is placed with its pickup time');
+  const id = o.body.order.id;
+  ok(!(await queue(tuStaff)).some((x) => x.id === id), 'it is NOT on the live queue yet');
+  const laterList = await queue(tuStaff, 'later');
+  ok(laterList.some((x) => x.id === id), 'it shows under "Later today"');
+  ok((await call('GET', '/station/summary', null, tok(tuStaff))).body.queue.later >= 1, 'the station summary counts it as later');
+  ok((await call('GET', `/orders/${id}`, null, c.token)).body.ahead === 0, 'the customer is not told there are orders ahead');
+  await sql(`UPDATE orders SET scheduled_for = now() + interval '5 minutes' WHERE id=$1`, [id]); // time passes
+  ok((await releaseDueOrders()) >= 1, 'shortly before pickup time the order is released');
+  const live = (await queue(tuStaff)).find((x) => x.id === id);
+  ok(live && live.status === 'placed' && live.scheduled_for, 'it is now on the live queue with its pickup time');
+  await setStatus(tuStaff, id, 'preparing'); await setStatus(tuStaff, id, 'ready');
+  const code = (await call('GET', `/orders/${id}`, null, c.token)).body.handover_code;
+  ok((await setStatus(tuStaff, id, 'picked_up', { code })).body.status === 'picked_up', 'it is handed over with the code like any other order');
+
+  const pay = await call('POST', '/orders', body({ scheduled_for: later, payment_method: 'fonepay' }), c.token);
+  ok(pay.body.order.status === 'awaiting_payment', 'a Fonepay pickup-later order still waits for payment');
+  await call('POST', `/payments/${pay.body.payment.payment_id}/confirm`, {}, c.token);
+  ok((await queue(tuStaff, 'later')).some((x) => x.id === pay.body.order.id), 'once paid it waits under Later today');
+  const cx = await call('POST', `/orders/${pay.body.order.id}/cancel`, {}, c.token);
+  ok(cx.body.status === 'cancelled', 'the customer can cancel it before it is accepted');
+  ok((await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Guest', customer_phone: '9801234502', payment: 'counter', consent: true, scheduled_for: later }, tok(tuStaff))).body.order.scheduled_for == null, 'kiosk orders are always for now');
+  ok((await call('GET', '/admin/alerts', null, tok(owner))).status === 200, 'a waiting scheduled order does not raise a late-order alert');
+}
+
 console.log(`\n${n - failed} of ${n} checks passed`);
 if (failed) { console.log(`${failed} FAILED`); process.exit(1); }
+process.exit(0);

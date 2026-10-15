@@ -60,14 +60,14 @@ function LocationGate() {
           {stations.loading && <Loading />}
           <div className="col">
             {list.map((s, i) => (
-              <button key={s.id} className="stationrow" onClick={() => cart.setStation({ id: s.id, name: s.name, name_ne: s.name_ne, address: s.address, open_now: s.open_now, distance_km: s.distance_km })}>
+              <button key={s.id} className="stationrow" disabled={s.can_order === false} aria-disabled={s.can_order === false} style={s.can_order === false ? { opacity: 0.55, cursor: 'not-allowed' } : undefined} onClick={() => cart.setStation({ id: s.id, name: s.name, name_ne: s.name_ne, address: s.address, open_now: s.open_now, distance_km: s.distance_km })}>
                 <span className="pinic"><Icon name="pin" /></span>
                 <span className="grow">
                   <span className="row wrap" style={{ gap: 6 }}><strong>{lang === 'ne' && s.name_ne ? s.name_ne : s.name}</strong>{pos && i === 0 && !q && <span className="chip hill">Nearest</span>}{s.operator_type === 'partner' && <span className="chip">Partner cafe</span>}</span>
                   <span className="small muted" style={{ display: 'block' }}>{s.address} · {s.opens.slice(0, 5)}–{s.closes.slice(0, 5)}</span>
-                  <span className="small" style={{ display: 'block' }}>{s.distance_km != null ? `${s.distance_km} km · about ${walkMinutes(s.distance_km)} min walk · ` : ''}{s.open_now ? `${t('wait')} ~${s.wait_minutes} ${t('min')}` : t('closed')}</span>
+                  <span className="small" style={{ display: 'block' }}>{s.distance_km != null ? `${s.distance_km} km · about ${walkMinutes(s.distance_km)} min walk · ` : ''}{s.can_order === false ? (s.open_now ? 'Not taking orders for a moment' : `Closed · opens ${s.opens.slice(0, 5)}`) : `${t('wait')} ~${s.wait_minutes} ${t('min')}`}</span>
                 </span>
-                <span className={`chip ${s.open_now ? 'hill' : ''}`}>{s.open_now ? t('open_now') : t('closed')}</span>
+                <span className={`chip ${s.can_order === false ? '' : 'hill'}`}>{s.can_order === false ? (s.open_now ? 'Paused' : t('closed')) : t('open_now')}</span>
               </button>
             ))}
             {!list.length && !stations.loading && <Empty>No station matches that search.</Empty>}
@@ -132,7 +132,8 @@ function Home() {
         </button>
         <div className="row"><LangToggle /><Link href="/account" aria-label="Notifications" style={{ position: 'relative', color: 'var(--ink)' }}><Icon name="bell" />{inbox.data?.unread > 0 && <span className="badge" style={{ top: -8, right: -8 }}>{inbox.data.unread}</span>}</Link></div>
       </div>
-      {!st.open_now && <div className="card flat" style={{ marginTop: 12 }}>This station is closed right now. It opens at {String(st.opens).slice(0, 5)}.</div>}
+      {d && d.station.can_order === false && <div className="card flat" role="status" style={{ marginTop: 12, borderColor: 'var(--cherry)' }}><strong>{d.station.open_now ? 'This station is not taking orders for a moment.' : `This station is closed right now. It opens at ${String(d.station.opens).slice(0, 5)}.`}</strong> You can look at the menu, but you cannot order here. <button className="btn sm" style={{ marginLeft: 8 }} onClick={() => cart.setStation(null)}>Choose another station</button></div>}
+      <div {...(d && d.station.can_order === false ? ({ inert: '' } as any) : {})} style={d && d.station.can_order === false ? { opacity: 0.6 } : undefined}>
       <div className="searchbar" style={{ margin: '14px 0' }}><Icon name="search" size={20} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search coffee, bites, merch" aria-label="Search items" />{q && <button className="btn ghost sm" onClick={() => setQ('')} aria-label="Clear search"><Icon name="close" size={16} /></button>}</div>
 
       {results ? (
@@ -215,6 +216,7 @@ function Home() {
           {st.operator_type === 'partner' && <p className="small muted center" style={{ marginTop: 16 }}>Served at {st.partner_name}, a Sadhai partner cafe.</p>}
         </>
       )}
+      </div>
     </>
   );
 }

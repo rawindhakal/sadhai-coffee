@@ -26,12 +26,27 @@ export default function Cart() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [payment, setPayment] = useState<any>(null);
+  // Pickup now, or later today. The station says what is possible and whether it is open at all.
+  const times = useData<any>(cart.station ? `/stations/${cart.station.id}/pickup-times` : null, [cart.station?.id]);
+  const [when, setWhen] = useState<'now' | 'later'>('now');
+  const [at, setAt] = useState('');
+  const w = times.data?.preorder;
+  const slots: string[] = useMemo(() => {
+    if (!w) return [];
+    const out: string[] = [];
+    for (let t = new Date(w.earliest).getTime(); t <= new Date(w.latest).getTime() && out.length < 200; t += 5 * 60000) out.push(new Date(t).toISOString());
+    return out;
+  }, [w?.earliest, w?.latest]);
+  useEffect(() => { if (when === 'later' && slots.length && !slots.includes(at)) setAt(slots.find((s) => new Date(s).getTime() >= Date.now() + 29 * 60000) || slots[0]); if (when === 'later' && !slots.length && times.data) setWhen('now'); }, [when, slots.join()]);
+  const closed = times.data && !times.data.can_order;
+  const fmtAt = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kathmandu' });
 
   const payload = useMemo(() => cart.station ? ({
     station_id: cart.station.id, items: cart.lines.map((l) => ({ product_id: l.product.id, qty: l.qty, option_ids: l.option_ids })),
     payment_method: offer.type === 'pass' ? 'pass' : method, channel: 'web',
     coupon_id: offer.type === 'coupon' ? offer.id : undefined, promo_code: offer.type === 'promo' ? offer.code : undefined, note: note || undefined,
-  }) : null, [cart.station?.id, cart.lines, method, offer, note]);
+    scheduled_for: when === 'later' && at ? at : undefined,
+  }) : null, [cart.station?.id, cart.lines, method, offer, note, when, at]);
 
   useEffect(() => {
     if (!user || !payload || !cart.lines.length) { setQuote(null); return; }
@@ -84,6 +99,18 @@ export default function Cart() {
             {activePass && <Radio on={offer.type === 'pass'} label={t('pass')} hint={`${activePass.remaining} cups left`} onClick={() => setOffer({ type: 'pass' })} />}
             <div className="row"><input placeholder="Promo code" value={promo} onChange={(e) => setPromo(e.target.value.toUpperCase())} aria-label="Promo code" /><button className="btn sm" onClick={() => promo && setOffer({ type: 'promo', code: promo })}>Apply</button></div>
           </div>
+          {closed && <div className="card flat" role="alert" style={{ marginTop: 16, borderColor: 'var(--cherry)' }}><strong>{times.data.open_now ? 'This station is not taking orders for a moment.' : `This station is closed. It opens at ${String(times.data.opens).slice(0, 5)}.`}</strong> <button className="btn sm" style={{ marginLeft: 8 }} onClick={() => router.push('/order')}>Choose another station</button></div>}
+          {!closed && w && (
+            <>
+              <h4 style={{ margin: '20px 0 8px' }}>Pickup time</h4>
+              <div className="row wrap">
+                <button className={`btn sm ${when === 'now' ? 'primary' : 'ghost'}`} aria-pressed={when === 'now'} onClick={() => setWhen('now')}>As soon as possible</button>
+                <button className={`btn sm ${when === 'later' ? 'primary' : 'ghost'}`} aria-pressed={when === 'later'} onClick={() => setWhen('later')}>Later today</button>
+                {when === 'later' && <select aria-label="Pickup time" value={at} onChange={(e) => setAt(e.target.value)} style={{ width: 'auto', minHeight: 40 }}>{slots.map((s) => <option key={s} value={s}>{fmtAt(s)}</option>)}</select>}
+              </div>
+              <p className="small muted" style={{ marginTop: 6 }}>{when === 'later' ? `We start making it a few minutes before ${at ? fmtAt(at) : 'then'}. You can pick from ${w.min_minutes} minutes ahead until the station closes. You can cancel until the barista starts.` : 'Ready in about 90 seconds once the barista starts.'}</p>
+            </>
+          )}
           {offer.type !== 'pass' && (
             <>
               <h4 style={{ margin: '20px 0 8px' }}>{t('pay_with')}</h4>
@@ -98,7 +125,7 @@ export default function Cart() {
             <p className="small muted">{t('prices_note')}</p>
           </div>
           <ErrorNote error={error} />
-          <button className="btn primary lg block" style={{ marginTop: 16 }} disabled={busy || !quote} onClick={place}>{busy ? 'Placing…' : `${t('place_order')} · ${rs(quote?.total ?? 0)}`}</button>
+          <button className="btn primary lg block" style={{ marginTop: 16 }} disabled={busy || !quote || !!closed} onClick={place}>{busy ? 'Placing…' : `${t('place_order')} · ${rs(quote?.total ?? 0)}`}</button>
         </>
       )}
 

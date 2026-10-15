@@ -115,6 +115,7 @@ class _QueueState extends State<_Queue> {
   List<Map> _orders = [];
   String? _error;
   Timer? _timer;
+  List<Map> _later = [];
 
   @override
   void initState() {
@@ -128,7 +129,11 @@ class _QueueState extends State<_Queue> {
   void dispose() { widget.tick.removeListener(_load); _timer?.cancel(); super.dispose(); }
 
   Future<void> _load() async {
-    try { final l = await Api.instance.get('/station/orders${widget.q}') as List; if (mounted) setState(() { _orders = l.cast<Map>(); _error = null; }); }
+    try {
+      final l = await Api.instance.get('/station/orders${widget.q}') as List;
+      final lt = await Api.instance.get('/station/orders${widget.q.isEmpty ? '?' : '${widget.q}&'}view=later') as List;
+      if (mounted) setState(() { _orders = l.cast<Map>(); _later = lt.cast<Map>(); _error = null; });
+    }
     on ApiException catch (e) { if (mounted) setState(() => _error = e.message); }
   }
 
@@ -174,9 +179,22 @@ class _QueueState extends State<_Queue> {
   @override
   Widget build(BuildContext context) {
     if (_error != null) return Center(child: Text(_error!));
-    if (_orders.isEmpty) return const Center(child: Text('No open orders. A quiet moment.', style: TextStyle(color: Brand.inkMuted)));
+    if (_orders.isEmpty && _later.isEmpty) return const Center(child: Text('No open orders. A quiet moment.', style: TextStyle(color: Brand.inkMuted)));
     return RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(16), children: [
       for (final o in _orders) Padding(padding: const EdgeInsets.only(bottom: 12), child: _TicketCard(o: o, target: widget.target, onMove: _move, onHandover: _handover, onCash: _cash)),
+      if (_later.isNotEmpty) ...[
+        Text('Later today', style: display(18)),
+        const Text('Pickup-later orders move to the queue a few minutes before their time.', style: TextStyle(color: Brand.inkMuted, fontSize: 13)),
+        for (final o in _later) Card(child: ListTile(
+          title: Text('${o['pickup_code']} · ${(o['items'] as List).map((i) => '${i['qty']} × ${i['name']}').join(', ')}'),
+          subtitle: Text('${o['customer_name'] ?? o['user_name'] ?? 'Customer'} · ${o['payment_status']}'),
+          trailing: Row(mainAxisSize: MainAxisSize.min, children: [Text(DateFormat('h:mm a').format(DateTime.parse(o['scheduled_for']).toLocal()), style: const TextStyle(fontWeight: FontWeight.w700)), IconButton(tooltip: 'Decline', icon: const Icon(Icons.close), onPressed: () async {
+            final rc = TextEditingController();
+            final why = await showDialog<String>(context: context, builder: (c) => AlertDialog(title: Text('Decline ${o['pickup_code']}?'), content: TextField(controller: rc, decoration: const InputDecoration(hintText: 'Why? The customer is told, and a paid order is refunded.')), actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Keep')), FilledButton(onPressed: () => Navigator.pop(c, rc.text.trim()), child: const Text('Decline'))]));
+            if (why != null && why.length >= 3) await _move(o, 'cancelled', {'reason': why});
+          })]),
+        )),
+      ],
     ]));
   }
 }

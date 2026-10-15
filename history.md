@@ -17,6 +17,13 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.5.0 (2026-10-15)
+
+### Added
+- **Pickup later**: customers choose a pickup time later today (web and app): same day, inside opening hours, at least 15 minutes ahead. Scheduled orders wait under "Later today" at the station and move to the live queue a few minutes before pickup. The owner can switch it off or change the lead times.
+- **Closed outlets cannot be ordered from**: closed, out-of-hours and paused stations are greyed out in the station list, show a banner with the menu locked, and are refused by the cart, quote, order and kiosk APIs.
+- `npm run flows` now has 137 checks.
+
 ## v1.4.0 (2026-10-15)
 
 ### Added

@@ -33,6 +33,9 @@ export const DEFAULT_SETTINGS = {
   checkin_grace_minutes: 10,
   ssf_employee_pct: 0,            // social security / provident fund taken from pay (ask your accountant)
   ssf_employer_pct: 0,            // employer contribution on top of pay
+  preorder_enabled: 1,            // let customers choose a pickup time later today
+  preorder_min_minutes: 15,       // earliest pickup, from now
+  preorder_prep_minutes: 10,      // a scheduled order reaches the bar this long before pickup
   auto_shift_reminder: 1,
   auto_pass_expiry: 1,
   auto_pass_low: 1,

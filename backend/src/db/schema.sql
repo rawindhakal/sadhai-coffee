@@ -746,5 +746,8 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS code_attempts int NOT NULL DEFAULT 0
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS handover_override text;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS picked_up_by uuid REFERENCES users(id);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancel_reason text;
+-- Pickup later: a scheduled order reaches the station queue when released (a little before its pickup time).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS released_at timestamptz;
+CREATE INDEX IF NOT EXISTS orders_scheduled_idx ON orders(scheduled_for) WHERE scheduled_for IS NOT NULL AND released_at IS NULL;
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('customer','station','manager','owner','partner'));

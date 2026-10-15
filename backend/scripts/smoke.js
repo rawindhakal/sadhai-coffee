@@ -20,6 +20,7 @@ ok(owner.user?.role === 'owner' && mgr.user?.role === 'manager' && staff.user?.r
 const stations = (await call('GET', '/stations')).body;
 ok(stations.length === 4, 'public stations list');
 const st = stations.find((s) => s.code === 'TU-GATE');
+for (const s of stations) await call('PATCH', `/admin/stations/${s.id}`, { opens: '00:00', closes: '23:59', is_open: true, accepting_orders: true }, owner.access_token);
 const home = (await call('GET', `/stations/${st.id}/home`)).body;
 const menu = home.categories;
 const all = menu.flatMap((c) => c.products);

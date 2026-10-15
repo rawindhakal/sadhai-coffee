@@ -41,11 +41,14 @@ export const inventoryFor = async (stationId) =>
 
 station.get('/orders', wrap(async (req, res) => {
   const id = await sid(req);
-  const done = req.query.view === 'done';
+  const view = req.query.view;
+  const done = view === 'done' ? true : view === 'later' ? 'later' : false;
   const { rows } = await query(
-    `SELECT o.id FROM orders o WHERE o.station_id=$1 AND ${done
+    `SELECT o.id FROM orders o WHERE o.station_id=$1 AND ${done === true
       ? `o.status IN ('picked_up','cancelled') AND o.created_at >= ((now() AT TIME ZONE 'Asia/Kathmandu')::date::timestamp AT TIME ZONE 'Asia/Kathmandu') ORDER BY o.created_at DESC LIMIT 40`
-      : `o.status IN ('placed','preparing','ready') ORDER BY o.created_at`}`, [id],
+      : done === 'later'
+        ? `o.status = 'placed' AND o.scheduled_for IS NOT NULL AND o.released_at IS NULL ORDER BY o.scheduled_for`
+        : `o.status IN ('placed','preparing','ready') AND (o.scheduled_for IS NULL OR o.released_at IS NOT NULL) ORDER BY COALESCE(o.released_at, o.created_at)`}`, [id],
   );
   const orders = await Promise.all(rows.map((r) => fullOrder(r.id)));
   res.json(orders);
@@ -130,7 +133,7 @@ station.get('/summary', wrap(async (req, res) => {
                   COALESCE(sum((SELECT sum(i.qty) FROM order_items i JOIN products pk ON pk.id=i.product_id WHERE i.order_id=o.id AND pk.kind='drink')),0)::int AS cups,
                   COALESCE(avg(extract(epoch FROM (o.ready_at - COALESCE(o.accepted_at,o.created_at)))),0)::int AS avg_make_seconds
              FROM orders o WHERE o.station_id=$1 AND ${today} AND o.status NOT IN ('cancelled','awaiting_payment')`, [id]),
-    query(`SELECT count(*) FILTER (WHERE status='placed')::int AS waiting, count(*) FILTER (WHERE status='preparing')::int AS making,
+    query(`SELECT count(*) FILTER (WHERE status='placed' AND (scheduled_for IS NULL OR released_at IS NOT NULL))::int AS waiting, count(*) FILTER (WHERE status='placed' AND scheduled_for IS NOT NULL AND released_at IS NULL)::int AS later, count(*) FILTER (WHERE status='preparing')::int AS making,
                   count(*) FILTER (WHERE status='ready')::int AS ready FROM orders WHERE station_id=$1 AND status IN ('placed','preparing','ready')`, [id]),
     query(`SELECT COALESCE(sum(p.amount),0)::int AS cash FROM payments p WHERE p.station_id=$1 AND p.provider='cash' AND p.status='paid'
              AND p.settled_at >= ((now() AT TIME ZONE 'Asia/Kathmandu')::date::timestamp AT TIME ZONE 'Asia/Kathmandu')`, [id]),

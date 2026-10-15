@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../api.dart';
@@ -27,9 +28,28 @@ class _CartScreenState extends State<CartScreen> {
   String? _error;
   bool _busy = false;
   String _sig = '';
+  Json? _times; // pickup window and whether the station is taking orders
+  bool _later = false;
+  String? _at;
 
   @override
-  void initState() { super.initState(); _loadOffers(); }
+  void initState() { super.initState(); _loadOffers(); _loadTimes(); }
+
+  Future<void> _loadTimes() async {
+    final st = context.read<CartState>().station;
+    if (st == null) return;
+    try { final t = await Api.instance.get('/stations/${st['id']}/pickup-times'); if (mounted) setState(() { _times = Map<String, dynamic>.from(t); if (t['preorder'] == null) _later = false; }); } catch (_) {}
+  }
+
+  List<String> get _slots {
+    final w = _times?['preorder'] as Map?;
+    if (w == null) return [];
+    final out = <String>[];
+    for (var t = DateTime.parse(w['earliest']); !t.isAfter(DateTime.parse(w['latest'])) && out.length < 200; t = t.add(const Duration(minutes: 5))) { out.add(t.toUtc().toIso8601String()); }
+    return out;
+  }
+
+  String _fmt(String iso) => DateFormat('h:mm a').format(DateTime.parse(iso).toLocal());
 
   Future<void> _loadOffers() async {
     try {
@@ -48,6 +68,7 @@ class _CartScreenState extends State<CartScreen> {
         'station_id': cart.station!['id'], 'items': cart.payloadItems, 'payment_method': _offerType == 'pass' ? 'pass' : _method, 'channel': 'app',
         if (_offerType == 'coupon') 'coupon_id': _offerId, if (_offerType == 'promo') 'promo_code': _promo,
         if (_note.text.trim().isNotEmpty) 'note': _note.text.trim(),
+        if (_later && _at != null) 'scheduled_for': _at,
       };
 
   Future<void> _requote(CartState cart) async {
@@ -145,6 +166,18 @@ class _CartScreenState extends State<CartScreen> {
         ]),
         const SizedBox(height: 8),
       ]))),
+      if (_times != null && _times!['can_order'] == false) Container(margin: const EdgeInsets.only(top: 16), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Brand.surfaceSunk, borderRadius: BorderRadius.circular(Brand.radiusMd), border: Border.all(color: Brand.cherry)), child: Text(_times!['open_now'] == true ? 'This station is not taking orders for a moment.' : 'This station is closed. It opens at ${(_times!['opens'] as String).substring(0, 5)}.', style: const TextStyle(fontWeight: FontWeight.w700))),
+      if (_times != null && _times!['preorder'] != null) ...[
+        const SizedBox(height: 16),
+        Text('Pickup time', style: display(18)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          ChoiceChip(label: const Text('As soon as possible'), selected: !_later, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: !_later ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { setState(() => _later = false); _requote(cart); }),
+          ChoiceChip(label: const Text('Later today'), selected: _later, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _later ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { final s = _slots; setState(() { _later = true; _at ??= s.firstWhere((x) => DateTime.parse(x).isAfter(DateTime.now().add(const Duration(minutes: 29))), orElse: () => s.first); }); _requote(cart); }),
+          if (_later && _at != null) DropdownButton<String>(value: _slots.contains(_at) ? _at : null, items: [for (final s in _slots) DropdownMenuItem(value: s, child: Text(_fmt(s)))], onChanged: (v) { setState(() => _at = v); _requote(cart); }),
+        ]),
+        Padding(padding: const EdgeInsets.only(top: 4), child: Text(_later && _at != null ? 'We start making it a few minutes before ${_fmt(_at!)}. You can cancel until the barista starts.' : 'Ready in about 90 seconds once the barista starts.', style: const TextStyle(color: Brand.inkMuted, fontSize: 13))),
+      ],
       if (_offerType != 'pass') ...[
         const SizedBox(height: 16),
         Text('Pay with', style: display(18)),
@@ -162,7 +195,7 @@ class _CartScreenState extends State<CartScreen> {
       ]))),
       if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: Brand.cherry, fontWeight: FontWeight.w600))),
       const SizedBox(height: 16),
-      FilledButton(style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)), onPressed: _busy || q == null ? null : () => _place(cart), child: Text(_busy ? 'Placing…' : 'Place order · ${rs(q?['total'] ?? 0)}')),
+      FilledButton(style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)), onPressed: _busy || q == null || (_times != null && _times!['can_order'] == false) ? null : () => _place(cart), child: Text(_busy ? 'Placing…' : 'Place order · ${rs(q?['total'] ?? 0)}')),
     ]);
   }
 }

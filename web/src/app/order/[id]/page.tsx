@@ -36,6 +36,7 @@ export default function Tracking() {
         <p className="label">Pickup number</p>
         <div className="pickup" aria-live="polite">{o.pickup_code}</div>
         <div style={{ margin: '12px 0' }}><Status s={o.status} /></div>
+        {o.scheduled_for && !['picked_up', 'cancelled'].includes(o.status) && <p style={{ fontWeight: 600 }}>Pickup at {fmtTime(o.scheduled_for)}</p>}
         {o.status === 'ready' && <h3 style={{ color: 'var(--hill)' }}>{o.pickup_code} is ready. See you at the counter.</h3>}
         {o.handover_code && ['placed', 'preparing', 'ready'].includes(o.status) && (
           <div className="card flat" style={{ marginTop: 16, display: 'inline-block', padding: '12px 28px' }}>
@@ -44,7 +45,8 @@ export default function Tracking() {
             <p className="small muted">Say this code at the counter to collect your coffee.</p>
           </div>
         )}
-        {['placed', 'preparing'].includes(o.status) && <p className="muted">{o.ahead > 0 ? `${o.ahead} order${o.ahead > 1 ? 's' : ''} ahead of you · about ${Math.ceil(o.eta_seconds / 60)} min` : 'Your coffee in 90 seconds.'}</p>}
+        {['placed', 'preparing'].includes(o.status) && o.scheduled_for && !o.released_at && <p className="muted">We start making it a few minutes before your pickup time.</p>}
+        {['placed', 'preparing'].includes(o.status) && !(o.scheduled_for && !o.released_at) && <p className="muted">{o.ahead > 0 ? `${o.ahead} order${o.ahead > 1 ? 's' : ''} ahead of you · about ${Math.ceil(o.eta_seconds / 60)} min` : 'Your coffee in 90 seconds.'}</p>}
         {o.status === 'awaiting_payment' && <p className="muted">Finish the payment to send your order to the barista.</p>}
         {o.status !== 'cancelled' && <div className="steps" style={{ marginTop: 20 }} aria-hidden>{STEPS.map((s, i) => <i key={s} className={i <= step ? 'on' : ''} />)}</div>}
         {o.status === 'cancelled' && <p className="err">{o.cancel_reason || 'Cancelled'}{o.payment_status === 'refunded' ? ' · Refund on its way' : ''}</p>}
