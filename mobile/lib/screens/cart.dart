@@ -176,7 +176,7 @@ class _CartScreenState extends State<CartScreen> {
           ChoiceChip(label: const Text('Later today'), selected: _later, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _later ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { final s = _slots; setState(() { _later = true; _at ??= s.firstWhere((x) => DateTime.parse(x).isAfter(DateTime.now().add(const Duration(minutes: 29))), orElse: () => s.first); }); _requote(cart); }),
           if (_later && _at != null) DropdownButton<String>(value: _slots.contains(_at) ? _at : null, items: [for (final s in _slots) DropdownMenuItem(value: s, child: Text(_fmt(s)))], onChanged: (v) { setState(() => _at = v); _requote(cart); }),
         ]),
-        Padding(padding: const EdgeInsets.only(top: 4), child: Text(_later && _at != null ? 'We start making it a few minutes before ${_fmt(_at!)}. You can cancel until the barista starts.' : 'Ready in about 90 seconds once the barista starts.', style: const TextStyle(color: Brand.inkMuted, fontSize: 13))),
+        Padding(padding: const EdgeInsets.only(top: 4), child: Text(_later && _at != null ? 'We start making it a few minutes before ${_fmt(_at!)}. Once you place it, it cannot be cancelled.' : 'Ready in about 90 seconds once the barista starts.', style: const TextStyle(color: Brand.inkMuted, fontSize: 13))),
       ],
       if (_offerType != 'pass') ...[
         const SizedBox(height: 16),

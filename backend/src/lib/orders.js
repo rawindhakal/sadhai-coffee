@@ -543,7 +543,8 @@ export async function cancelOrder(orderId, actor, reason) {
   if (!o) throw notFound('Order not found');
   if (actor.role === 'customer') {
     if (o.user_id !== actor.id) throw forbidden();
-    if (!['awaiting_payment', 'placed'].includes(o.status)) throw conflict('Your coffee is already being made, so it cannot be cancelled', 'in_progress');
+    // Once an order is placed it goes straight to the bar, so only an unpaid order can be cancelled by the customer.
+    if (o.status !== 'awaiting_payment') throw conflict('Your order has gone to the barista, so it cannot be cancelled. Ask at the counter if something is wrong.', 'in_progress');
   }
   await tx((db) => cancelInTx(db, orderId, actor.id, reason || 'Cancelled', { refund: true }));
   const order = await fullOrder(orderId);

@@ -42,13 +42,14 @@ Public pages `/partners` and `/investors` show the model, the standard prices an
 
 - **Closed means closed.** A station that is switched to closed, outside its opening hours, or paused cannot take any order: the station list greys it out, its menu cannot be ordered from, the cart refuses it, and the API rejects the order and the price quote. Kiosks follow the same rule.
 - **Pickup later.** Under *Pickup time* in the cart, a customer chooses **Later today** and a time. Times start 15 minutes from now (setting) in 5-minute steps and end 5 minutes before closing. Same day only. Not offered while the station is closed or paused. Cash, passes, coupons and Fonepay all work; a Fonepay order is still held until it is paid.
-- **At the station.** A pickup-later order waits under *Later today* (staff can decline it with a reason, and paid orders are refunded). A few minutes before the pickup time (setting, 10 by default) it moves to *New* with a pickup-time badge, staff are alerted, and the customer is told it is with the barista. From there it is the normal accept, prepare, hand over with code. The customer can cancel until the barista starts.
+- **At the station.** A pickup-later order waits under *Later today* (staff can decline it with a reason, and paid orders are refunded). A few minutes before the pickup time (setting, 10 by default) it moves to *New* with a pickup-time badge, staff are alerted, and the customer is told it is with the barista. From there it is the normal accept, prepare, hand over with code. Once placed, the customer cannot cancel it (only the station can decline).
 - Late-order alerts and wait estimates ignore scheduled orders until they are released. Settings: *Pickup later* in Settings and keys.
 
 ## From order to cup (every channel)
 
 1. **Order.** The customer orders in the app or web (QR at the counter, or the app), at the kiosk, or the counter staff key it in.
 2. **Pay.** Fonepay QR, a pass, a coupon or promo that brings it to Rs 0, or cash at pickup. A Fonepay order waits as *awaiting payment*: the station does not see it and no ingredients are used until Fonepay confirms. A failed or abandoned payment cancels the order.
+**Cancelling.** A customer can cancel only while an order is waiting for payment. Once it is placed it goes straight to the bar and the customer cannot cancel it. Only the station (decline, with a reason) or a manager can cancel it, and a paid order is then refunded.
 3. **Accept.** The order appears on the station queue as *New*. Staff press **Accept and start**, or **Decline** with a reason (a paid order is refunded and the customer is told).
 4. **Prepare.** **Mark prepared** moves it to *Ready for pickup* and notifies the customer.
 5. **Hand over.** The customer says the **4-digit pickup code** shown on their phone or kiosk screen. Staff enter it and press **Check code and hand over**. Wrong codes are refused; five wrong codes lock the order to a manager. A manager or owner can hand over without the code by writing a reason, which stays in the order's audit trail. Walk-in counter orders paid on the spot need no code.

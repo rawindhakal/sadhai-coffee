@@ -144,7 +144,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 if (o['payment_method'] == 'cash' && o['payment_status'] == 'unpaid') const Text('Pay when you pick up.', style: TextStyle(color: Brand.inkMuted)),
               ]))),
               if (o['status'] == 'awaiting_payment') Padding(padding: const EdgeInsets.only(top: 16), child: FilledButton(onPressed: () async { try { final p = await Api.instance.get('/payments/${o['payment_id']}'); if (!mounted) return; await showFonepay(context, {'payment_id': p['id'], 'qr_message': p['qr_message'], 'mode': p['mode'] ?? rtMode(p)}, p['amount'] as num); _load(); } on ApiException catch (e) { if (!mounted) return; toast(context, e.message, bad: true); } }, child: const Text('Pay with Fonepay QR'))),
-              if (o['status'] == 'placed' || o['status'] == 'awaiting_payment') Padding(padding: const EdgeInsets.only(top: 12), child: OutlinedButton(onPressed: _cancel, child: const Text('Cancel order'))),
+              if (['placed', 'preparing', 'ready'].contains(o['status'])) const Padding(padding: EdgeInsets.only(top: 12), child: Text('Your order has gone to the barista, so it cannot be cancelled. Something wrong? Ask at the counter.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted, fontSize: 13))),
+              if (o['status'] == 'awaiting_payment') Padding(padding: const EdgeInsets.only(top: 12), child: OutlinedButton(onPressed: _cancel, child: const Text('Cancel order'))),
               if (o['status'] == 'picked_up') Padding(padding: const EdgeInsets.only(top: 16), child: Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
                 Text(o['rating'] != null ? 'Thank you for rating' : 'How was your coffee?', style: display(20)),
                 const SizedBox(height: 8),

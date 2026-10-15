@@ -74,10 +74,11 @@ ok(o2.order.status === 'awaiting_payment' && o2.payment.mode === 'sandbox' && o2
 ok(o2.order.discount === Math.floor(o2.order.subtotal * 0.3), '30% coupon applied');
 const paid = (await call('POST', `/payments/${o2.payment.payment_id}/confirm`, {}, T)).body;
 ok(paid.order.status === 'placed' && paid.order.payment_status === 'paid', 'sandbox payment confirmed -> placed');
-const cancel = (await call('POST', `/orders/${o2.order.id}/cancel`, {}, T));
-ok(cancel.status === 200 && cancel.body.status === 'cancelled' && cancel.body.payment_status === 'refunded', 'customer cancels before preparing, refunded');
+ok((await call('POST', `/orders/${o2.order.id}/cancel`, {}, T)).status === 409, 'a placed order cannot be cancelled by the customer');
+const cancel = (await call('POST', `/station/orders/${o2.order.id}/status`, { status: 'cancelled', reason: 'Out of milk' }, staff.access_token));
+ok(cancel.status === 200 && cancel.body.status === 'cancelled' && cancel.body.payment_status === 'refunded', 'the station can decline a placed order, refunded');
 const couponBack = (await call('GET', '/coupons', null, T)).body.find((c) => c.id === pct.id);
-ok(couponBack.status === 'active', 'coupon restored on cancel');
+ok(couponBack.status === 'active', 'coupon restored when the station declines');
 
 // pass: buy, pay, redeem
 const pp = (await call('POST', '/passes', { payment_method: 'fonepay' }, T)).body;

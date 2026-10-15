@@ -108,7 +108,7 @@ export default function Cart() {
                 <button className={`btn sm ${when === 'later' ? 'primary' : 'ghost'}`} aria-pressed={when === 'later'} onClick={() => setWhen('later')}>Later today</button>
                 {when === 'later' && <select aria-label="Pickup time" value={at} onChange={(e) => setAt(e.target.value)} style={{ width: 'auto', minHeight: 40 }}>{slots.map((s) => <option key={s} value={s}>{fmtAt(s)}</option>)}</select>}
               </div>
-              <p className="small muted" style={{ marginTop: 6 }}>{when === 'later' ? `We start making it a few minutes before ${at ? fmtAt(at) : 'then'}. You can pick from ${w.min_minutes} minutes ahead until the station closes. You can cancel until the barista starts.` : 'Ready in about 90 seconds once the barista starts.'}</p>
+              <p className="small muted" style={{ marginTop: 6 }}>{when === 'later' ? `We start making it a few minutes before ${at ? fmtAt(at) : 'then'}. You can pick from ${w.min_minutes} minutes ahead until the station closes. Once you place it, it cannot be cancelled.` : 'Ready in about 90 seconds once the barista starts.'}</p>
             </>
           )}
           {offer.type !== 'pass' && (

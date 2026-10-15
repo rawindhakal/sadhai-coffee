@@ -65,7 +65,8 @@ export default function Tracking() {
       </div>
       {o.status === 'awaiting_payment' && !qr && <button className="btn primary block" style={{ marginTop: 16 }} onClick={pay}>Pay with Fonepay QR</button>}
       {o.status === 'awaiting_payment' && qr && <div className="card" style={{ marginTop: 16 }}><FonepayQr payment={{ payment_id: qr.id, mode: qr.mode || 'qr', qr_message: qr.qr_message, amount: qr.amount }} onDone={() => { setQr(null); reload(); }} /></div>}
-      {['placed', 'awaiting_payment'].includes(o.status) && <button className="btn danger block" style={{ marginTop: 16 }} onClick={cancel}>Cancel order</button>}
+      {o.status === 'awaiting_payment' && <button className="btn danger block" style={{ marginTop: 16 }} onClick={cancel}>Cancel order</button>}
+      {['placed', 'preparing', 'ready'].includes(o.status) && <p className="small muted center" style={{ marginTop: 16 }}>Your order has gone to the barista, so it cannot be cancelled. Something wrong? Ask at the counter.</p>}
       {o.status === 'picked_up' && (
         <div className="card center" style={{ marginTop: 16 }}>
           <h3>{o.rating ? 'Thank you for rating' : 'How was your coffee?'}</h3>

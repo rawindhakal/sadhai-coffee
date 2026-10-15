@@ -17,6 +17,11 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.5.1 (2026-10-15)
+
+### Changed
+- **Placed orders cannot be cancelled by the customer.** Only an order waiting for payment can be cancelled; once placed it goes to the bar. The station can still decline an order with a reason (a paid order is refunded). The web and mobile cancel buttons, checkout notes and terms are updated.
+
 ## v1.5.0 (2026-10-15)
 
 ### Added

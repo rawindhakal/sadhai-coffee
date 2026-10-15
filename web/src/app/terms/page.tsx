@@ -8,7 +8,7 @@ export default function Terms() {
     <LegalPage title="Terms of use">
       <p>These terms cover your use of the {SITE.brand} app and website. By creating an account you agree to them.</p>
       <h2>Orders and prices</h2>
-      <ul><li>Prices are in Nepali rupees and include VAT and service. Nothing is added at the counter.</li><li>You pay when you order (Fonepay QR or a pass) or at the counter in cash where offered. An order is accepted when you see its pickup number.</li><li>Stations can stop taking orders if they are closed, paused or out of an item. We will not charge you for an order we cannot make.</li><li>You can cancel before the barista starts. After that the drink is being made and cannot be cancelled.</li></ul>
+      <ul><li>Prices are in Nepali rupees and include VAT and service. Nothing is added at the counter.</li><li>You pay when you order (Fonepay QR or a pass) or at the counter in cash where offered. An order is accepted when you see its pickup number.</li><li>Stations can stop taking orders if they are closed, paused or out of an item. We will not charge you for an order we cannot make.</li><li>You can cancel an order only while it is waiting for payment. Once an order is placed it goes straight to the barista and cannot be cancelled by you; if the station cannot make it, we cancel it and refund any payment.</li></ul>
       <h2>Refunds</h2>
       <p>If something is wrong with your order, tell the station or contact support. We refund orders we cannot fulfil or that are not as described. Digital refunds go back through the payment provider and can take a few working days.</p>
       <h2>10-cup pass</h2>
