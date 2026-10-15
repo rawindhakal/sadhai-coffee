@@ -325,7 +325,7 @@ function ModernHero({ openCounters }: { openCounters: number | null }) {
             </div>
             <div className="nh-trust-item">
               <span className="nh-trust-num">0%</span>
-              <span className="nh-trust-lbl">Hidden Fees or VAT</span>
+              <span className="nh-trust-lbl">Hidden fees. VAT included</span>
             </div>
           </div>
         </div>
@@ -1001,7 +1001,7 @@ function AppExperience() {
             </li>
             <li>
               <Icon name="check" size={20} color="var(--marigold)" />
-              <span>Fonepay, eSewa, pass punch, or cash at counter</span>
+              <span>Fonepay QR, your pass, or cash at the counter</span>
             </li>
             <li>
               <Icon name="check" size={20} color="var(--marigold)" />
@@ -1174,7 +1174,7 @@ const FAQS = [
   },
   {
     q: 'What payment options can I use?',
-    a: 'We support Fonepay QR (all Nepali bank apps), eSewa, Sadhai Digital Pass, and cash directly at the counter.',
+    a: 'Fonepay QR (works with any Nepali mobile-banking or wallet app), your 10-cup pass, or cash at the counter. Online payment is Fonepay only.',
   },
 ];
 
