@@ -10,6 +10,7 @@ async function call(method, path, body, token) {
 }
 // The customer says a 4-digit code at pickup. Smoke helper: the code as the customer sees it.
 const codeOf = async (orderId, token) => (await call('GET', `/orders/${orderId}`, null, token)).body.handover_code;
+const decline = (id) => call('POST', `/station/orders/${id}/status`, { status: 'cancelled', reason: 'Declined in test' }, staff.access_token);
 const login = async (phone) => (await call('POST', '/auth/login', { phone, password: 'Sadhai@123' })).body;
 
 const owner = await login('9800000001');
@@ -149,7 +150,7 @@ const after = (await call('GET', '/passes', null, T)).body.filter((p) => ['activ
 const rem = after.map((p) => p.remaining).sort((a, b) => a - b);
 ok(rem[0] === 0 && rem[1] === 9, `cups spilled from the first pass into the next (${rem.join(', ')} left)`);
 ok(after.find((p) => p.remaining === 9)?.state === 'using', 'the next pass becomes "using"');
-await call('POST', `/orders/${big.order.id}/cancel`, {}, T);
+await decline(big.order.id);
 const back = (await call('GET', '/passes', null, T)).body.filter((p) => p.status === 'active').map((p) => p.remaining).sort();
 ok(back.join() === [9, 10].join() || back.join() === [10, 9].join() || back.reduce((a, b) => a + b, 0) === 19, 'cancelling returns the cups to the right passes');
 
@@ -231,7 +232,7 @@ ok((await call('POST', `/transfers/${req1.body.id}/receive`, {}, staff.access_to
 const before = await stInv();
 const usage = await call('POST', '/orders', { station_id: st.id, items: [item], payment_method: 'cash' }, T);
 ok(Math.round((before - await stInv()) * 10) / 10 === 17.6, 'a sale uses 16 g + 10% wastage = 17.6 g of coffee from the station');
-await call('POST', `/orders/${usage.body.order.id}/cancel`, {}, T);
+await decline(usage.body.order.id);
 const cnt = await call('POST', '/transfers/counts', { counts: [{ ingredient_id: coffee.id, counted: (await stInv()) - 100 }], note: 'closing count' }, staff.access_token);
 ok(cnt.status === 201 && cnt.body.lines[0].variance === -100 && cnt.body.variance_value === -275, 'shelf count: 100 g missing = Rs 275 loss at cost incl. wastage');
 const vr = (await call('GET', '/transfers/variance', null, mgr.access_token)).body;
@@ -392,8 +393,8 @@ const wrongPw = await call('DELETE', '/me', { password: 'nope-nope' }, T);
 ok(wrongPw.status === 401, 'delete account needs the right password');
 const pending = await call('POST', '/orders', { station_id: st.id, items: [item], payment_method: 'cash' }, T);
 ok((await call('DELETE', '/me', { password: 'Sadhai@123' }, T)).status === 409, 'cannot delete with an order in progress');
-await call('POST', `/orders/${pending.body.order.id}/cancel`, {}, T);
-await call('POST', `/orders/${o3.order.id}/cancel`, {}, T);
+await decline(pending.body.order.id);
+await decline(o3.order.id);
 ok((await call('DELETE', '/me', { password: 'Sadhai@123' }, T)).status === 200, 'account deleted');
 ok((await call('POST', '/auth/login', { phone, password: 'Sadhai@123' })).status === 401, 'deleted account cannot sign in');
 ok((await call('GET', '/me', null, T)).status === 401, 'old token stops working');
