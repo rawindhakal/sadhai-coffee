@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 480" role="img" aria-label="Illustration of a smiling barista holding a coffee cup">
+<defs><clipPath id="c"><rect x="0" y="0" width="400" height="480" rx="200" ry="200"/></clipPath></defs>
+<g clip-path="url(#c)">
+<rect width="400" height="480" fill="#F2A81D"/>
+<circle cx="320" cy="90" r="46" fill="#ffffff22"/><circle cx="70" cy="190" r="28" fill="#ffffff1a"/>
+
+<path d="M40 480 C 40 360 110 330 200 330 C 290 330 360 360 360 480 Z" fill="#5A3322"/>
+<rect x="172" y="268" width="56" height="70" rx="22" fill="#C98B63"/>
+<path d="M172 318 C 185 345 215 345 228 318 L 228 336 C 215 352 185 352 172 336 Z" fill="#00000018"/>
+<ellipse cx="200" cy="215" rx="72" ry="84" fill="#C98B63"/>
+<ellipse cx="128" cy="222" rx="11" ry="17" fill="#C98B63"/><ellipse cx="272" cy="222" rx="11" ry="17" fill="#C98B63"/>
+<path d="M128 190 C 128 130 165 112 200 112 C 240 112 274 135 272 192 C 262 160 238 148 200 148 C 165 148 140 160 128 190 Z" fill="#2A1810"/>
+<ellipse cx="172" cy="214" rx="6" ry="7.5" fill="#2A1810"/><ellipse cx="228" cy="214" rx="6" ry="7.5" fill="#2A1810"/>
+<circle cx="174" cy="211" r="2" fill="#fff"/><circle cx="230" cy="211" r="2" fill="#fff"/>
+<path d="M160 196 Q172 190 184 195 M216 195 Q228 190 240 196" stroke="#2A1810" stroke-width="5" stroke-linecap="round" fill="none"/>
+<path d="M200 220 C 196 236 196 244 204 246" stroke="#00000030" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+<path d="M176 262 C 190 280 212 280 226 262" stroke="#7A2A2A" stroke-width="5" stroke-linecap="round" fill="none"/>
+<ellipse cx="156" cy="248" rx="13" ry="8" fill="#E8836A" opacity=".25"/><ellipse cx="246" cy="248" rx="13" ry="8" fill="#E8836A" opacity=".25"/>
+<path d="M126 150 C 130 96 270 96 274 150 Z" fill="#A81F2A"/><rect x="124" y="142" width="152" height="18" rx="9" fill="#8A1822"/>
+<path d="M120 480 L 150 360 Q200 392 250 360 L 280 480 Z" fill="#FBF4E8"/><path d="M150 360 Q200 392 250 360" stroke="#A81F2A" stroke-width="8" fill="none"/><path d="M178 400 h44 v40 h-44z" fill="#A81F2A"/><text x="200" y="428" font-family="Georgia,serif" font-size="22" font-weight="700" fill="#FBF4E8" text-anchor="middle">s</text><g transform="translate(262 372)"><path d="M0 0 H70 L62 86 Q60 96 50 96 H20 Q10 96 8 86 Z" fill="#FBF4E8"/><path d="M4 18 H66 L63 36 H7 Z" fill="#A81F2A"/><path d="M70 14 q26 4 22 28 q-4 20 -28 20" fill="none" stroke="#FBF4E8" stroke-width="8" stroke-linecap="round"/><path d="M20 -8 q-8 -14 0 -26 M38 -8 q-8 -14 0 -26 M54 -8 q-8 -14 0 -26" stroke="#ffffffaa" stroke-width="4" stroke-linecap="round" fill="none"/></g>
+</g></svg>

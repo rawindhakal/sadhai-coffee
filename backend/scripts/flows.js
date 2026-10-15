@@ -296,6 +296,13 @@ section('8. Owner and managers supervise every outlet');
   ok(Array.isArray(stm) && stm.length === 2 && stm.every((x) => x.station.operator_type === 'partner'), 'the owner sees a statement for each partner cafe');
   const kst = stm.find((x) => x.station.code === 'KALANKI');
   ok(kst.digital_held_by_sadhai >= 0 && kst.cash_held >= 0 && kst.net_due === kst.partner_share - kst.cash_held, 'statement nets the share against cash the cafe holds; Fonepay money is held by Sadhai');
+  // Station hours saved from the owner screen must stick, even for a station with no Nepali name or address.
+  const row = (await call('GET', '/admin/stations', null, tok(owner))).body.find((x) => x.code === 'TUTH');
+  const edit = { name: row.name, name_ne: null, address: null, district: null, lat: null, lng: null, opens: '06:45', closes: '21:30', operator_type: 'company', breakeven_cups: row.breakeven_cups, order_letter: row.order_letter, partner_name: null, partner_phone: null, revenue_share_pct: 0 };
+  const saved = await call('PATCH', `/owner/stations/${row.id}`, edit, tok(owner));
+  const again = (await call('GET', '/admin/stations', null, tok(owner))).body.find((x) => x.code === 'TUTH');
+  ok(saved.status === 200 && again.opens.startsWith('06:45') && again.closes.startsWith('21:30'), 'station hours saved by the owner are kept, even with blank optional fields');
+  ok((await call('PATCH', `/owner/stations/${row.id}`, { opens: 'late' }, tok(owner))).status === 400, 'a bad time is refused instead of being silently dropped');
   const users = (await call('GET', '/owner/users?role=partner', null, tok(owner))).body;
   ok(users.length === 2, 'the owner manages partner logins');
 }

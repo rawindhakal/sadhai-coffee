@@ -100,9 +100,10 @@ const sections = {
   hero: z.object({
     headline_en: z.string().max(80), headline_ne: z.string().max(120), sub_en: z.string().max(140), sub_ne: z.string().max(200),
     primary_cta: z.string().max(30), secondary_cta: z.string().max(30), note: z.string().max(100),
-    layers: z.object({ sun: mid, far: mid, mid, near: mid }), timer_cup: mid, show_timer: z.boolean(), parallax: z.boolean(),
+    layers: z.object({ sun: mid, far: mid, mid, near: mid }), timer_cup: mid, portrait: mid.optional().default(null), show_timer: z.boolean(), parallax: z.boolean(),
   }),
   steps: z.array(z.object({ title_en: z.string().max(60), title_ne: z.string().max(80), text: z.string().max(240), art: mid })).length(3),
+  people: z.array(z.object({ role: z.string().max(40), title: z.string().max(80), text: z.string().max(240), art: mid })).length(4),
   story: z.array(z.object({ tag: z.string().max(20), title: z.string().max(90), text: z.string().max(240), art: mid })).length(3),
   marquee: z.string().max(300),
   partners: z.object({

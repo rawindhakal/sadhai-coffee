@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 480" role="img" aria-label="Illustration of a coffee farmer in a topi hat with a basket of ripe red cherries">
+<defs><clipPath id="c"><rect x="0" y="0" width="400" height="480" rx="200" ry="200"/></clipPath></defs>
+<g clip-path="url(#c)">
+<rect width="400" height="480" fill="#2F5D46"/>
+<circle cx="320" cy="90" r="46" fill="#ffffff22"/><circle cx="70" cy="190" r="28" fill="#ffffff1a"/>
+<path d="M0 300 C 80 240 140 280 200 250 C 270 215 330 260 400 230 V 480 H0 Z" fill="#244A38"/><path d="M0 340 C 90 290 160 330 230 300 C 300 270 350 310 400 290 V480 H0Z" fill="#1E3F30"/>
+<path d="M40 480 C 40 360 110 330 200 330 C 290 330 360 360 360 480 Z" fill="#6B4B33"/>
+<rect x="172" y="268" width="56" height="70" rx="22" fill="#B87A55"/>
+<path d="M172 318 C 185 345 215 345 228 318 L 228 336 C 215 352 185 352 172 336 Z" fill="#00000018"/>
+<ellipse cx="200" cy="215" rx="72" ry="84" fill="#B87A55"/>
+<ellipse cx="128" cy="222" rx="11" ry="17" fill="#B87A55"/><ellipse cx="272" cy="222" rx="11" ry="17" fill="#B87A55"/>
+<path d="M128 190 C 128 130 165 112 200 112 C 240 112 274 135 272 192 C 262 160 238 148 200 148 C 165 148 140 160 128 190 Z" fill="#3B2A22"/>
+<ellipse cx="172" cy="214" rx="6" ry="7.5" fill="#2A1810"/><ellipse cx="228" cy="214" rx="6" ry="7.5" fill="#2A1810"/>
+<circle cx="174" cy="211" r="2" fill="#fff"/><circle cx="230" cy="211" r="2" fill="#fff"/>
+<path d="M160 196 Q172 190 184 195 M216 195 Q228 190 240 196" stroke="#3B2A22" stroke-width="5" stroke-linecap="round" fill="none"/>
+<path d="M200 220 C 196 236 196 244 204 246" stroke="#00000030" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+<path d="M176 262 C 190 280 212 280 226 262" stroke="#7A2A2A" stroke-width="5" stroke-linecap="round" fill="none"/>
+<ellipse cx="156" cy="248" rx="13" ry="8" fill="#E8836A" opacity=".25"/><ellipse cx="246" cy="248" rx="13" ry="8" fill="#E8836A" opacity=".25"/>
+<path d="M132 140 C 134 96 266 96 268 140 L 268 152 L 132 152 Z" fill="#E7DCC6"/><path d="M132 140 C 134 96 266 96 268 140" fill="none" stroke="#C94A2A" stroke-width="5"/><path d="M140 128 H260 M138 116 H262" stroke="#C94A2A" stroke-width="4" opacity=".7"/><rect x="132" y="148" width="136" height="12" fill="#C94A2A"/>
+<g transform="translate(250 392)"><path d="M0 20 H120 L108 90 Q104 104 90 104 H30 Q16 104 12 90 Z" fill="#B98350"/><path d="M0 20 H120" stroke="#8A5E34" stroke-width="6"/><path d="M14 44 H106 M18 66 H102" stroke="#8A5E34" stroke-width="3"/><circle cx="24" cy="16" r="11" fill="#A81F2A"/><circle cx="21" cy="13" r="3" fill="#ffffff55"/><circle cx="48" cy="8" r="11" fill="#A81F2A"/><circle cx="45" cy="5" r="3" fill="#ffffff55"/><circle cx="72" cy="12" r="11" fill="#A81F2A"/><circle cx="69" cy="9" r="3" fill="#ffffff55"/><circle cx="96" cy="16" r="11" fill="#A81F2A"/><circle cx="93" cy="13" r="3" fill="#ffffff55"/><circle cx="36" cy="2" r="11" fill="#A81F2A"/><circle cx="33" cy="-1" r="3" fill="#ffffff55"/><circle cx="60" cy="-2" r="11" fill="#A81F2A"/><circle cx="57" cy="-5" r="3" fill="#ffffff55"/><circle cx="84" cy="2" r="11" fill="#A81F2A"/><circle cx="81" cy="-1" r="3" fill="#ffffff55"/><path d="M48 8 q4 -12 14 -14" stroke="#2F5D46" stroke-width="3" fill="none"/></g>
+</g></svg>

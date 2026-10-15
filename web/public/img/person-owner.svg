@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 480" role="img" aria-label="Illustration of a cafe owner with glasses and an apron holding a tablet">
+<defs><clipPath id="c"><rect x="0" y="0" width="400" height="480" rx="200" ry="200"/></clipPath></defs>
+<g clip-path="url(#c)">
+<rect width="400" height="480" fill="#5A3322"/>
+<circle cx="320" cy="90" r="46" fill="#ffffff22"/><circle cx="70" cy="190" r="28" fill="#ffffff1a"/>
+
+<path d="M40 480 C 40 360 110 330 200 330 C 290 330 360 360 360 480 Z" fill="#FBF4E8"/>
+<rect x="172" y="268" width="56" height="70" rx="22" fill="#BF8660"/>
+<path d="M172 318 C 185 345 215 345 228 318 L 228 336 C 215 352 185 352 172 336 Z" fill="#00000018"/>
+<ellipse cx="200" cy="215" rx="72" ry="84" fill="#BF8660"/>
+<ellipse cx="128" cy="222" rx="11" ry="17" fill="#BF8660"/><ellipse cx="272" cy="222" rx="11" ry="17" fill="#BF8660"/>
+<path d="M128 190 C 128 130 165 112 200 112 C 240 112 274 135 272 192 C 262 160 238 148 200 148 C 165 148 140 160 128 190 Z" fill="#6E6A66"/>
+<ellipse cx="172" cy="214" rx="6" ry="7.5" fill="#2A1810"/><ellipse cx="228" cy="214" rx="6" ry="7.5" fill="#2A1810"/>
+<circle cx="174" cy="211" r="2" fill="#fff"/><circle cx="230" cy="211" r="2" fill="#fff"/>
+<path d="M160 196 Q172 190 184 195 M216 195 Q228 190 240 196" stroke="#6E6A66" stroke-width="5" stroke-linecap="round" fill="none"/>
+<path d="M200 220 C 196 236 196 244 204 246" stroke="#00000030" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+<path d="M176 262 C 190 280 212 280 226 262" stroke="#7A2A2A" stroke-width="5" stroke-linecap="round" fill="none"/>
+<ellipse cx="156" cy="248" rx="13" ry="8" fill="#E8836A" opacity=".25"/><ellipse cx="246" cy="248" rx="13" ry="8" fill="#E8836A" opacity=".25"/>
+<g fill="none" stroke="#2A1810" stroke-width="5"><circle cx="172" cy="214" r="23"/><circle cx="228" cy="214" r="23"/><path d="M195 214 H205"/></g>
+<path d="M150 360 Q200 392 250 360 L 270 480 H130 Z" fill="#2F5D46"/><g transform="translate(250 382) rotate(6)"><rect width="110" height="82" rx="10" fill="#2A1810"/><rect x="6" y="6" width="98" height="70" rx="6" fill="#FBF4E8"/><path d="M16 56 L36 40 L54 48 L76 24 L94 32" stroke="#2F5D46" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><rect x="16" y="14" width="30" height="6" rx="3" fill="#A81F2A"/></g>
+</g></svg>

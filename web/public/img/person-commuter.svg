@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 480" role="img" aria-label="Illustration of a commuter with headphones checking a pickup number on a phone">
+<defs><clipPath id="c"><rect x="0" y="0" width="400" height="480" rx="200" ry="200"/></clipPath></defs>
+<g clip-path="url(#c)">
+<rect width="400" height="480" fill="#A81F2A"/>
+<circle cx="320" cy="90" r="46" fill="#ffffff22"/><circle cx="70" cy="190" r="28" fill="#ffffff1a"/>
+
+<path d="M40 480 C 40 360 110 330 200 330 C 290 330 360 360 360 480 Z" fill="#2F5D46"/>
+<rect x="172" y="268" width="56" height="70" rx="22" fill="#D6A27A"/>
+<path d="M172 318 C 185 345 215 345 228 318 L 228 336 C 215 352 185 352 172 336 Z" fill="#00000018"/>
+<ellipse cx="200" cy="215" rx="72" ry="84" fill="#D6A27A"/>
+<ellipse cx="128" cy="222" rx="11" ry="17" fill="#D6A27A"/><ellipse cx="272" cy="222" rx="11" ry="17" fill="#D6A27A"/>
+<path d="M128 190 C 128 130 165 112 200 112 C 240 112 274 135 272 192 C 262 160 238 148 200 148 C 165 148 140 160 128 190 Z" fill="#1F1410"/>
+<ellipse cx="172" cy="214" rx="6" ry="7.5" fill="#2A1810"/><ellipse cx="228" cy="214" rx="6" ry="7.5" fill="#2A1810"/>
+<circle cx="174" cy="211" r="2" fill="#fff"/><circle cx="230" cy="211" r="2" fill="#fff"/>
+<path d="M160 196 Q172 190 184 195 M216 195 Q228 190 240 196" stroke="#1F1410" stroke-width="5" stroke-linecap="round" fill="none"/>
+<path d="M200 220 C 196 236 196 244 204 246" stroke="#00000030" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+<path d="M176 262 C 190 280 212 280 226 262" stroke="#7A2A2A" stroke-width="5" stroke-linecap="round" fill="none"/>
+<ellipse cx="156" cy="248" rx="13" ry="8" fill="#E8836A" opacity=".25"/><ellipse cx="246" cy="248" rx="13" ry="8" fill="#E8836A" opacity=".25"/>
+<path d="M128 200 C 116 120 284 120 272 200" fill="none" stroke="#2A1810" stroke-width="10" stroke-linecap="round"/><rect x="112" y="190" width="26" height="46" rx="12" fill="#F2A81D"/><rect x="262" y="190" width="26" height="46" rx="12" fill="#F2A81D"/>
+<path d="M110 480 Q 130 380 160 346" stroke="#2A1810" stroke-width="14" fill="none" stroke-linecap="round"/><g transform="translate(262 380) rotate(-8)"><rect width="74" height="128" rx="14" fill="#2A1810"/><rect x="6" y="8" width="62" height="112" rx="9" fill="#FBF4E8"/><rect x="14" y="18" width="46" height="10" rx="5" fill="#A81F2A"/><text x="37" y="64" font-family="Georgia,serif" font-size="30" font-weight="700" fill="#2A1810" text-anchor="middle">A27</text><rect x="16" y="82" width="42" height="8" rx="4" fill="#2F5D46"/><rect x="16" y="98" width="30" height="8" rx="4" fill="#F1E4CE"/></g>
+</g></svg>

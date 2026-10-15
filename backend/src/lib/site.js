@@ -7,12 +7,18 @@ export const SITE_DEFAULTS = {
     headline_en: 'Good coffee, every day.', headline_ne: 'सधैं राम्रो कफी।',
     sub_en: 'Grown in the hills. Ready in 90 seconds.', sub_ne: 'पहाडमा फलेको, ९० सेकेन्डमा तयार।',
     primary_cta: 'Order ahead', secondary_cta: 'Get a free first cup', note: 'The price you see is the price you pay.',
-    layers: { sun: null, far: null, mid: null, near: null }, timer_cup: null, show_timer: true, parallax: true,
+    layers: { sun: null, far: null, mid: null, near: null }, timer_cup: null, portrait: null, show_timer: true, parallax: true,
   },
   steps: [
     { title_en: 'Pick a counter', title_ne: 'नजिकको काउन्टर छान्नुहोस्', text: 'Share your location (free, on your phone) and we sort the nearest counters by walking time.', art: null },
     { title_en: 'Order and pay', title_ne: 'अर्डर र भुक्तानी', text: 'Add a coffee in one tap. Pay with Fonepay, your pass, or cash at the counter.', art: null },
     { title_en: 'Walk in, 90 seconds', title_ne: 'भित्र आउनुहोस्, ९० सेकेन्ड', text: 'Your pickup number lights up when it is ready. Fresh Nepali beans, poured while you walk up.', art: null },
+  ],
+  people: [
+    { role: 'The hands on the hill', title: 'Farmers in Gulmi, Syangja and Kaski', text: 'Families who pick each ripe cherry by hand on mid-hill terraces. We name the district on the bag.', art: null },
+    { role: 'Behind the counter', title: 'Baristas who know your order', text: 'A small team at every counter, trained on one standard recipe so a drink tastes the same everywhere.', art: null },
+    { role: 'On the way to work', title: 'Commuters, students, nurses', text: 'People who want a good cup in 90 seconds, at a bus stop, a hospital gate or a campus entrance.', art: null },
+    { role: 'Our cafe partners', title: 'Cafe owners across Kathmandu', text: 'Neighbourhood cafes that keep their own counter and team, and bring Sadhai coffee and orders through the door.', art: null },
   ],
   story: [
     { tag: 'Grown', title: 'In the hills of Gulmi, Syangja and Kaski', text: 'Nepali farmers pick cherries by hand on mid-hill terraces. We name the district on the bag.', art: null },
@@ -66,13 +72,13 @@ export async function loadSite(section) {
   }
   // swap media ids for urls
   const ids = new Set();
-  const walk = (o) => { if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) { if ((k === 'art' || k === 'timer_cup' || ['sun', 'far', 'mid', 'near'].includes(k)) && typeof v === 'string') ids.add(v); else walk(v); } };
+  const walk = (o) => { if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) { if ((k === 'art' || k === 'timer_cup' || k === 'portrait' || ['sun', 'far', 'mid', 'near'].includes(k)) && typeof v === 'string') ids.add(v); else walk(v); } };
   walk(merged);
   const found = ids.size ? (await query('SELECT id, mime FROM media WHERE id = ANY($1::uuid[])', [[...ids]])).rows : [];
   const byId = new Map(found.map((m) => [m.id, m]));
   const resolve = (o) => {
     if (Array.isArray(o)) return o.map(resolve);
-    if (o && typeof o === 'object') return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, ((k === 'art' || k === 'timer_cup' || ['sun', 'far', 'mid', 'near'].includes(k)) && (typeof v === 'string' || v === null)) ? (v && byId.has(v) ? { id: v, url: mediaUrl(v, byId.get(v).mime) } : null) : resolve(v)]));
+    if (o && typeof o === 'object') return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, ((k === 'art' || k === 'timer_cup' || k === 'portrait' || ['sun', 'far', 'mid', 'near'].includes(k)) && (typeof v === 'string' || v === null)) ? (v && byId.has(v) ? { id: v, url: mediaUrl(v, byId.get(v).mime) } : null) : resolve(v)]));
     return o;
   };
   const out = resolve(merged);

@@ -17,6 +17,18 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.6.0 (2026-10-15)
+
+### Added
+- **New home page** (`/`): live hero with an illustrated barista and floating beans, a live menu and prices from the API, "The people of Sadhai" (farmers, baristas, commuters, cafe owners), the 90-second brew simulator, the 10-cup pass calculator, live counters with open/closed and wait times plus "show the nearest first", app and cafe-partner sections, and a FAQ that matches how ordering really works. Mobile menu now works. `/newhome` redirects to `/`.
+- Owner can change the main hero picture and the four people pictures and captions under Home page and pictures (new "People" tab and "Main hero picture").
+- Illustrated beans and people in the brand style (`web/public/img/bean*.svg`, `person-*.svg`).
+
+### Fixed
+- **Station hours now save reliably** from the owner screen: stations without a Nepali name, address or coordinates no longer fail validation, and a badly formed time is refused with a message instead of being ignored.
+- `npm run seed` now refuses to wipe a database whose station hours or details have been changed. Use `npm run seed:force` to reset on purpose. (Re-seeding was resetting hours back to 07:00 to 20:00.)
+- Removed invented claims from the preview page (fake counters, partner yield, savings) and the leftover eSewa mentions.
+
 ## v1.5.1 (2026-10-15)
 
 ### Changed

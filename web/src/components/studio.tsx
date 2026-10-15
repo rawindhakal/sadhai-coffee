@@ -7,7 +7,7 @@ import { useDash } from './dash/shell';
 import { Icon } from './icons';
 import { HeroScene } from './hero';
 import { productArt } from '@/lib/art';
-import { STEP_ART, STORY_ART, HERO_DEFAULTS } from '@/lib/site-content';
+import { STEP_ART, STORY_ART, PEOPLE_ART, HERO_DEFAULTS } from '@/lib/site-content';
 
 /* ============================================================================
    Settings: business rules, staff and pay rules, and every integration key.
@@ -171,7 +171,7 @@ function ObjList({ label, items, fields, onChange, make, max = 8 }: { label: str
 export function SiteEditor() {
   const site = useData<any>('/owner/site');
   const toast = useToast();
-  const [tab, setTab] = useState<'hero' | 'steps' | 'story' | 'marquee' | 'partners' | 'investors' | 'menu'>('hero');
+  const [tab, setTab] = useState<'hero' | 'steps' | 'people' | 'story' | 'marquee' | 'partners' | 'investors' | 'menu'>('hero');
   const [draft, setDraft] = useState<any>({});
   useEffect(() => { if (site.data) setDraft(JSON.parse(JSON.stringify(site.data.content))); }, [site.data]);
   if (!site.data || !draft.hero) return <Skeleton h={90} n={4} />;
@@ -187,7 +187,7 @@ export function SiteEditor() {
   const h = draft.hero;
   return (
     <div className="col" style={{ gap: 16 }}>
-      <Seg value={tab} onChange={setTab} options={[{ id: 'hero', label: 'Hero' }, { id: 'steps', label: 'How it works' }, { id: 'story', label: 'Our story' }, { id: 'marquee', label: 'Banner text' }, { id: 'partners', label: 'Partner page' }, { id: 'investors', label: 'Investor page' }, { id: 'menu', label: 'Menu pictures' }]} />
+      <Seg value={tab} onChange={setTab} options={[{ id: 'hero', label: 'Hero' }, { id: 'steps', label: 'How it works' }, { id: 'people', label: 'People' }, { id: 'story', label: 'Our story' }, { id: 'marquee', label: 'Banner text' }, { id: 'partners', label: 'Partner page' }, { id: 'investors', label: 'Investor page' }, { id: 'menu', label: 'Menu pictures' }]} />
       <p className="small muted">Changes go live on the website, the kiosk and the apps as soon as you save. The Sadhai logo is fixed and cannot be changed here, so it stays the same everywhere.</p>
 
       {tab === 'hero' && (
@@ -199,6 +199,7 @@ export function SiteEditor() {
               <ImagePicker label="Far mountains" hint="Moves slowly." slot={h.layers.far} fallback={HERO_DEFAULTS.far} onChange={(s) => set('hero', { ...h, layers: { ...h.layers, far: s } })} />
               <ImagePicker label="Middle hills" slot={h.layers.mid} fallback={HERO_DEFAULTS.mid} onChange={(s) => set('hero', { ...h, layers: { ...h.layers, mid: s } })} />
               <ImagePicker label="Front hills" hint="Moves fastest. Keep the bottom edge solid." slot={h.layers.near} fallback={HERO_DEFAULTS.near} onChange={(s) => set('hero', { ...h, layers: { ...h.layers, near: s } })} />
+              <ImagePicker label="Main hero picture" hint="The big picture on the home page. A real photo of your team or a customer works best. Portrait, about 4 by 5." slot={h.portrait} fallback="/img/person-barista.svg" wide onChange={(s) => set('hero', { ...h, portrait: s })} />
               <ImagePicker label="Cup in the timer ring" slot={h.timer_cup} fallback={HERO_DEFAULTS.cup} onChange={(s) => set('hero', { ...h, timer_cup: s })} />
             </div>
             <div className="grid g2" style={{ marginTop: 16 }}>
@@ -231,6 +232,9 @@ export function SiteEditor() {
         <div key={i} className="card flat grid g2"><div className="col"><Field label={`Step ${i + 1} title (English)`}><input value={s.title_en} onChange={(e) => set('steps', draft.steps.map((x: any, j: number) => (j === i ? { ...x, title_en: e.target.value } : x)))} /></Field><Field label="Title (Nepali)"><input value={s.title_ne} onChange={(e) => set('steps', draft.steps.map((x: any, j: number) => (j === i ? { ...x, title_ne: e.target.value } : x)))} /></Field><Field label="Text"><textarea value={s.text} onChange={(e) => set('steps', draft.steps.map((x: any, j: number) => (j === i ? { ...x, text: e.target.value } : x)))} /></Field></div>
           <ImagePicker label="Picture" slot={s.art} fallback={STEP_ART[i]} wide onChange={(a) => set('steps', draft.steps.map((x: any, j: number) => (j === i ? { ...x, art: a } : x)))} /></div>))}</div><Footer s="steps" /></div>}
 
+      {tab === 'people' && <div className="panel"><div className="ph"><h3>The people of Sadhai</h3><p className="small muted">Four pictures and captions on the home page. Upload real photos, with permission from the people in them.</p></div><div className="col" style={{ gap: 16 }}>{(draft.people || []).map((s: any, i: number) => (
+        <div key={i} className="card flat grid g2"><div className="col"><Field label="Small label"><input value={s.role} onChange={(e) => set('people', draft.people.map((x: any, j: number) => (j === i ? { ...x, role: e.target.value } : x)))} /></Field><Field label="Headline"><input value={s.title} onChange={(e) => set('people', draft.people.map((x: any, j: number) => (j === i ? { ...x, title: e.target.value } : x)))} /></Field><Field label="Text"><textarea value={s.text} onChange={(e) => set('people', draft.people.map((x: any, j: number) => (j === i ? { ...x, text: e.target.value } : x)))} /></Field></div>
+          <ImagePicker label="Picture" slot={s.art} fallback={PEOPLE_ART[i]} wide onChange={(a) => set('people', draft.people.map((x: any, j: number) => (j === i ? { ...x, art: a } : x)))} /></div>))}</div><Footer s="people" /></div>}
       {tab === 'story' && <div className="panel"><div className="ph"><h3>From hill to cup</h3></div><div className="col" style={{ gap: 16 }}>{draft.story.map((s: any, i: number) => (
         <div key={i} className="card flat grid g2"><div className="col"><Field label="Label"><input value={s.tag} onChange={(e) => set('story', draft.story.map((x: any, j: number) => (j === i ? { ...x, tag: e.target.value } : x)))} /></Field><Field label="Heading"><input value={s.title} onChange={(e) => set('story', draft.story.map((x: any, j: number) => (j === i ? { ...x, title: e.target.value } : x)))} /></Field><Field label="Text"><textarea value={s.text} onChange={(e) => set('story', draft.story.map((x: any, j: number) => (j === i ? { ...x, text: e.target.value } : x)))} /></Field></div>
           <ImagePicker label="Picture" slot={s.art} fallback={STORY_ART[i]} wide onChange={(a) => set('story', draft.story.map((x: any, j: number) => (j === i ? { ...x, art: a } : x)))} /></div>))}</div><Footer s="story" /></div>}

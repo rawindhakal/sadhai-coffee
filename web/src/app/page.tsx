@@ -1,3 +1,3 @@
 'use client';
-import { Landing } from '@/components/landing';
-export default function Page() { return <Landing />; }
+import { NewLanding } from '@/components/new-landing';
+export default function Page() { return <NewLanding />; }

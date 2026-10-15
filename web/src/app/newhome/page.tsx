@@ -1,6 +1,2 @@
-'use client';
-import { NewLanding } from '@/components/new-landing';
-
-export default function NewHomePage() {
-  return <NewLanding />;
-}
+import { redirect } from 'next/navigation';
+export default function NewHome() { redirect('/'); }

@@ -15,10 +15,10 @@ owner.use(authenticate, requireRole('owner'));
 
 /* ---- stations ---- */
 const stationSchema = z.object({
-  code: z.string().min(2).max(12).regex(/^[A-Z0-9-]+$/), name: z.string().min(2), name_ne: z.string().optional(), address: z.string().optional(), district: z.string().optional(),
-  lat: z.number().optional(), lng: z.number().optional(), opens: z.string().default('07:00'), closes: z.string().default('20:00'),
+  code: z.string().min(2).max(12).regex(/^[A-Z0-9-]+$/), name: z.string().min(2), name_ne: z.string().nullish(), address: z.string().nullish(), district: z.string().nullish(),
+  lat: z.number().nullish(), lng: z.number().nullish(), opens: z.string().regex(/^\d\d:\d\d(:\d\d)?$/, 'Use a time like 07:00').default('07:00'), closes: z.string().regex(/^\d\d:\d\d(:\d\d)?$/, 'Use a time like 20:00').default('20:00'),
   order_letter: z.string().length(1).default('A'), breakeven_cups: z.number().int().min(1).default(220),
-  operator_type: z.enum(['company', 'partner']).default('company'), partner_name: z.string().optional(), partner_phone: z.string().optional(), revenue_share_pct: z.number().int().min(0).max(100).default(0), manager_ids: z.array(z.string().uuid()).default([]),
+  operator_type: z.enum(['company', 'partner']).default('company'), partner_name: z.string().nullish(), partner_phone: z.string().nullish(), revenue_share_pct: z.number().int().min(0).max(100).default(0), manager_ids: z.array(z.string().uuid()).default([]),
 });
 owner.post('/stations', wrap(async (req, res) => {
   const b = stationSchema.parse(req.body);

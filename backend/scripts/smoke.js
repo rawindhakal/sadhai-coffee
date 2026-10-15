@@ -285,6 +285,12 @@ ok(site1.hero.headline_en === 'Coffee, the Sadhai way' && site1.hero.layers.sun?
 ok((await call('PUT', '/owner/site/hero', heroNew, mgr.access_token)).status === 403, 'managers cannot edit the site');
 await call('DELETE', '/owner/site/hero', null, owner.access_token);
 ok((await call('GET', '/site')).body.hero.headline_en === 'Good coffee, every day.', 'resetting restores the default hero');
+const ppl = (await call('GET', '/site')).body.people;
+ok(Array.isArray(ppl) && ppl.length === 4 && ppl.every((x) => x.title && x.art === null), 'the home page has four people cards by default');
+const pplNew = ppl.map((x, i) => ({ role: x.role, title: i === 1 ? 'Our baristas' : x.title, text: x.text, art: null }));
+ok((await call('PUT', '/owner/site/people', pplNew, owner.access_token)).status === 200 && (await call('GET', '/site')).body.people[1].title === 'Our baristas', 'owner edits the people cards');
+ok((await call('PUT', '/owner/site/people', pplNew.slice(0, 3), owner.access_token)).status === 400, 'the people cards must be exactly four');
+await call('DELETE', '/owner/site/people', null, owner.access_token);
 
 const enq = await call('POST', '/enquiries', { kind: 'partner', name: 'Tara Cafe', email: 'tara@example.com', org: 'Tara Cafe', city: 'Pokhara', message: 'Interested', consent: true }, null);
 ok(enq.status === 201, 'partner enquiry accepted');

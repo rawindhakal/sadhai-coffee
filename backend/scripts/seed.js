@@ -11,6 +11,18 @@ if (process.env.NODE_ENV === 'production' && !process.env.SEED_FORCE) {
   process.exit(1);
 }
 
+// The seed wipes everything, including station hours and any changes made in the dashboards.
+// If the database already holds data that does not look like the demo, stop and ask for --force.
+{
+  const force = process.argv.includes('--force') || process.env.SEED_FORCE;
+  const { rows } = await pool.query(`SELECT count(*)::int AS n FROM stations`).catch(() => ({ rows: [{ n: 0 }] }));
+  const changed = rows[0].n > 0 ? (await pool.query(`SELECT count(*)::int AS n FROM stations WHERE opens <> '07:00' OR closes <> '20:00' OR code NOT IN ('TU-GATE','TUTH','KALANKI','NEWROAD')`)).rows[0].n : 0;
+  if (rows[0].n > 0 && !force && changed > 0) {
+    console.error('This database already has stations whose hours or details differ from the demo.\nSeeding would erase them (and every order). If you really want that, run: npm run seed:force');
+    process.exit(1);
+  }
+}
+
 let seed = 42;
 const rnd = () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
 const pick = (a) => a[Math.floor(rnd() * a.length)];

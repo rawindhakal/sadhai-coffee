@@ -70,7 +70,11 @@ Or with Docker: `docker compose up --build`, then `docker compose exec api npm r
 | Manager (TU Gate, Teaching Hospital) | 9800000002 |
 | Manager (Kalanki, New Road) | 9800000003 |
 | Station staff (TU Gate) | 9800000011 |
+| Partner cafe owner (Kalanki) | 9801111111 |
+| Partner cafe owner (New Road) | 9802222222 |
 | Customer | 9812345678 |
+
+`npm run seed` wipes the database and recreates the demo. It refuses to run if station hours or details have been changed, so a re-seed cannot silently undo your edits. To reset on purpose, run `npm run seed:force`.
 
 Demo data: 4 stations, 13 menu items with Nepali names, ~15,000 orders over 60 days, passes, coupons, a live drop, provider settlements. Change every password before any real use. The seed refuses to run in production.
 
