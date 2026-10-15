@@ -3,7 +3,7 @@ import { Logo } from './logo';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import QRCode from 'qrcode';
+import { FonepayQr } from './fonepay';
 import { api, rs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
@@ -15,7 +15,7 @@ const T: Record<string, [string, string]> = {
   touch: ['Touch to order', 'अर्डर गर्न छुनुहोस्'], who: ['Who is this order for?', 'यो अर्डर कसको नाममा?'], name: ['Your name', 'तपाईंको नाम'], phone: ['Mobile number', 'मोबाइल नम्बर'],
   consent: ['You may use my name and number to call my order and send updates.', 'मेरो अर्डर बोलाउन र जानकारी पठाउन मेरो नाम र नम्बर प्रयोग गर्न सक्नुहुन्छ।'],
   next: ['Continue', 'अगाडि'], review: ['Review order', 'अर्डर हेर्नुहोस्'], pay: ['How will you pay?', 'भुक्तानी कसरी गर्ने?'], counter: ['Pay at the counter', 'काउन्टरमा तिर्ने'],
-  passopt: ['Use my 10-cup pass', 'मेरो १०-कप पास प्रयोग गर्ने'], scan: ['Pay with eSewa, Khalti or Fonepay', 'eSewa, Khalti वा Fonepay बाट तिर्ने'], place: ['Place order', 'अर्डर गर्नुहोस्'],
+  passopt: ['Use my 10-cup pass', 'मेरो १०-कप पास प्रयोग गर्ने'], scan: ['Pay online with a Fonepay QR', 'Fonepay QR बाट अहिले तिर्ने'], place: ['Place order', 'अर्डर गर्नुहोस्'],
   done: ['Your number', 'तपाईंको नम्बर'], again: ['New order', 'नयाँ अर्डर'], total: ['Total', 'जम्मा'], back: ['Back', 'पछाडि'], cart: ['View order', 'अर्डर हेर्नुहोस्'],
 };
 
@@ -251,7 +251,7 @@ function Pay({ t, total, busy, error, guest, onBack, onPlace }: any) {
       <div className="col" style={{ marginTop: 16 }}>
         <button className="k-opt" disabled={busy} onClick={() => onPlace('counter')}><Icon name="coin" size={30} /><span><strong>{t('counter')}</strong><small>Pay {rs(total)} when you pick up your coffee</small></span></button>
         <button className={`k-opt ${mode === 'online' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'online' ? '' : 'online')}><Icon name="cart" size={30} /><span><strong>{t('scan')}</strong><small>Pay now on your phone</small></span></button>
-        {mode === 'online' && <div className="row wrap">{['esewa', 'khalti', 'fonepay'].map((p) => <button key={p} className="btn lg grow" disabled={busy} onClick={() => onPlace('online', undefined, p)}>{p === 'esewa' ? 'eSewa' : p === 'khalti' ? 'Khalti' : 'Fonepay'}</button>)}</div>}
+        {mode === 'online' && <div className="row wrap"><button className="btn primary lg grow" disabled={busy} onClick={() => onPlace('online', undefined, 'fonepay')}>Show my Fonepay QR</button></div>}
         <button className={`k-opt ${mode === 'pass' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'pass' ? '' : 'pass')}><Icon name="ticket" size={30} /><span><strong>{t('passopt')}</strong><small>Enter your pass code (SP-XXXX-XXXX)</small></span></button>
         {mode === 'pass' && (
           <div className="card flat col">
@@ -273,18 +273,15 @@ function Done({ t, result, guest, onNew }: { t: (k: string) => string; result: a
   const [left, setLeft] = useState(25);
   const pay = result.payment;
   const awaiting = o.status === 'awaiting_payment';
-  const qr = useRef<HTMLCanvasElement>(null);
-  useEffect(() => { if (pay?.mode === 'redirect' && qr.current) QRCode.toCanvas(qr.current, pay.start_url || pay.url, { width: 220, margin: 1 }).catch(() => {}); }, []);
   useEffect(() => { if (!awaiting) return; const i = setInterval(() => api(`/kiosk/orders/${o.id}`).then((x) => setO({ ...o, ...x })).catch(() => {}), 2000); return () => clearInterval(i); }, [awaiting]);
   useEffect(() => { if (awaiting) return; setLeft(25); const i = setInterval(() => setLeft((n) => { if (n <= 1) { onNew(); return 0; } return n - 1; }), 1000); return () => clearInterval(i); }, [awaiting]);
-  async function sandboxPay(outcome: 'paid' | 'fail') { await api(`/payments/${pay.payment_id}/confirm`, { method: 'POST', body: { outcome } }).catch(() => {}); const x = await api(`/kiosk/orders/${o.id}`); setO({ ...o, ...x }); }
+  const refresh = () => api(`/kiosk/orders/${o.id}`).then((x) => setO({ ...o, ...x })).catch(() => {});
   return (
     <div className="k-card wide center">
       {o.status === 'cancelled' ? <><h2>That payment did not go through</h2><p className="muted">You were not charged. Please start again.</p></> : awaiting ? (
         <>
           <h2>Finish paying to send your order</h2>
-          {pay?.mode === 'sandbox' && <div className="col" style={{ alignItems: 'center', margin: '16px 0' }}><p className="muted">Test payments are on. No real money moves.</p><div className="row"><button className="btn primary lg" onClick={() => sandboxPay('paid')}>Confirm payment</button><button className="btn ghost lg" onClick={() => sandboxPay('fail')}>Fail it</button></div></div>}
-          {pay?.mode === 'redirect' && <div className="col" style={{ alignItems: 'center', margin: '16px 0' }}><canvas ref={qr} aria-label="QR code to pay" /><p className="muted">Scan with your phone to pay {rs(o.total)}</p></div>}
+          {pay && <FonepayQr payment={pay} amount={o.total} big size={300} onDone={refresh} />}
         </>
       ) : (
         <>
@@ -292,6 +289,7 @@ function Done({ t, result, guest, onNew }: { t: (k: string) => string; result: a
           <div className="pickup" style={{ fontSize: 'clamp(96px, 22vw, 200px)' }} aria-live="polite">{o.pickup_code}</div>
           <h2>Thank you, {guest.name.split(' ')[0]}.</h2>
           <p className="muted" style={{ fontSize: 20 }}>{o.payment_status === 'unpaid' ? `Pay ${rs(o.total)} at the counter when your number is called.` : o.payment_method === 'pass' ? 'Paid with your pass.' : 'Paid. See you at the counter.'}</p>
+          {o.handover_code && <div className="card flat" style={{ display: 'inline-block', padding: '12px 36px', margin: '12px 0' }}><p className="label">Your pickup code</p><div style={{ fontSize: 64, fontWeight: 700, letterSpacing: 12 }}>{o.handover_code}</div><p className="muted">Say it at the counter to collect your coffee.</p></div>}
           <p className="muted">Your coffee in 90 seconds.</p>
         </>
       )}

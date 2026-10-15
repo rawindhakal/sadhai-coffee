@@ -10,7 +10,7 @@ import { SetupChecklist } from '../studio';
 import { useAuth } from '@/lib/auth';
 
 const qs = (o: Record<string, any>) => { const p = Object.entries(o).filter(([, v]) => v); return p.length ? '?' + p.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&') : ''; };
-const PAY_COLORS: Record<string, string> = { cash: '#5A3322', esewa: '#2F5D46', khalti: '#7C97A6', fonepay: '#F2A81D', pass: '#A81F2A' };
+const PAY_COLORS: Record<string, string> = { cash: '#5A3322', fonepay: '#F2A81D', pass: '#A81F2A', esewa: '#2F5D46', khalti: '#7C97A6' };
 
 /* ============================== Overview ============================== */
 export function OverviewSection() {
@@ -38,7 +38,7 @@ export function OverviewSection() {
         <Kpi label="Orders" value={t.orders.toLocaleString()} delta={pctDelta(t.orders, p.orders)} spark={sp('orders')} onClick={() => go('orders')} />
         <Kpi label="Cups" value={t.cups.toLocaleString()} delta={pctDelta(t.cups, p.cups)} spark={sp('cups')} hint={`${t.cups_per_day} a day`} />
         <Kpi label="Average ticket" value={rs(t.avg_ticket)} delta={pctDelta(t.avg_ticket, p.avg_ticket)} />
-        <Kpi label="Gross margin" value={`${Math.round((t.gross_margin / Math.max(1, t.revenue)) * 100)}%`} hint={`${rs(t.gross_margin)} after food cost`} />
+        {t.gross_margin != null && <Kpi label="Gross margin" value={`${Math.round((t.gross_margin / Math.max(1, t.revenue)) * 100)}%`} hint={`${rs(t.gross_margin)} after food cost`} />}
         <Kpi label="Through app or QR" value={`${t.app_share_pct}%`} hint="of all orders" />
         {o.labour && <Kpi label="Staff hours" value={`${Math.round(o.labour.hours)} h`} hint={o.labour.sales_per_hour != null ? `${rs(o.labour.sales_per_hour)} sales an hour${o.labour.cost_pct != null ? ` · pay is ${o.labour.cost_pct}% of sales` : ''}` : undefined} onClick={() => go('staff')} />}
       </div>
@@ -91,9 +91,9 @@ export function OverviewSection() {
       </div>
 
       <div className="panel"><div className="ph"><h3>Best sellers</h3></div>
-        <DataTable csvName="best-sellers" rows={o.top_products.map((p: any) => ({ id: p.name, ...p, margin: p.revenue ? Math.round(((p.revenue - p.cost) / p.revenue) * 100) : 0 }))} pageSize={10}
+        <DataTable csvName="best-sellers" rows={o.top_products.map((p: any) => ({ id: p.name, ...p, margin: p.revenue && p.cost != null ? Math.round(((p.revenue - p.cost) / p.revenue) * 100) : null }))} pageSize={10}
           cols={[{ key: 'name', label: 'Item', sort: (r: any) => r.name, render: (r: any) => <strong>{r.name}</strong> }, { key: 'qty', label: 'Sold', num: true, sort: (r: any) => r.qty, render: (r: any) => r.qty.toLocaleString() },
-            { key: 'revenue', label: 'Sales', num: true, sort: (r: any) => r.revenue, render: (r: any) => rs(r.revenue) }, { key: 'margin', label: 'Margin', num: true, sort: (r: any) => r.margin, render: (r: any) => <span style={{ color: r.margin < 55 ? 'var(--cherry)' : undefined }}>{r.margin}%</span> }]} />
+            { key: 'revenue', label: 'Sales', num: true, sort: (r: any) => r.revenue, render: (r: any) => rs(r.revenue) }, ...(o.partner ? [] : [{ key: 'margin', label: 'Margin', num: true, sort: (r: any) => r.margin, render: (r: any) => <span style={{ color: r.margin < 55 ? 'var(--cherry)' : undefined }}>{r.margin}%</span> }])]} />
       </div>
     </div>
   );

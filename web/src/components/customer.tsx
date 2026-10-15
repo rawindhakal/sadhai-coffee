@@ -8,7 +8,7 @@ import { LangToggle } from '@/lib/i18n';
 import { rs } from '@/lib/api';
 import { Icon } from './icons';
 
-export const PAY_LABEL: Record<string, string> = { cash: 'Cash at counter', esewa: 'eSewa', khalti: 'Khalti', fonepay: 'Fonepay', pass: '10-cup pass' };
+export const PAY_LABEL: Record<string, string> = { cash: 'Cash at counter', fonepay: 'Fonepay QR', pass: '10-cup pass', esewa: 'eSewa (old)', khalti: 'Khalti (old)' };
 export { LangToggle };
 
 const TABS = [
@@ -52,15 +52,4 @@ export function CustomerShell({ children, bare }: { children: React.ReactNode; b
       </nav>
     </>
   );
-}
-
-/** Hands the customer to the payment provider (live mode). */
-export function startRedirect(p: any) {
-  if (p.mode !== 'redirect') return false;
-  if (p.method === 'GET') { location.href = p.url; return true; }
-  const f = document.createElement('form');
-  f.method = 'POST'; f.action = p.url;
-  Object.entries(p.fields || {}).forEach(([k, v]) => { const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = String(v); f.appendChild(i); });
-  document.body.appendChild(f); f.submit();
-  return true;
 }

@@ -1,9 +1,10 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, ago, fmtTime, rs } from '@/lib/api';
-import { useEvents } from '@/lib/auth';
+import { useAuth, useEvents } from '@/lib/auth';
 import { Empty, ErrorNote, Field, Loading, Modal, Stat, Status, Tabs, useData, useToast } from './ui';
 import { CountPanel, TransfersPanel } from './inventory';
+import { FonepayQr } from './fonepay';
 import { MyShift } from './people';
 
 /** Station workspace. Staff are pinned to their station; managers/owners pass stationId. */
@@ -63,8 +64,17 @@ function Queue({ q, target, onChange }: { q: string; target: number; onChange: (
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, []);
   useEvents((ev) => { if (ev === 'order_new') beep(); if (['order_new', 'order'].includes(ev)) { reload(); onChange(); } });
 
-  async function move(id: string, status: string) {
-    try { await api(`/station/orders/${id}/status${q}`, { method: 'POST', body: { status } }); reload(); onChange(); setFound(null); } catch (e: any) { toast(e.message, true); }
+  const { user } = useAuth();
+  const [handing, setHanding] = useState<any>(null);
+  const [code, setCode] = useState('');
+  const [reason, setReason] = useState('');
+  async function move(id: string, status: string, extra: any = {}) {
+    try { await api(`/station/orders/${id}/status${q}`, { method: 'POST', body: { status, ...extra } }); reload(); onChange(); setFound(null); return true; } catch (e: any) { toast(e.message, true); return false; }
+  }
+  // Hand-over: the customer says the 4-digit code from their phone or kiosk screen.
+  function startHandover(o: any) { if (o.has_code && o.channel !== 'counter') { setCode(''); setReason(''); setHanding(o); } else move(o.id, 'picked_up'); }
+  async function finishHandover(withReason = false) {
+    if (await move(handing.id, 'picked_up', withReason ? { reason } : { code })) setHanding(null);
   }
   async function pay(id: string) { try { await api(`/station/orders/${id}/pay${q}`, { method: 'POST' }); reload(); setFound(null); toast('Cash recorded'); } catch (e: any) { toast(e.message, true); } }
   async function lookup(e: React.FormEvent) {
@@ -84,24 +94,41 @@ function Queue({ q, target, onChange }: { q: string; target: number; onChange: (
             <div key={st} className="kcol" aria-label={label}>
               <div className="row between"><h4>{label}</h4><span className="chip">{list.length}</span></div>
               {!list.length && <p className="small muted center" style={{ padding: 16 }}>Nothing here.</p>}
-              {list.map((o) => <Ticket key={o.id} o={o} target={target} move={move} pay={pay} />)}
+              {list.map((o) => <Ticket key={o.id} o={o} target={target} move={move} pay={pay} handover={startHandover} />)}
             </div>
           );
         })}
       </div>
       {found && (
         <Modal title={`Order ${found.pickup_code}`} onClose={() => setFound(null)}>
-          <Ticket o={found} target={target} move={move} pay={pay} bare />
+          <Ticket o={found} target={target} move={move} pay={pay} handover={startHandover} bare />
+        </Modal>
+      )}
+      {handing && (
+        <Modal title={`Hand over ${handing.pickup_code}`} onClose={() => setHanding(null)}>
+          <div className="col">
+            <p>Ask the customer for their <strong>4-digit pickup code</strong>. It is on their phone or on the kiosk screen.</p>
+            {handing.payment_status === 'unpaid' && handing.total > 0 && <p className="err">Collect {rs(handing.total)} cash first.</p>}
+            <input inputMode="numeric" autoFocus maxLength={4} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} aria-label="Pickup code" style={{ fontSize: 36, letterSpacing: 12, textAlign: 'center' }} />
+            <button className="btn primary lg" disabled={code.length !== 4} onClick={() => finishHandover(false)}>Check code and hand over</button>
+            {['manager', 'owner'].includes(user?.role || '') && (
+              <div className="card flat col">
+                <span className="label">No code? Manager only</span>
+                <input placeholder="Why (for example: lost phone, showed ID)" value={reason} onChange={(e) => setReason(e.target.value)} />
+                <button className="btn ghost" disabled={reason.trim().length < 3} onClick={() => finishHandover(true)}>Hand over without the code</button>
+              </div>
+            )}
+          </div>
         </Modal>
       )}
     </>
   );
 }
 
-function Ticket({ o, target, move, pay, bare }: any) {
+function Ticket({ o, target, move, pay, handover, bare }: any) {
   const secs = Math.floor((Date.now() - new Date(o.status === 'ready' ? o.ready_at : o.created_at).getTime()) / 1000);
   const late = ['placed', 'preparing'].includes(o.status) && secs > target;
-  const next: Record<string, [string, string]> = { placed: ['preparing', 'Start'], preparing: ['ready', 'Ready'], ready: ['picked_up', 'Handed over'] };
+  const next: Record<string, [string, string]> = { placed: ['preparing', 'Accept and start'], preparing: ['ready', 'Mark prepared'], ready: ['picked_up', 'Hand over'] };
   return (
     <div className={`ticket ${late ? 'late' : ''}`} style={bare ? { border: 0, padding: 0 } : undefined}>
       <div className="row between">
@@ -118,9 +145,9 @@ function Ticket({ o, target, move, pay, bare }: any) {
       <div className="row between small"><span>{o.customer_name || o.user_name || 'Walk-in'}</span><span><Status s={o.payment_status} /> {rs(o.total)}</span></div>
       {o.status === 'ready' && o.payment_status === 'unpaid' && o.total > 0 && <p className="small err" style={{ margin: '6px 0' }}>Collect {rs(o.total)} cash at hand-over.</p>}
       <div className="row" style={{ marginTop: 10 }}>
-        {next[o.status] && <button className="btn primary grow" onClick={() => move(o.id, next[o.status][0])}>{next[o.status][1]}</button>}
+        {next[o.status] && <button className="btn primary grow" onClick={() => (o.status === 'ready' ? handover(o) : move(o.id, next[o.status][0]))}>{next[o.status][1]}</button>}
         {o.payment_status === 'unpaid' && o.total > 0 && o.status !== 'cancelled' && <button className="btn sm" onClick={() => pay(o.id)}>Got cash</button>}
-        {['placed', 'preparing'].includes(o.status) && <button className="btn danger sm" onClick={() => confirm(`Cancel ${o.pickup_code}?`) && move(o.id, 'cancelled')}>Cancel</button>}
+        {['placed', 'preparing'].includes(o.status) && <button className="btn danger sm" onClick={() => { const r = prompt(`Why are you declining ${o.pickup_code}? The customer is told, and paid orders are refunded.`); if (r && r.trim().length >= 3) move(o.id, 'cancelled', { reason: r.trim() }); }}>{o.status === 'placed' ? 'Decline' : 'Cancel'}</button>}
       </div>
     </div>
   );
@@ -136,6 +163,7 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
   const [offer, setOffer] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<any>(null);
+  const [qrPay, setQrPay] = useState<any>(null);
   const total = cart.reduce((a, l) => a + l.unit * l.qty, 0);
 
   async function find() { const v = phone.trim(); const key = v.toUpperCase().startsWith('SP-') ? 'pass_code' : 'phone'; try { setCust(await api(`/station/customers/lookup${q ? q + '&' : '?'}${key}=${encodeURIComponent(v)}`)); } catch (e: any) { toast(e.message, true); setCust(null); } }
@@ -146,7 +174,9 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
       if (cust) body.customer_phone = cust.phone;
       if (offer && offer !== 'pass') body.coupon_id = offer;
       const out = await api(`/station/orders`, { method: 'POST', body });
-      toast(`Order ${out.order.pickup_code} · ${rs(out.order.total)}`); setCart([]); setCust(null); setPhone(''); onDone();
+      setCart([]); setCust(null); setPhone('');
+      if (out.payment) { setQrPay(out); return; }
+      toast(`Order ${out.order.pickup_code} · ${rs(out.order.total)}`); onDone();
     } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
   }
   async function sellPass() {
@@ -180,11 +210,16 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
             </div>
           </div>
         )}
-        {offer !== 'pass' && <div className="row wrap">{['cash', 'esewa', 'khalti', 'fonepay'].map((m) => <button key={m} className={`btn sm ${method === m ? 'primary' : 'ghost'}`} onClick={() => setMethod(m)}>{m}</button>)}</div>}
+        {offer !== 'pass' && <div className="row wrap">{['cash', 'fonepay'].map((m) => <button key={m} className={`btn sm ${method === m ? 'primary' : 'ghost'}`} onClick={() => setMethod(m)}>{m === 'cash' ? 'Cash' : 'Fonepay QR'}</button>)}</div>}
         <div className="row between"><strong>Total</strong><strong style={{ fontSize: 24 }}>{rs(total)}</strong></div>
-        <p className="small muted">{method === 'cash' && offer !== 'pass' ? 'Collect cash now.' : 'Confirm the payment on the customer’s phone or QR before you tap.'}</p>
+        <p className="small muted">{method === 'cash' && offer !== 'pass' ? 'Collect cash now.' : method === 'fonepay' && offer !== 'pass' ? 'A QR appears for the customer to scan. The order goes to the bar only after Fonepay confirms.' : 'Pays from the pass.'}</p>
         <button className="btn primary lg" disabled={!cart.length || busy} onClick={place}>{busy ? 'Placing…' : 'Take order'}</button>
       </div>
+      {qrPay && (
+        <Modal title={`Pay for ${qrPay.order.pickup_code}`} onClose={() => { setQrPay(null); onDone(); }}>
+          <FonepayQr payment={qrPay.payment} amount={qrPay.order.total} onDone={(s) => { toast(s === 'paid' ? `Paid. ${qrPay.order.pickup_code} is on the queue` : 'Payment failed. Nothing was charged', s !== 'paid'); setQrPay(null); onDone(); }} />
+        </Modal>
+      )}
       {picking && <PosItem p={picking} onClose={() => setPicking(null)} onAdd={(l: any) => { setCart([...cart, l]); setPicking(null); }} />}
     </div>
   );

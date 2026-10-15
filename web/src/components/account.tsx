@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { api, fmtDate, fmtDateTime, rs } from '@/lib/api';
 import { useAuth, useEvents, useRequireRole } from '@/lib/auth';
 import { Empty, ErrorNote, Field, Loading, Modal, Status, Tabs, useData, useToast } from './ui';
-import { CustomerShell, PAY_LABEL, startRedirect } from './customer';
+import { CustomerShell, PAY_LABEL } from './customer';
+import { FonepayQr } from './fonepay';
 import { useI18n } from '@/lib/i18n';
 import { disableWebPush, enableWebPush, pushState } from '@/lib/push';
 
@@ -40,6 +41,7 @@ export function PassTab() {
   const cfg = useData<any>('/config');
   const toast = useToast();
   const [buy, setBuy] = useState(false);
+  const [pay, setPay] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const list = passes.data || [];
   const live = list.filter((p) => p.status === 'active' && p.remaining > 0).sort((a, b) => a.queue_position - b.queue_position);
@@ -48,9 +50,7 @@ export function PassTab() {
     setBusy(true);
     try {
       const out = await api('/passes', { method: 'POST', body: { payment_method: method } });
-      if (out.payment?.mode === 'redirect') { startRedirect(out.payment); return; }
-      await api(`/payments/${out.payment.payment_id}/confirm`, { method: 'POST', body: {} });
-      toast(`Pass ${out.pass.code} is ready`); setBuy(false); passes.reload();
+      setPay({ ...out.payment, code: out.pass.code });
     } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
   }
   const total = live.reduce((a, p) => a + p.remaining, 0);
@@ -74,10 +74,15 @@ export function PassTab() {
         {!live.length && <Empty>No active pass yet.</Empty>}
       </div>
       {past.length > 0 && <><h3 style={{ margin: '24px 0 8px' }}>Past passes</h3><div className="col">{past.map((p) => <div key={p.id} className="card flat row between"><span><strong>{p.code}</strong> <span className="muted small">{rs(p.price_paid)} · {fmtDate(p.purchased_at)}</span></span><Status s={p.status} /></div>)}</div></>}
-      {buy && (
+      {pay && (
+        <Modal title="Pay for your pass" onClose={() => { setPay(null); setBuy(false); passes.reload(); }}>
+          <FonepayQr payment={pay} onDone={(s) => { toast(s === 'paid' ? `Pass ${pay.code} is ready` : 'The payment did not go through', s !== 'paid'); setPay(null); setBuy(false); passes.reload(); }} />
+        </Modal>
+      )}
+      {buy && !pay && (
         <Modal title="Buy a 10-cup pass" onClose={() => setBuy(false)}>
           <p className="muted">Pay {rs(cfg.data?.pass.price)} with:</p>
-          <div className="col" style={{ marginTop: 12 }}>{['esewa', 'khalti', 'fonepay'].map((m) => <button key={m} className="btn block" disabled={busy} onClick={() => purchase(m)}>{PAY_LABEL[m]}</button>)}</div>
+          <div className="col" style={{ marginTop: 12 }}><button className="btn primary block" disabled={busy} onClick={() => purchase('fonepay')}>Pay with Fonepay QR</button></div>
           <p className="small muted" style={{ marginTop: 12 }}>Prefer cash? Buy it at any station counter. A new pass never starts until you use its first cup.</p>
         </Modal>
       )}

@@ -62,11 +62,11 @@ station.get('/orders/lookup', wrap(async (req, res) => {
 }));
 
 station.post('/orders/:id/status', wrap(async (req, res) => {
-  const { status } = z.object({ status: z.enum(['preparing', 'ready', 'picked_up', 'cancelled']) }).parse(req.body);
+  const { status, code, reason } = z.object({ status: z.enum(['preparing', 'ready', 'picked_up', 'cancelled']), code: z.string().max(8).optional(), reason: z.string().max(120).optional() }).parse(req.body);
   const o = (await query('SELECT station_id FROM orders WHERE id=$1', [req.params.id])).rows[0];
   if (!o) throw notFound('Order not found');
   await assertStationAccess(req.user, o.station_id);
-  res.json(await advanceOrder(req.params.id, status, req.user));
+  res.json(await advanceOrder(req.params.id, status, req.user, { code, override: reason }));
 }));
 
 // Walk-in / counter order. Optional customer phone links offers, pass and beans.
@@ -74,7 +74,7 @@ station.post('/orders', wrap(async (req, res) => {
   const stationId = await sid(req);
   const b = z.object({
     items: z.array(z.object({ product_id: z.string().uuid(), qty: z.number().int().min(1).max(10).default(1), option_ids: z.array(z.string().uuid()).default([]) })).min(1),
-    payment_method: z.enum(['cash', 'esewa', 'khalti', 'fonepay', 'pass']).default('cash'),
+    payment_method: z.enum(['cash', 'fonepay', 'pass']).default('cash'),
     customer_phone: z.string().optional(), customer_name: z.string().max(40).optional(),
     coupon_id: z.string().uuid().optional(), promo_code: z.string().optional(), note: z.string().max(200).optional(),
   }).parse(req.body);
@@ -134,7 +134,7 @@ station.get('/summary', wrap(async (req, res) => {
                   count(*) FILTER (WHERE status='ready')::int AS ready FROM orders WHERE station_id=$1 AND status IN ('placed','preparing','ready')`, [id]),
     query(`SELECT COALESCE(sum(p.amount),0)::int AS cash FROM payments p WHERE p.station_id=$1 AND p.provider='cash' AND p.status='paid'
              AND p.settled_at >= ((now() AT TIME ZONE 'Asia/Kathmandu')::date::timestamp AT TIME ZONE 'Asia/Kathmandu')`, [id]),
-    query(`SELECT id, name, code, is_open, accepting_orders, breakeven_cups, prep_target_seconds FROM stations WHERE id=$1`, [id]),
+    query(`SELECT id, name, code, is_open, accepting_orders, breakeven_cups, prep_target_seconds, operator_type FROM stations WHERE id=$1`, [id]),
   ]);
   const closed = (await query(`SELECT * FROM cash_closes WHERE station_id=$1 AND business_date=(now() AT TIME ZONE 'Asia/Kathmandu')::date`, [id])).rows[0] || null;
   res.json({ station: st.rows[0], today: t.rows[0], queue: q.rows[0], expected_cash: c.rows[0].cash, cash_close: closed });

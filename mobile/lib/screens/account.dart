@@ -6,6 +6,7 @@ import '../version.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'fonepay.dart';
 import 'package:provider/provider.dart';
 import '../api.dart';
 import '../state.dart';
@@ -50,6 +51,7 @@ class _PassPanelState extends State<PassPanel> {
   List<Map> _passes = [];
   bool _loaded = false;
   Map<String, dynamic>? _pass;
+  num? get _price => _pass?['price'] as num?;
   @override
   void initState() { super.initState(); _load(); }
   Future<void> _load() async {
@@ -103,21 +105,19 @@ class _PassPanelState extends State<PassPanel> {
 
   Future<void> _buy() async {
     final m = await showModalBottomSheet<String>(context: context, backgroundColor: Brand.surfaceRaised, builder: (c) => SafeArea(child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Pay Rs 1,200 with', style: display(22)),
+      Text('Pay ${rs(_price ?? 900)} with', style: display(22)),
       const SizedBox(height: 12),
-      for (final m in ['esewa', 'khalti', 'fonepay']) Padding(padding: const EdgeInsets.only(bottom: 8), child: OutlinedButton(onPressed: () => Navigator.pop(c, m), child: Center(child: Text(payLabel[m]!)))),
+      Padding(padding: const EdgeInsets.only(bottom: 8), child: FilledButton(onPressed: () => Navigator.pop(c, 'fonepay'), child: const Center(child: Text('Fonepay QR')))),
       const Text('Prefer cash? Buy it at any station counter.', style: TextStyle(color: Brand.inkMuted)),
     ]))));
     if (m == null || !mounted) return;
     try {
       final out = await Api.instance.post('/passes', {'payment_method': m});
       final pay = out['payment'] as Map;
-      if (pay['mode'] == 'sandbox') {
-        await Api.instance.post('/payments/${pay['payment_id']}/confirm');
-        if (mounted) toast(context, 'Pass ${out['pass']['code']} is ready');
-      } else {
-        await launchUrl(Uri.parse((pay['start_url'] ?? pay['url']) as String), mode: LaunchMode.externalApplication);
-      }
+      if (!mounted) return;
+      final r = await showFonepay(context, pay, (pay['amount'] ?? _price ?? 900) as num);
+      if (mounted && r == 'paid') toast(context, 'Pass ${out['pass']['code']} is ready');
+      if (mounted && r == 'failed') toast(context, 'The payment did not go through', bad: true);
       await _load();
     } on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); }
   }

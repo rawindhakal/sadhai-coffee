@@ -19,7 +19,19 @@ import { extras, liveBoard, alerts, customerInsights, customerDetail, search } f
 
 // Shared by managers (their stations) and owners (all stations).
 export const admin = Router();
-admin.use(authenticate, requireRole('manager', 'owner'));
+admin.use(authenticate, requireRole('manager', 'owner', 'partner'));
+
+// A partner cafe owner sees their own cafe: sales, orders, stock, ratings, their statement and their counter logins.
+// They cannot change prices, offers, recipes or anything that belongs to the whole network.
+const PARTNER_OK = [
+  ['GET', /^\/(stations|overview|live|alerts|orders|inventory|cash-closes|reviews|partner-statement|scorecard|staff|search)(\/|$)/],
+  ['GET', /^\/stations\/[^/]+\/products$/],
+  ['POST', /^\/staff$/], ['POST', /^\/inventory\/[^/]+\/[^/]+$/], ['PATCH', /^\/inventory\/[^/]+\/[^/]+$/], ['PATCH', /^\/staff\/[^/]+$/], ['PATCH', /^\/stations\/[^/]+$/],
+];
+admin.use((req, _res, next) => {
+  if (req.user.role !== 'partner') return next();
+  return PARTNER_OK.some(([m, re]) => m === req.method && re.test(req.path)) ? next() : next(forbidden('Partner cafe owners can view this but not change it'));
+});
 
 async function scoped(req) {
   const all = await scopeStations(req.user);
@@ -63,6 +75,12 @@ admin.get('/overview', wrap(async (req, res) => {
   const r = dateRange(req.query.from, req.query.to);
   const l = await labour(ids, r.start, r.end);
   // Pay rates are the owner's business: managers see hours, the owner also sees cost.
+  if (req.user.role === 'partner') {
+    // Costs, margins and growth spend are Sadhai's own numbers. A partner sees sales, orders and stock.
+    const strip = ({ food_cost, gross_margin, ...t } = {}) => t;
+    return res.json({ ...o, ...x, totals: strip(o.totals), previous: strip(o.previous), stations: o.stations?.map(strip),
+      top_products: o.top_products?.map(({ cost, ...p }) => p), labour: null, partner: true });
+  }
   res.json({ ...o, ...x, labour: { hours: l.hours, cost: req.user.role === 'owner' ? l.cost : null, sales_per_hour: l.hours ? Math.round(o.totals.revenue / l.hours) : null, cost_pct: req.user.role === 'owner' && o.totals.revenue ? Math.round((l.cost / o.totals.revenue) * 1000) / 10 : null } });
 }));
 admin.get('/live', wrap(async (req, res) => res.json(await liveBoard(await scoped(req)))));
@@ -70,7 +88,8 @@ admin.get('/alerts', wrap(async (req, res) => res.json(await alerts(await scoped
 admin.get('/search', wrap(async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (q.length < 2) return res.json({ orders: [], customers: [], products: [] });
-  res.json(await search(await scoped(req), q));
+  const found = await search(await scoped(req), q);
+  res.json(req.user.role === 'partner' ? { ...found, customers: [] } : found);
 }));
 admin.get('/customers/insights', wrap(async (req, res) => res.json(await customerInsights(req.query.from, req.query.to))));
 admin.get('/customers/:id', wrap(async (req, res) => {
@@ -87,6 +106,7 @@ admin.get('/orders/:id', wrap(async (req, res) => {
     query(`SELECT provider, amount, status, provider_ref, created_at, settled_at FROM payments WHERE order_id=$1 ORDER BY created_at`, [o.id]),
   ]);
   const staff = await query(`SELECT (SELECT name FROM users WHERE id=$1) AS accepted_by, (SELECT name FROM users WHERE id=$2) AS ready_by`, [o.accepted_by, o.ready_by]);
+  if (req.user.role === 'partner') { delete o.user_phone; delete o.customer_phone; }
   res.json({ ...o, timeline: timeline.rows, payments: payments.rows, ...staff.rows[0] });
 }));
 
@@ -147,7 +167,8 @@ admin.post('/staff', wrap(async (req, res) => {
     `INSERT INTO users(name, phone, password_hash, role, station_id) VALUES ($1,$2,$3,'station',$4) RETURNING id, name, phone, role, station_id, active`,
     [b.name, normalizePhone(b.phone), await bcrypt.hash(b.password, 10), b.station_id],
   );
-  await query(`INSERT INTO staff_profiles(user_id, employee_code, joined_on) VALUES ($1, 'SC-' || lpad(((SELECT count(*) FROM staff_profiles) + 1)::text, 4, '0'), current_date) ON CONFLICT DO NOTHING`, [rows[0].id]);
+  const company = (await query(`SELECT 1 FROM stations WHERE id=$1 AND operator_type='company'`, [b.station_id])).rowCount;
+  if (company) await query(`INSERT INTO staff_profiles(user_id, employee_code, joined_on) VALUES ($1, 'SC-' || lpad(((SELECT count(*) FROM staff_profiles) + 1)::text, 4, '0'), current_date) ON CONFLICT DO NOTHING`, [rows[0].id]);
   await audit(req.user.id, 'staff.create', 'user', rows[0].id);
   res.status(201).json(rows[0]);
 }));

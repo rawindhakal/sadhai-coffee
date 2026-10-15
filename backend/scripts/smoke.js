@@ -8,6 +8,8 @@ async function call(method, path, body, token) {
   let j; try { j = JSON.parse(t); } catch { j = t; }
   return { status: r.status, body: j };
 }
+// The customer says a 4-digit code at pickup. Smoke helper: the code as the customer sees it.
+const codeOf = async (orderId, token) => (await call('GET', `/orders/${orderId}`, null, token)).body.handover_code;
 const login = async (phone) => (await call('POST', '/auth/login', { phone, password: 'Sadhai@123' })).body;
 
 const owner = await login('9800000001');
@@ -54,7 +56,7 @@ ok(reuse.status === 409, 'coupon cannot be reused');
 const queue = (await call('GET', '/station/orders', null, staff.access_token)).body;
 ok(queue.some((o) => o.id === o1.order.id), 'station queue shows the order');
 for (const s of ['preparing', 'ready', 'picked_up']) {
-  const r = await call('POST', `/station/orders/${o1.order.id}/status`, { status: s }, staff.access_token);
+  const r = await call('POST', `/station/orders/${o1.order.id}/status`, { status: s, code: s === 'picked_up' ? await codeOf(o1.order.id, T) : undefined }, staff.access_token);
   ok(r.status === 200 && r.body.status === s, `station -> ${s}`);
 }
 const refAfter = (await call('GET', '/coupons', null, T)).body;
@@ -66,8 +68,8 @@ ok((await call('POST', `/orders/${o1.order.id}/rate`, { rating: 5, note: 'Fast' 
 
 // digital payment (sandbox) with percent coupon
 const pct = refAfter.find((c) => c.kind === 'pct');
-const o2 = (await call('POST', '/orders', { station_id: st.id, items: [{ ...item, qty: 2 }], payment_method: 'esewa', coupon_id: pct.id }, T)).body;
-ok(o2.order.status === 'awaiting_payment' && o2.payment.mode === 'sandbox', 'esewa order awaits payment');
+const o2 = (await call('POST', '/orders', { station_id: st.id, items: [{ ...item, qty: 2 }], payment_method: 'fonepay', coupon_id: pct.id }, T)).body;
+ok(o2.order.status === 'awaiting_payment' && o2.payment.mode === 'sandbox' && o2.payment.qr_message, 'Fonepay order awaits payment and shows a QR');
 ok(o2.order.discount === Math.floor(o2.order.subtotal * 0.3), '30% coupon applied');
 const paid = (await call('POST', `/payments/${o2.payment.payment_id}/confirm`, {}, T)).body;
 ok(paid.order.status === 'placed' && paid.order.payment_status === 'paid', 'sandbox payment confirmed -> placed');
@@ -77,7 +79,7 @@ const couponBack = (await call('GET', '/coupons', null, T)).body.find((c) => c.i
 ok(couponBack.status === 'active', 'coupon restored on cancel');
 
 // pass: buy, pay, redeem
-const pp = (await call('POST', '/passes', { payment_method: 'khalti' }, T)).body;
+const pp = (await call('POST', '/passes', { payment_method: 'fonepay' }, T)).body;
 await call('POST', `/payments/${pp.payment.payment_id}/confirm`, {}, T);
 const passes = (await call('GET', '/passes', null, T)).body;
 ok(passes[0]?.status === 'active' && passes[0].remaining === 10, '10-cup pass active');
@@ -134,7 +136,7 @@ ok((await call('GET', '/admin/partner-statement', null, mgr2.access_token)).body
 // unique passes used one after another
 const myPasses = (await call('GET', '/passes', null, T)).body;
 ok(/^SP-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(myPasses[0].code), `pass has a unique code (${myPasses[0].code})`);
-const pp2 = (await call('POST', '/passes', { payment_method: 'khalti' }, T)).body;
+const pp2 = (await call('POST', '/passes', { payment_method: 'fonepay' }, T)).body;
 await call('POST', `/payments/${pp2.payment.payment_id}/confirm`, {}, T);
 const two = (await call('GET', '/passes', null, T)).body.filter((p) => p.status === 'active');
 ok(two.length === 2 && new Set(two.map((p) => p.code)).size === 2, 'a customer can hold two passes with different codes');
@@ -161,7 +163,8 @@ ok((await call('POST', '/kiosk/orders', { ...kBase, customer_phone: '9801112223'
 ok((await call('GET', `/kiosk/pass-check?code=${code}&phone=${phone}`, null, staff.access_token)).body.remaining === 19, 'kiosk: pass check shows cups left');
 const k2 = await call('POST', '/kiosk/orders', { ...kBase, customer_name: 'Pass Owner', customer_phone: phone, payment: 'pass', pass_code: code }, staff.access_token);
 ok(k2.status === 201 && k2.body.order.total === 0 && k2.body.order.payment_method === 'pass', 'kiosk: order paid with a pass code');
-const k3 = await call('POST', '/kiosk/orders', { ...kBase, payment: 'esewa' }, staff.access_token);
+const k3 = await call('POST', '/kiosk/orders', { ...kBase, payment: 'fonepay' }, staff.access_token);
+ok(k3.body.payment.qr_message && k3.body.order.handover_code, 'kiosk: Fonepay QR and a handover code for the guest');
 ok(k3.body.order.status === 'awaiting_payment' && k3.body.payment.mode === 'sandbox', 'kiosk: digital payment waits for confirmation');
 await call('POST', `/payments/${k3.body.payment.payment_id}/confirm`, {}, staff.access_token);
 ok((await call('GET', `/kiosk/orders/${k3.body.order.id}`, null, staff.access_token)).body.status === 'placed', 'kiosk: paid order reaches the queue');
@@ -170,6 +173,7 @@ ok(qk.some((o) => o.id === k1.body.order.id && o.customer_name === 'Kiosk Guest'
 
 // push notifications (dry-run without Firebase credentials)
 ok((await call('POST', '/me/push-token', { token: 'dev-android-token-1234567890', platform: 'android', app_version: '1.2.0' }, T)).status === 201, 'device token registered');
+await call('POST', `/station/orders/${k2.body.order.id}/status`, { status: 'preparing' }, staff.access_token);
 await call('POST', `/station/orders/${k2.body.order.id}/status`, { status: 'ready' }, staff.access_token);
 await new Promise((r) => setTimeout(r, 500));
 const pst = (await call('GET', '/admin/push/status', null, owner.access_token)).body;
@@ -185,7 +189,7 @@ ok(camp2.body.result.sent === 0, 'daily promo cap stops a second marketing push'
 await call('PATCH', '/me', { notif_offers: false }, T);
 const auto = (await call('POST', '/admin/push/automations/run', {}, owner.access_token)).body;
 ok(typeof auto.pass_expiry === 'number', 'automations run');
-await call('POST', `/station/orders/${k2.body.order.id}/status`, { status: 'picked_up' }, staff.access_token);
+await call('POST', `/station/orders/${k2.body.order.id}/status`, { status: 'picked_up', code: k2.body.order.handover_code }, staff.access_token);
 
 // recipes, costing and central inventory
 const costing = (await call('GET', '/admin/costing', null, owner.access_token)).body;
@@ -248,18 +252,19 @@ const amrCard = cards.find((c) => c.sku === 'AMR');
 ok(amrCard && amrCard.lines.some((l) => l.name.startsWith('Coffee') && l.qty === 16) && amrCard.recipe_method && !JSON.stringify(cards).includes('unit_cost'), 'recipe cards show the standard recipe and no costs');
 
 const ints = (await call('GET', '/owner/integrations', null, owner.access_token)).body;
-const esk = ints.find((i) => i.key === 'esewa_secret');
-ok(esk.secret && esk.value === null && esk.masked, 'secrets are masked, never sent to the browser');
+const esk = ints.find((i) => i.key === 'fonepay_secret_key');
+ok(esk.secret && esk.value === null, 'secrets are never sent to the browser');
 ok((await call('GET', '/owner/integrations', null, mgr.access_token)).status === 403, 'only the owner can see integrations');
 ok((await call('PUT', '/owner/integrations', { values: { payment_mode: 'maybe' } }, owner.access_token)).status === 400, 'invalid setting values are refused');
-const put = await call('PUT', '/owner/integrations', { values: { khalti_secret: 'live_secret_key_abcd1234', support_email: 'help@sadhai.test' } }, owner.access_token);
-const kh = put.body.settings.find((i) => i.key === 'khalti_secret');
+const put = await call('PUT', '/owner/integrations', { values: { fonepay_secret_key: 'live_secret_key_abcd1234', support_email: 'help@sadhai.test' } }, owner.access_token);
+const kh = put.body.settings.find((i) => i.key === 'fonepay_secret_key');
 ok(put.status === 200 && kh.is_set && kh.masked.endsWith('1234') && !JSON.stringify(put.body).includes('abcd1234') && kh.source === 'dashboard', 'owner saves a key from the dashboard; it comes back masked');
 ok((await call('GET', '/config')).body.site.support_email === 'help@sadhai.test', 'company details are live in the public config');
-ok((await call('POST', '/owner/integrations/test/esewa', {}, owner.access_token)).body.ok === true, 'eSewa check runs');
+const fpTest = (await call('POST', '/owner/integrations/test/fonepay', {}, owner.access_token)).body;
+ok(fpTest.ok === false && /Missing/.test(fpTest.message), 'Fonepay check says what is still missing');
 ok((await call('POST', '/owner/integrations/vapid', {}, owner.access_token)).status === 400, 'existing browser push keys are not replaced without confirmation');
-await call('PUT', '/owner/integrations', { values: { khalti_secret: null, support_email: null } }, owner.access_token);
-ok(!(await call('GET', '/owner/integrations', null, owner.access_token)).body.find((i) => i.key === 'khalti_secret').is_set, 'clearing a key removes it');
+await call('PUT', '/owner/integrations', { values: { fonepay_secret_key: null, support_email: null } }, owner.access_token);
+ok(!(await call('GET', '/owner/integrations', null, owner.access_token)).body.find((i) => i.key === 'fonepay_secret_key').is_set, 'clearing a key removes it');
 
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const up = await call('POST', '/owner/media', { filename: 'sun.png', mime: 'image/png', data: png }, owner.access_token);
@@ -295,7 +300,7 @@ ok(/^\d+$/.test(String((await call('GET', '/config')).body.partner_share_pct)) &
 
 // ---------- staff, rosters, duties, attendance, time off, payroll ----------
 const people = (await call('GET', '/hr/staff', null, owner.access_token)).body;
-ok(people.length === 16 && people.every((p) => p.hourly_rate !== undefined), 'owner sees all 16 staff with pay rates');
+ok(people.length === 8 && people.every((p) => p.hourly_rate !== undefined) && people.every((p) => /Tribhuvan|Teaching/.test(p.station_name)), 'owner sees the 8 Sadhai-run staff with pay rates; partner cafes are not rostered');
 const mgrPeople = (await call('GET', '/hr/staff', null, mgr.access_token)).body;
 ok(mgrPeople.length >= 8 && mgrPeople.every((p) => p.hourly_rate === undefined), 'managers see their staff but not pay rates');
 ok((await call('PATCH', `/hr/staff/${mgrPeople[0].id}`, { hourly_rate: 500 }, mgr.access_token)).status === 403, 'managers cannot change pay rates');
@@ -349,7 +354,7 @@ ok((await call('GET', `/hr/payroll/preview?from=${sDate}&to=${sDate}`, null, mgr
 const lastMonth = pv.length ? null : null;
 const runFrom = new Date(Date.now() + 345 * 60000 - 20 * 864e5).toISOString().slice(0, 10);
 const prev2 = (await call('GET', `/hr/payroll/preview?from=${runFrom}&to=${sDate}`, null, owner.access_token)).body;
-ok(prev2.length >= 10 && prev2.every((l) => Math.abs(l.gross - ((l.regular_minutes / 60) * l.hourly_rate + (l.overtime_minutes / 60) * l.hourly_rate * 1.5)) < 0.01), 'payroll lines add up: regular hours + overtime at 1.5 times');
+ok(prev2.length >= 8 && prev2.every((l) => Math.abs(l.gross - ((l.regular_minutes / 60) * l.hourly_rate + (l.overtime_minutes / 60) * l.hourly_rate * 1.5)) < 0.01), 'payroll lines add up: regular hours + overtime at 1.5 times');
 
 // time off respected by the roster, and decided by the manager
 const tReq = await call('POST', '/hr/me/time-off', { from_date: sDate, to_date: sDate, reason: 'Test' }, ts.access_token);

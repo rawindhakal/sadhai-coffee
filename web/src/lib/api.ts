@@ -1,7 +1,7 @@
 export const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4747';
 const KEY = 'sadhai.auth';
 
-export type User = { id: string; name: string; phone: string; email?: string; role: 'customer' | 'station' | 'manager' | 'owner'; station_id?: string | null; lang: 'en' | 'ne'; referral_code?: string; beans?: number };
+export type User = { id: string; name: string; phone: string; email?: string; role: 'customer' | 'station' | 'manager' | 'owner' | 'partner'; station_id?: string | null; lang: 'en' | 'ne'; referral_code?: string; beans?: number };
 type Stored = { access: string; refresh: string; user: User };
 
 export const store = {
@@ -51,4 +51,4 @@ export const fmtTime = (d: string) => new Date(d).toLocaleTimeString('en-GB', { 
 export const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Kathmandu' });
 export const fmtDateTime = (d: string) => `${fmtDate(d)}, ${fmtTime(d)}`;
 export const ago = (d: string) => { const s = Math.max(0, (Date.now() - new Date(d).getTime()) / 1000); return s < 60 ? `${Math.floor(s)}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`; };
-export const home = (role: string) => ({ customer: '/order', station: '/station', manager: '/manager', owner: '/owner' } as any)[role] || '/';
+export const home = (role: string) => ({ customer: '/order', station: '/station', manager: '/manager', owner: '/owner', partner: '/partner' } as any)[role] || '/';

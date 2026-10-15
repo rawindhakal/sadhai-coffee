@@ -738,3 +738,13 @@ CREATE TABLE IF NOT EXISTS enquiries (
 );
 CREATE INDEX IF NOT EXISTS enquiries_status_idx ON enquiries(status, created_at DESC);
 ALTER TABLE payroll_adjustments ADD COLUMN IF NOT EXISTS run_id uuid REFERENCES payroll_runs(id) ON DELETE SET NULL;
+
+-- ---- v1.4: Fonepay only, handover code, partner role ----
+-- Older rows may still say esewa or khalti. They stay readable in reports, but the API no longer accepts them.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS handover_code text;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS code_attempts int NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS handover_override text;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS picked_up_by uuid REFERENCES users(id);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancel_reason text;
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('customer','station','manager','owner','partner'));

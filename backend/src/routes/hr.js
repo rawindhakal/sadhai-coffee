@@ -21,15 +21,31 @@ const staffRoles = requireRole('station', 'manager', 'owner');
 
 const date = z.string().regex(/^\d{4}-\d\d-\d\d$/);
 const time = z.string().regex(/^\d\d:\d\d$/);
+// Rosters, attendance and payroll cover Sadhai-run stations only. A partner cafe schedules and pays its own people.
+async function companyOnly(ids) {
+  return (await query(`SELECT id FROM stations WHERE id = ANY($1) AND operator_type='company'`, [ids])).rows.map((r) => r.id);
+}
+async function assertCompany(user, stationId) {
+  await assertStationAccess(user, stationId);
+  if (!(await companyOnly([stationId])).length) throw forbidden('This cafe runs its own staff, so Sadhai does not roster or pay them.');
+}
 async function scoped(req) {
   const all = await scopeStations(req.user);
   if (req.query.station_id || req.body?.station_id) {
     const id = req.query.station_id || req.body.station_id;
     if (!all.includes(id)) throw forbidden('This station is not yours');
-    return [id];
+    return companyOnly([id]);
   }
-  return all;
+  return companyOnly(all);
 }
+// Staff at partner cafes have no Sadhai shifts, check-in or payslips.
+hr.use('/me', wrap(async (req, _res, next) => {
+  if (req.user.role === 'station') {
+    const ok = (await query(`SELECT 1 FROM stations WHERE id=$1 AND operator_type='company'`, [req.user.station_id])).rowCount;
+    if (!ok) throw forbidden('Your cafe manages its own staff.');
+  }
+  next();
+}));
 const clean = (row, isOwner) => { if (isOwner) return row; const { hourly_rate, ...rest } = row; return rest; };
 const profileSchema = z.object({
   position: z.enum(['barista', 'cashier', 'supervisor', 'all_rounder']).optional(), skills: z.array(z.enum(['bar', 'counter'])).min(1).optional(),
@@ -53,6 +69,7 @@ hr.get('/staff', managerUp, wrap(async (req, res) => {
 
 hr.post('/staff', ownerOnly, wrap(async (req, res) => {
   const b = z.object({ name: z.string().trim().min(2).max(60), phone: z.string(), password: z.string().min(6).max(72), station_id: z.string().uuid() }).merge(profileSchema).parse(req.body);
+  await assertCompany(req.user, b.station_id);
   const out = await tx(async (db) => {
     const u = (await db.query(`INSERT INTO users(name, phone, password_hash, role, station_id) VALUES ($1,$2,$3,'station',$4) RETURNING id, name, phone, station_id`, [b.name, normalizePhone(b.phone), await bcrypt.hash(b.password, 10), b.station_id])).rows[0];
     const n = (await db.query(`SELECT count(*)::int + 1 AS n FROM staff_profiles`)).rows[0].n;
@@ -70,7 +87,7 @@ hr.patch('/staff/:id', managerUp, wrap(async (req, res) => {
   const b = profileSchema.extend({ station_id: z.string().uuid().optional(), name: z.string().min(2).max(60).optional() }).parse(req.body);
   const u = (await query(`SELECT id, station_id FROM users WHERE id=$1 AND role='station'`, [req.params.id])).rows[0];
   if (!u) throw notFound('Staff member not found');
-  await assertStationAccess(req.user, u.station_id);
+  await assertCompany(req.user, u.station_id);
   if (req.user.role !== 'owner' && (b.hourly_rate !== undefined || b.station_id)) throw forbidden('Only the owner changes pay rates and home stations');
   await tx(async (db) => {
     await db.query('INSERT INTO staff_profiles(user_id) VALUES ($1) ON CONFLICT DO NOTHING', [u.id]);
@@ -89,7 +106,7 @@ hr.get('/templates', managerUp, wrap(async (req, res) => {
   res.json((await query(`SELECT t.*, s.name AS station_name FROM shift_templates t JOIN stations s ON s.id=t.station_id WHERE t.station_id = ANY($1) AND t.active ORDER BY s.name, t.start_time`, [ids])).rows);
 }));
 hr.put('/templates/:stationId', managerUp, wrap(async (req, res) => {
-  await assertStationAccess(req.user, req.params.stationId);
+  await assertCompany(req.user, req.params.stationId);
   const list = z.array(z.object({ name: z.string().min(2).max(30), kind: z.enum(['morning', 'midday', 'evening', 'any']), start_time: time, hours: z.number().min(1).max(12).default(6), min_staff: z.number().int().min(0).max(10), max_staff: z.number().int().min(1).max(12) })).min(1).max(6).parse(req.body);
   await tx(async (db) => {
     await db.query('UPDATE shift_templates SET active=false WHERE station_id=$1', [req.params.stationId]);
@@ -118,7 +135,7 @@ hr.get('/roster', managerUp, wrap(async (req, res) => {
 
 hr.post('/roster/shifts', managerUp, wrap(async (req, res) => {
   const b = z.object({ station_id: z.string().uuid(), user_id: z.string().uuid().nullable().optional(), date, template_id: z.string().uuid().optional(), start: time.optional(), hours: z.number().min(1).max(12).optional(), duty: z.string().max(60).optional(), note: z.string().max(200).optional() }).parse(req.body);
-  await assertStationAccess(req.user, b.station_id);
+  await assertCompany(req.user, b.station_id);
   let start = b.start, hours = b.hours ?? 6, tplId = b.template_id || null;
   if (tplId) { const t = (await query('SELECT * FROM shift_templates WHERE id=$1 AND station_id=$2', [tplId, b.station_id])).rows[0]; if (!t) throw notFound('Shift time not found'); start = String(t.start_time).slice(0, 5); hours = b.hours ?? Number(t.hours); }
   if (!start) throw bad('Choose a shift time or a start time');
@@ -143,7 +160,7 @@ hr.patch('/roster/shifts/:id', managerUp, wrap(async (req, res) => {
   const b = z.object({ user_id: z.string().uuid().nullable().optional(), duty: z.string().max(60).optional(), note: z.string().max(200).optional(), cancel: z.boolean().optional() }).parse(req.body);
   const sh = (await query('SELECT * FROM shifts WHERE id=$1', [req.params.id])).rows[0];
   if (!sh) throw notFound('Shift not found');
-  await assertStationAccess(req.user, sh.station_id);
+  await assertCompany(req.user, sh.station_id);
   if (['checked_in', 'completed'].includes(sh.status)) throw conflict('This shift has already started. Use Adjust hours instead.');
   try {
     if (b.cancel) await query(`UPDATE shifts SET status='cancelled' WHERE id=$1`, [sh.id]);
@@ -165,14 +182,14 @@ hr.patch('/roster/shifts/:id', managerUp, wrap(async (req, res) => {
 hr.post('/roster/auto-assign', managerUp, wrap(async (req, res) => {
   const b = z.object({ station_id: z.string().uuid().optional(), from: date, to: date, replace: z.boolean().default(true) }).parse(req.body);
   if (b.to < b.from || (Date.parse(b.to) - Date.parse(b.from)) / 864e5 > 31) throw bad('Choose a range of up to 31 days');
-  const ids = b.station_id ? (await assertStationAccess(req.user, b.station_id), [b.station_id]) : await scopeStations(req.user);
+  const ids = b.station_id ? (await assertCompany(req.user, b.station_id), [b.station_id]) : await companyOnly(await scopeStations(req.user));
   const out = await autoAssign({ stationIds: ids, from: b.from, to: b.to, replace: b.replace, userId: req.user.id });
   await audit(req.user.id, 'roster.auto', 'roster', null, { from: b.from, to: b.to, created: out.created, unfilled: out.unfilled.length });
   res.json(out);
 }));
 hr.post('/roster/publish', managerUp, wrap(async (req, res) => {
   const b = z.object({ station_id: z.string().uuid().optional(), from: date, to: date }).parse(req.body);
-  const ids = b.station_id ? (await assertStationAccess(req.user, b.station_id), [b.station_id]) : await scopeStations(req.user);
+  const ids = b.station_id ? (await assertCompany(req.user, b.station_id), [b.station_id]) : await companyOnly(await scopeStations(req.user));
   const out = await publish({ stationIds: ids, from: b.from, to: b.to });
   await audit(req.user.id, 'roster.publish', 'roster', null, { from: b.from, to: b.to, ...out });
   res.json(out);
@@ -193,7 +210,7 @@ hr.post('/shifts/:id/adjust', managerUp, wrap(async (req, res) => {
   const b = z.object({ minutes: z.number().int().min(0).max(960), reason: z.string().trim().min(3).max(200), present: z.boolean().optional() }).parse(req.body);
   const sh = (await query('SELECT * FROM shifts WHERE id=$1', [req.params.id])).rows[0];
   if (!sh) throw notFound('Shift not found');
-  await assertStationAccess(req.user, sh.station_id);
+  await assertCompany(req.user, sh.station_id);
   if (['scheduled', 'open', 'cancelled'].includes(sh.status)) throw conflict('This shift has not been worked yet.');
   const locked = (await query(`SELECT 1 FROM payroll_runs WHERE status IN ('approved','paid') AND $1::date BETWEEN period_from AND period_to LIMIT 1`, [sh.shift_date])).rowCount;
   if (locked) throw conflict('Payroll for this date is already approved. Ask the owner.');
@@ -214,7 +231,7 @@ hr.post('/time-off/:id/decide', managerUp, wrap(async (req, res) => {
   const { approve } = z.object({ approve: z.boolean() }).parse(req.body);
   const t = (await query(`SELECT t.*, u.station_id FROM time_off t JOIN users u ON u.id=t.user_id WHERE t.id=$1`, [req.params.id])).rows[0];
   if (!t) throw notFound('Request not found');
-  await assertStationAccess(req.user, t.station_id);
+  await assertCompany(req.user, t.station_id);
   await query(`UPDATE time_off SET status=$2, decided_by=$3, decided_at=now() WHERE id=$1`, [t.id, approve ? 'approved' : 'rejected', req.user.id]);
   if (approve) await query(`UPDATE shifts SET status='cancelled' WHERE user_id=$1 AND shift_date BETWEEN $2 AND $3 AND status IN ('scheduled','open') AND checked_in_at IS NULL`, [t.user_id, t.from_date, t.to_date]);
   await notify(t.user_id, { kind: 'system', title: approve ? 'Time off approved' : 'Time off not approved', body: `${String(t.from_date).slice(0, 10)} to ${String(t.to_date).slice(0, 10)}`, data: { url: '/station#shift' } });

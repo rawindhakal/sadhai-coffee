@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
 import '../push.dart';
 import 'customer.dart';
+import 'fonepay.dart';
 import 'home.dart' show Stepper2;
 
 /// Cart and checkout on one screen: change quantities, pick an offer and payment, place the order.
@@ -66,16 +66,7 @@ class _CartScreenState extends State<CartScreen> {
       final pay = out['payment'] as Map?;
       if (!mounted) return;
       cart.clear();
-      if (pay != null && pay['mode'] == 'sandbox') {
-        final ok = await showDialog<bool?>(context: context, barrierDismissible: false, builder: (c) => AlertDialog(
-          title: Text('Pay with ${payLabel[pay['provider']]}'),
-          content: Text('Test payments are on, so no real money moves. Confirm to place order ${order['pickup_code']} for ${rs(order['total'])}.'),
-          actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Fail it')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Confirm payment'))],
-        ));
-        await Api.instance.post('/payments/${pay['payment_id']}/confirm', {'outcome': ok == true ? 'paid' : 'fail'});
-      } else if (pay != null && pay['mode'] == 'redirect') {
-        await launchUrl(Uri.parse((pay['start_url'] ?? pay['url']) as String), mode: LaunchMode.externalApplication);
-      }
+      if (pay != null) await showFonepay(context, pay, order['total'] as num);
       if (!mounted) return;
       _askPush();
       await Navigator.push(context, MaterialPageRoute(builder: (_) => TrackingScreen(orderId: order['id'])));
@@ -158,7 +149,7 @@ class _CartScreenState extends State<CartScreen> {
         const SizedBox(height: 16),
         Text('Pay with', style: display(18)),
         const SizedBox(height: 8),
-        Wrap(spacing: 8, runSpacing: 4, children: [for (final m in ['cash', 'esewa', 'khalti', 'fonepay']) ChoiceChip(label: Text(payLabel[m]!), selected: _method == m, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _method == m ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { setState(() => _method = m); _requote(cart); })]),
+        Wrap(spacing: 8, runSpacing: 4, children: [for (final m in ['cash', 'fonepay']) ChoiceChip(label: Text(payLabel[m]!), selected: _method == m, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _method == m ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { setState(() => _method = m); _requote(cart); })]),
       ],
       const SizedBox(height: 16),
       TextField(controller: _note, maxLength: 200, decoration: const InputDecoration(labelText: 'Note for the barista (optional)'), onSubmitted: (_) => _requote(cart)),

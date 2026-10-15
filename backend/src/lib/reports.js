@@ -150,10 +150,10 @@ export async function reconciliation(from, to) {
   const { rows } = await query(
     `WITH sales AS (
        SELECT p.provider, (p.created_at AT TIME ZONE 'Asia/Kathmandu')::date AS day, sum(p.amount)::int AS app_amount, count(*)::int AS n
-         FROM payments p WHERE p.status='paid' AND p.provider IN ('esewa','khalti','fonepay') AND p.created_at >= $1 AND p.created_at < $2 GROUP BY 1,2
+         FROM payments p WHERE p.status='paid' AND p.provider NOT IN ('cash','pass') AND p.created_at >= $1 AND p.created_at < $2 GROUP BY 1,2
      ), refunds AS (
        SELECT p.provider, (p.created_at AT TIME ZONE 'Asia/Kathmandu')::date AS day, sum(p.amount)::int AS refunded
-         FROM payments p WHERE p.status='refunded' AND p.provider IN ('esewa','khalti','fonepay') AND p.created_at >= $1 AND p.created_at < $2 GROUP BY 1,2
+         FROM payments p WHERE p.status='refunded' AND p.provider NOT IN ('cash','pass') AND p.created_at >= $1 AND p.created_at < $2 GROUP BY 1,2
      )
      SELECT COALESCE(s.provider, st.provider) AS provider, COALESCE(s.day, st.day) AS day, COALESCE(s.app_amount,0) AS app_amount, COALESCE(s.n,0) AS payments,
             COALESCE(r.refunded,0) AS refunded, st.amount AS settled,

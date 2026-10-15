@@ -60,7 +60,7 @@ owner.get('/users', wrap(async (req, res) => {
 }));
 owner.post('/users', wrap(async (req, res) => {
   const b = z.object({
-    name: z.string().min(2), phone: z.string(), password: z.string().min(6), role: z.enum(['manager', 'owner', 'station']),
+    name: z.string().min(2), phone: z.string(), password: z.string().min(6), role: z.enum(['manager', 'owner', 'station', 'partner']),
     station_id: z.string().uuid().optional(), managed_station_ids: z.array(z.string().uuid()).default([]),
   }).parse(req.body);
   if (b.role === 'station' && !b.station_id) throw bad('Station staff need a station');
@@ -69,7 +69,8 @@ owner.post('/users', wrap(async (req, res) => {
       `INSERT INTO users(name, phone, password_hash, role, station_id) VALUES ($1,$2,$3,$4,$5) RETURNING id, name, phone, role, station_id, active`,
       [b.name, normalizePhone(b.phone), await bcrypt.hash(b.password, 10), b.role, b.role === 'station' ? b.station_id : null],
     );
-    if (b.role === 'manager') for (const s of b.managed_station_ids) await db.query('INSERT INTO station_managers(station_id,user_id) VALUES ($1,$2)', [s, rows[0].id]);
+    if (b.role === 'partner' && !b.managed_station_ids.length) throw bad('Choose the partner cafe this person owns');
+    if (b.role === 'manager' || b.role === 'partner') for (const s of b.managed_station_ids) await db.query('INSERT INTO station_managers(station_id,user_id) VALUES ($1,$2)', [s, rows[0].id]);
     await audit(req.user.id, 'user.create', 'user', rows[0].id, { role: b.role }, db);
     return rows[0];
   });
@@ -212,7 +213,7 @@ owner.get('/audit', wrap(async (req, res) => {
 }));
 owner.get('/reconciliation', wrap(async (req, res) => res.json(await reconciliation(req.query.from, req.query.to))));
 owner.post('/settlements', wrap(async (req, res) => {
-  const b = z.object({ provider: z.enum(['esewa', 'khalti', 'fonepay']), day: z.string().regex(/^\d{4}-\d\d-\d\d$/), amount: z.number().int().min(0), note: z.string().optional() }).parse(req.body);
+  const b = z.object({ provider: z.enum(['fonepay']), day: z.string().regex(/^\d{4}-\d\d-\d\d$/), amount: z.number().int().min(0), note: z.string().optional() }).parse(req.body);
   const { rows } = await query(
     `INSERT INTO settlements(provider, day, amount, note, entered_by) VALUES ($1,$2,$3,$4,$5)
      ON CONFLICT (provider, day) DO UPDATE SET amount=$3, note=$4, entered_by=$5 RETURNING *`, [b.provider, b.day, b.amount, b.note, req.user.id],

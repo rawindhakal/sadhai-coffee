@@ -17,6 +17,19 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.4.0 (2026-10-15)
+
+### Added
+- **Fonepay is now the only online payment.** eSewa and Khalti are removed from the API, apps, settings and documents. A Fonepay QR is shown in the web app, the kiosk, the counter POS and the mobile app; the app polls `GET /payments/:id` and the signed webhook also confirms. Owner settings hold the Fonepay merchant keys with a Test button.
+- **Pickup code.** Every app and kiosk order has a 4-digit code the customer reads out. Staff must enter it to hand over; five wrong tries lock it to a manager; managers can hand over with a recorded reason.
+- **Proper order steps.** Accept, then Mark prepared, then Hand over. An order cannot be marked ready before it is accepted. Declining needs a reason and refunds paid orders.
+- **Partner cafe owner role** with its own dashboard (`/partner`) and mobile view: sales, orders, live queue, stock, ratings, cash counts, settlement statement and counter logins, with Sadhai's costs, margins and customer phone numbers hidden.
+- **Sadhai-run vs partner stations**: rosters, auto-assign, attendance, payroll and My shift now apply only to Sadhai-run stations.
+- `npm run flows` runs 112 end-to-end checks of the order, payment, handover, partner and supervision flows.
+
+### Fixed
+- The seeded "offer of the day" ended at the wrong time, so it was already expired when seeded in the evening.
+
 ## v1.3.0 (2026-10-15)
 
 ### Added

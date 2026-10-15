@@ -60,6 +60,11 @@ const mkUser = async (name, phone, role, station_id = null, extra = {}) =>
 const owner = await mkUser('Rabin Sharma', '+9779800000001', 'owner');
 const mgr1 = await mkUser('Sunita Thapa', '+9779800000002', 'manager');
 const mgr2 = await mkUser('Prakash Rai', '+9779800000003', 'manager');
+const partnerIds = new Set([stations[2].id, stations[3].id]); // Kalanki and New Road are partner cafes: they roster and pay their own people
+const partner1 = await mkUser('Himal Chiya Ghar (owner)', '+9779801111111', 'partner');
+const partner2 = await mkUser('New Road Cafe (owner)', '+9779802222222', 'partner');
+await q('INSERT INTO station_managers VALUES ($1,$2)', [stations[2].id, partner1.id]);
+await q('INSERT INTO station_managers VALUES ($1,$2)', [stations[3].id, partner2.id]);
 for (const [s, m] of [[0, mgr1], [1, mgr1], [2, mgr2], [3, mgr2]]) await q('INSERT INTO station_managers VALUES ($1,$2)', [stations[s].id, m.id]);
 const staffNames = ['Bikash Magar', 'Anita KC', 'Suman Tamang', 'Mina Shrestha'];
 const staff = [];
@@ -238,7 +243,7 @@ await q(`UPDATE users SET active=true WHERE true`);
 const menuWeights = [['AMR', 26], ['LAT', 16], ['CAP', 13], ['CHL', 14], ['ICL', 9], ['CLB', 6], ['ESP', 5], ['MOC', 4], ['GPO', 3], ['SCB', 4], ['GUR', 5], ['CRO', 4], ['BUN', 3]];
 const hourW = [[7, 6], [8, 14], [9, 12], [10, 8], [11, 7], [12, 9], [13, 8], [14, 6], [15, 8], [16, 9], [17, 8], [18, 5], [19, 3]];
 const stationBase = [150, 120, 130, 100];
-const payW = [['cash', 38], ['esewa', 24], ['khalti', 14], ['fonepay', 24]];
+const payW = [['cash', 38], ['fonepay', 62]];
 const counters = new Map();
 
 async function insertOrder({ st, user, at, lines, channel, method, status = 'picked_up', discount = 0, label = null, pass_id = null, coupon_id = null, rating = null, note = null, who = null }) {
@@ -319,7 +324,7 @@ for (const [i, cu] of customers.slice(0, 14).entries()) {
     `INSERT INTO passes(user_id,total_cups,used_cups,price_paid,status,purchased_at,expires_at,related_party,code,activated_at) VALUES ($1,10,$2,900,$3,$4,$5,$6,$7,$8) RETURNING id`,
     [cu.u.id, used, used >= 10 ? 'used' : 'active', when, new Date(when.getTime() + 30 * DAY), i === 13, `SP-DEMO-${1000 + i}`, used > 0 ? when : null],
   )).rows[0];
-  await q(`INSERT INTO payments(user_id,pass_id,station_id,purpose,provider,amount,status,created_at,settled_at) VALUES ($1,$2,$3,'pass',$4,900,'paid',$5,$5)`, [cu.u.id, pass.id, stations[cu.home].id, wpick([['esewa', 3], ['khalti', 2], ['fonepay', 2], ['cash', 3]]), when]);
+  await q(`INSERT INTO payments(user_id,pass_id,station_id,purpose,provider,amount,status,created_at,settled_at) VALUES ($1,$2,$3,'pass',$4,900,'paid',$5,$5)`, [cu.u.id, pass.id, stations[cu.home].id, wpick([['fonepay', 4], ['cash', 3]]), when]);
   if (cu.u.id === demo.id) await q(`UPDATE passes SET used_cups=4, status='active', purchased_at=now() - interval '6 days', expires_at=now() + interval '24 days' WHERE id=$1`, [pass.id]);
 }
 
@@ -338,14 +343,14 @@ await q(
   [prod.GUR.id],
 );
 
-await q(`INSERT INTO daily_offers(title,title_ne,blurb,scope,product_id,offer_price,ends_at,created_by) VALUES ('Iced latte, Rs 120 today','आज आइस्ड ल्याते रु १२०','Beat the heat. Everything included.','product',$1,120, date_trunc('day', now() AT TIME ZONE 'Asia/Kathmandu') + interval '1 day' - interval '5 hours 45 minutes',$2)`, [prod.ICL.id, owner.id]);
+await q(`INSERT INTO daily_offers(title,title_ne,blurb,scope,product_id,offer_price,ends_at,created_by) VALUES ('Iced latte, Rs 120 today','आज आइस्ड ल्याते रु १२०','Beat the heat. Everything included.','product',$1,120, (((now() AT TIME ZONE 'Asia/Kathmandu')::date + 1)::timestamp AT TIME ZONE 'Asia/Kathmandu'),$2)`, [prod.ICL.id, owner.id]);
 await q(`INSERT INTO daily_offers(title,blurb,scope,product_id,pct,station_id,ends_at,max_uses,created_by) VALUES ('Cold brew 20% off at Kalanki','Beat the afternoon heat.','product',$1,20,$2, now() + interval '2 days', 200,$3)`, [prod.CLB.id, stations[2].id, mgr2.id]);
 await q(`INSERT INTO daily_offers(title,blurb,scope,category_id,pct,ends_at,created_by) VALUES ('Bites 15% off with any coffee','Croissant or bun, fresh from TERAI.','category',$1,15, now() + interval '3 days',$2)`, [cat.Bites, owner.id]);
 
 /* settlements (providers' bank credits) for the last 14 days, with two deliberate gaps */
 const { rows: sums } = await q(
   `SELECT provider, (created_at AT TIME ZONE 'Asia/Kathmandu')::date AS day, sum(amount)::int AS amt FROM payments
-    WHERE status='paid' AND provider IN ('esewa','khalti','fonepay') AND created_at > now() - interval '15 days' AND created_at < now() - interval '1 day' GROUP BY 1,2`,
+    WHERE status='paid' AND provider NOT IN ('cash','pass') AND created_at > now() - interval '15 days' AND created_at < now() - interval '1 day' GROUP BY 1,2`,
 );
 let gap = 0;
 for (const r of sums) {
@@ -372,20 +377,21 @@ for (const [i, [nm, si]] of MORE_STAFF.entries()) staffAll.push(await mkUser(nm,
 const POS = ['supervisor', 'barista', 'all_rounder', 'cashier'];
 const perStation = new Map();
 for (const u of staffAll) { const n = perStation.get(u.station_id) || 0; perStation.set(u.station_id, n + 1); u.pos = POS[n % 4]; }
-for (const [i, u] of staffAll.entries()) {
+const companyStaff = staffAll.filter((u) => !partnerIds.has(u.station_id));
+for (const [i, u] of companyStaff.entries()) {
   const pos = u.pos;
   const rate = { supervisor: 150, all_rounder: 130, barista: 120, cashier: 110 }[pos];
   await q(`INSERT INTO staff_profiles(user_id, employee_code, position, skills, hourly_rate, max_shifts_week, days_off, preferred_shift, can_float, joined_on) VALUES ($1,$2,$3,$4,$5,6,$6,$7,$8,current_date - $9::int)`,
     [u.id, `SC-${String(i + 1).padStart(4, '0')}`, pos, pos === 'cashier' ? ['counter'] : ['bar', 'counter'], rate, i % 5 === 2 ? [0] : [], ['morning', 'any', 'evening', 'any'][i % 4], pos === 'all_rounder', 120 + i * 11]);
 }
-for (const st of stations) {
+for (const st of stations.filter((x) => !partnerIds.has(x.id))) {
   for (const [i, [name, kind, start, min, max]] of [['Morning', 'morning', '07:00', 1, 3], ['Midday', 'midday', '10:00', 1, 2], ['Evening', 'evening', '14:00', 1, 3]].entries()) {
     await q(`INSERT INTO shift_templates(station_id, name, kind, start_time, hours, min_staff, max_staff, sort) VALUES ($1,$2,$3,$4,6,$5,$6,$7)`, [st.id, name, kind, start, min, max, i]);
   }
 }
 const todayStr = todayNpt();
-await q(`INSERT INTO time_off(user_id, from_date, to_date, kind, reason, status, decided_by, decided_at) VALUES ($1,$2,$3,'leave','Family wedding','approved',$4,now())`, [staffAll[1].id, addDays(todayStr, 2), addDays(todayStr, 3), mgr1.id]);
-await q(`INSERT INTO time_off(user_id, from_date, to_date, kind, reason) VALUES ($1,$2,$3,'leave','Visiting home')`, [staffAll[6].id, addDays(todayStr, 12), addDays(todayStr, 14)]);
+await q(`INSERT INTO time_off(user_id, from_date, to_date, kind, reason, status, decided_by, decided_at) VALUES ($1,$2,$3,'leave','Family wedding','approved',$4,now())`, [companyStaff[1].id, addDays(todayStr, 2), addDays(todayStr, 3), mgr1.id]);
+await q(`INSERT INTO time_off(user_id, from_date, to_date, kind, reason) VALUES ($1,$2,$3,'leave','Visiting home')`, [companyStaff[5].id, addDays(todayStr, 12), addDays(todayStr, 14)]);
 await q(`INSERT INTO payroll_adjustments(user_id, month, label, amount, created_by) VALUES ($1, date_trunc('month', now()), 'Festival bonus', 1000, $2)`, [staffAll[0].id, owner.id]);
 await q(`INSERT INTO notifications(user_id,kind,title,body) VALUES ($1,'promo','Iced latte, Rs 120 today','Beat the heat. Everything included.')`, [demo.id]);
 await q(`INSERT INTO audit_log(actor_id,action,entity,meta) VALUES ($1,'seed','system','{"note":"demo data created"}')`, [owner.id]);
@@ -393,7 +399,7 @@ await q('COMMIT');
 c.release();
 
 /* ---------- rosters: four weeks of history with attendance, and this coming week published ---------- */
-const allIds = stations.map((x) => x.id);
+const allIds = stations.filter((x) => !partnerIds.has(x.id)).map((x) => x.id);
 const pastFrom = addDays(todayStr, -28), pastTo = addDays(todayStr, -1);
 await autoAssign({ stationIds: allIds, from: pastFrom, to: pastTo, replace: true, userId: owner.id });
 const pastShifts = (await pool.query(`SELECT sh.*, p.hourly_rate AS rate FROM shifts sh LEFT JOIN staff_profiles p ON p.user_id=sh.user_id WHERE sh.shift_date BETWEEN $1 AND $2 AND sh.user_id IS NOT NULL`, [pastFrom, pastTo])).rows;
@@ -427,5 +433,6 @@ console.log(`Demo logins (password ${PASSWORD}):`);
 console.log('  owner     9800000001');
 console.log('  manager   9800000002 (TU Gate + Teaching Hospital)   9800000003 (Kalanki + New Road)');
 console.log('  station   9800000011 (TU Gate)  9800000012  9800000013  9800000014   (16 staff in all, 9800000011 to 9800000026)');
+console.log('  partner   9801111111 (Himal Chiya Ghar, Kalanki)   9802222222 (New Road Cafe)');
 console.log('  customer  9812345678 (Asha Gurung)');
 await pool.end();

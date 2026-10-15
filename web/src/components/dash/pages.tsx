@@ -1,6 +1,6 @@
 'use client';
-import { Empty, Loading } from '../ui';
-import { AccountabilityTab, CashTab, InventoryTab, OffersTab, PromosTab, ReviewsTab, StaffTab, StationMenuTab } from '../admin';
+import { Empty, Loading, useData } from '../ui';
+import { PartnerStatementCard, AccountabilityTab, CashTab, InventoryTab, OffersTab, PromosTab, ReviewsTab, StaffTab, StationMenuTab } from '../admin';
 import { AuditTab, DropsTab, FinanceTab, GrowthTab, MenuTab, SettingsTab, StationsTab, TeamTab } from '../owner';
 import { StationWorkspace } from '../station';
 import { CostingSection } from '../recipes';
@@ -14,7 +14,7 @@ import { MyShift, PeopleSection } from '../people';
 
 const P = ({ children }: { children: React.ReactNode }) => <div className="panel">{children}</div>;
 
-function Body({ section, role }: { section: string; role: 'owner' | 'manager' }) {
+function Body({ section, role }: { section: string; role: 'owner' | 'manager' | 'partner' }) {
   const { stations, stationId, days } = useDash();
   const { user } = useAuth();
   const canWarehouse = !!(user as any)?.warehouse;
@@ -28,7 +28,7 @@ function Body({ section, role }: { section: string; role: 'owner' | 'manager' })
     case 'growth': return <GrowthTab />;
     case 'orders': return <OrdersSection />;
     case 'run': return first ? <StationWorkspace stationId={first} key={first} /> : <Empty>No station available.</Empty>;
-    case 'stock': return <div className="col" style={{ gap: 16 }}><InventoryTab stationId={sid} /><TransfersPanel mode="station" stationId={sid} /><VariancePanel days={days} /><CountPanel role="manager" stationId={sid} /></div>;
+    case 'stock': return role === 'partner' ? <P><InventoryTab stationId={sid} /></P> : <div className="col" style={{ gap: 16 }}><InventoryTab stationId={sid} /><TransfersPanel mode="station" stationId={sid} /><VariancePanel days={days} /><CountPanel role="manager" stationId={sid} /></div>;
     case 'inventory': return <InventoryHub days={days} />;
     case 'recipes': return <CostingSection canEdit={isOwner} />;
     case 'ingredients': return <IngredientsTab canEdit={isOwner || canWarehouse} />;
@@ -40,12 +40,13 @@ function Body({ section, role }: { section: string; role: 'owner' | 'manager' })
     case 'drops': return <P><DropsTab /></P>;
     case 'stations': return <P><StationsTab /></P>;
     case 'team': return <P><TeamTab /></P>;
-    case 'staff': return <PeopleSection isOwner={isOwner} />;
+    case 'staff': return role === 'partner' ? <P><StaffTab stations={stations} stationId={sid} /></P> : <PeopleSection isOwner={isOwner} />;
     case 'site': return <SiteEditor />;
     case 'enquiries': return <EnquiriesSection />;
     case 'accountability': return <AccountabilityTab stationId={sid} isOwner={isOwner} />;
     case 'finance': return <FinanceTab />;
     case 'cash': return <P><CashTab stationId={sid} /></P>;
+    case 'statement': return <PartnerStatement />;
     case 'rules': return <SettingsHub />;
     case 'audit': return <P><AuditTab /></P>;
     default: return null;
@@ -84,11 +85,38 @@ export function ManagerDashboard() {
   return <DashShell role="manager" sections={sections}>{(s) => <Body section={s} role="manager" />}</DashShell>;
 }
 
+const PARTNER: Section[] = [
+  { key: 'overview', label: 'Overview', icon: 'grid', group: 'My cafe', keywords: 'sales dashboard' }, { key: 'live', label: 'Live', icon: 'pulse', group: 'My cafe', keywords: 'queue now' },
+  { key: 'orders', label: 'Orders', icon: 'receipt', group: 'My cafe', keywords: 'history' }, { key: 'stock', label: 'Stock', icon: 'box', group: 'My cafe', keywords: 'inventory ingredients' },
+  { key: 'reviews', label: 'Ratings', icon: 'star', group: 'My cafe' },
+  { key: 'statement', label: 'My statement', icon: 'wallet', group: 'Money', keywords: 'settlement share revenue payout' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Money' },
+  { key: 'staff', label: 'Counter logins', icon: 'users', group: 'Team', keywords: 'staff accounts' },
+];
+export function PartnerDashboard() {
+  const user = useRequireRole('partner');
+  if (!user) return <div style={{ padding: 40 }}><Loading /></div>;
+  return <DashShell role="partner" sections={PARTNER}>{(s) => <Body section={s} role="partner" />}</DashShell>;
+}
+
 const STATION: Section[] = [
   { key: 'queue', label: 'Queue', icon: 'pulse' }, { key: 'pos', label: 'New order', icon: 'plus' }, { key: 'menu', label: 'Sold out', icon: 'list' }, { key: 'stock', label: 'Stock', icon: 'box' }, { key: 'close', label: 'Close day', icon: 'coin' }, { key: 'recipes', label: 'Recipes', icon: 'list' }, { key: 'shift', label: 'My shift', icon: 'clock' },
 ];
 export function StationDashboard() {
   const user = useRequireRole('station');
   if (!user) return <div style={{ padding: 40 }}><Loading /></div>;
-  return <DashShell role="station" sections={STATION}>{(s) => <StationWorkspace forcedTab={s as any} key={s} />}</DashShell>;
+  // Only Sadhai-run stations have rosters and pay. A partner cafe's counter staff just run the queue.
+  const sum = useData<any>('/station/summary');
+  const sections = sum.data?.station.operator_type === 'partner' ? STATION.filter((x) => x.key !== 'shift') : STATION;
+  return <DashShell role="station" sections={sections}>{(s) => <StationWorkspace forcedTab={s as any} key={s} />}</DashShell>;
+}
+
+/** What a partner cafe owner sees: how much they sold, what they keep, and what is owed either way. */
+function PartnerStatement() {
+  const { stationId, days } = useDash();
+  const from = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+  const st = useData<any[]>(`/admin/partner-statement?from=${from}${stationId ? `&station_id=${stationId}` : ''}`, [stationId, days]);
+  if (!st.data) return <Loading />;
+  if (!st.data.length) return <Empty>No statement for this period.</Empty>;
+  return <div className="col" style={{ gap: 16 }}>{st.data.map((s) => <PartnerStatementCard key={s.station.id} s={s} />)}
+    <p className="small muted">Digital (Fonepay) payments are received by Sadhai. Cash stays with your counter. Each period we net your share against the cash you hold, and one of us pays the difference.</p></div>;
 }

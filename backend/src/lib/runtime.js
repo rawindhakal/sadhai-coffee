@@ -9,14 +9,14 @@ import { config } from './config.js';
  */
 export const DEFS = {
   // payments
-  payment_mode: { group: 'payments', label: 'Payment mode', type: 'enum', options: ['sandbox', 'live'], env: 'PAYMENT_MODE', def: 'sandbox', help: 'Sandbox lets the apps confirm test payments. Live sends customers to eSewa and Khalti and trusts only the provider.' },
-  esewa_product_code: { group: 'payments', label: 'eSewa product code', env: 'ESEWA_PRODUCT_CODE', def: 'EPAYTEST', help: 'From your eSewa merchant account.' },
-  esewa_secret: { group: 'payments', label: 'eSewa secret key', secret: true, env: 'ESEWA_SECRET', def: '8gBm/:&EnhH.1/q', help: 'Signs payment requests. The default is eSewa’s public test key.' },
-  esewa_form_url: { group: 'payments', label: 'eSewa payment page', type: 'url', env: 'ESEWA_FORM_URL', def: 'https://rc-epay.esewa.com.np/api/epay/main/v2/form' },
-  esewa_status_url: { group: 'payments', label: 'eSewa status check', type: 'url', env: 'ESEWA_STATUS_URL', def: 'https://rc.esewa.com.np/api/epay/transaction/status/' },
-  khalti_secret: { group: 'payments', label: 'Khalti secret key', secret: true, env: 'KHALTI_SECRET', def: '', help: 'Live secret key from the Khalti merchant dashboard.' },
-  khalti_base_url: { group: 'payments', label: 'Khalti API address', type: 'url', env: 'KHALTI_BASE_URL', def: 'https://dev.khalti.com/api/v2', help: 'Use https://khalti.com/api/v2 for live.' },
-  fonepay_webhook_secret: { group: 'payments', label: 'Fonepay webhook secret', secret: true, env: 'FONEPAY_WEBHOOK_SECRET', def: '', help: 'Shared secret that signs Fonepay confirmations.' },
+  payment_mode: { group: 'payments', label: 'Payment mode', type: 'enum', options: ['sandbox', 'live'], env: 'PAYMENT_MODE', def: 'sandbox', help: 'Sandbox shows a test QR that the apps can mark as paid. Live asks Fonepay for a real QR and trusts only Fonepay.' },
+  fonepay_merchant_code: { group: 'payments', label: 'Fonepay merchant code', env: 'FONEPAY_MERCHANT_CODE', def: '', help: 'Given by Fonepay when your merchant account is approved.' },
+  fonepay_username: { group: 'payments', label: 'Fonepay username', env: 'FONEPAY_USERNAME', def: '' },
+  fonepay_password: { group: 'payments', label: 'Fonepay password', secret: true, env: 'FONEPAY_PASSWORD', def: '' },
+  fonepay_secret_key: { group: 'payments', label: 'Fonepay shared secret key', secret: true, env: 'FONEPAY_SECRET_KEY', def: '', help: 'Signs every request to Fonepay.' },
+  fonepay_qr_url: { group: 'payments', label: 'Fonepay QR address', type: 'url', env: 'FONEPAY_QR_URL', def: 'https://dev-merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrDownload', help: 'Use the live address from Fonepay when you go live.' },
+  fonepay_status_url: { group: 'payments', label: 'Fonepay status address', type: 'url', env: 'FONEPAY_STATUS_URL', def: 'https://dev-merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrGetStatus' },
+  fonepay_webhook_secret: { group: 'payments', label: 'Fonepay notification secret', secret: true, env: 'FONEPAY_WEBHOOK_SECRET', def: '', help: 'Signs the payment notifications Fonepay sends us.' },
   // push
   push_mode: { group: 'push', label: 'Push notifications', type: 'enum', options: ['auto', 'off'], env: 'PUSH_MODE', def: 'auto', help: 'Auto sends for real when keys are set and logs a test delivery when they are not. Off stops all push.' },
   fcm_service_account_json: { group: 'push', label: 'Firebase service account (JSON)', secret: true, type: 'json', env: 'FCM_SERVICE_ACCOUNT_JSON', def: '', help: 'Firebase, Project settings, Service accounts, Generate new private key. Paste the whole file.' },

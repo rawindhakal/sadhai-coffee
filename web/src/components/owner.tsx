@@ -140,12 +140,12 @@ export function TeamTab() {
       {f && (
         <Modal title="Add person" onClose={() => setF(null)}>
           <div className="col">
-            <Field label="Role"><select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="manager">Manager</option><option value="station">Station staff</option><option value="owner">Owner</option></select></Field>
+            <Field label="Role"><select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="manager">Manager</option><option value="station">Station staff</option><option value="partner">Partner cafe owner</option><option value="owner">Owner</option></select></Field>
             <Field label="Name"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
             <Field label="Mobile number"><input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
             <Field label="Password"><input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
             {f.role === 'station' && <Field label="Station"><select value={f.station_id} onChange={(e) => setF({ ...f, station_id: e.target.value })}>{stations.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>}
-            {f.role === 'manager' && <Field label="Stations to manage">{stations.data?.map((s) => <label key={s.id} className="row"><input type="checkbox" style={{ width: 20, minHeight: 20 }} checked={f.managed.includes(s.id)} onChange={(e) => setF({ ...f, managed: e.target.checked ? [...f.managed, s.id] : f.managed.filter((x: string) => x !== s.id) })} />{s.name}</label>)}</Field>}
+            {(f.role === 'manager' || f.role === 'partner') && <Field label={f.role === 'partner' ? 'Their cafe' : 'Stations to manage'}>{stations.data?.map((s) => <label key={s.id} className="row"><input type="checkbox" style={{ width: 20, minHeight: 20 }} checked={f.managed.includes(s.id)} onChange={(e) => setF({ ...f, managed: e.target.checked ? [...f.managed, s.id] : f.managed.filter((x: string) => x !== s.id) })} />{s.name}</label>)}</Field>}
             <button className="btn primary" onClick={create}>Add</button>
           </div>
         </Modal>
@@ -175,7 +175,7 @@ export function FinanceTab() {
         <Stat label="Related-party passes" value={ov.data.pass.related_party} delta="Keep this at zero" tone={ov.data.pass.related_party ? 'bad' : 'good'} />
       </div>}
       <div className="card tablewrap">
-        <div className="row between wrap" style={{ marginBottom: 8 }}><h3>App sales against provider settlements</h3><div className="row"><RangePicker days={days} setDays={setDays} /><button className="btn sm" onClick={() => setS({ provider: 'esewa', day: sinceDays(2), amount: '' })}>Enter settlement</button></div></div>
+        <div className="row between wrap" style={{ marginBottom: 8 }}><h3>Fonepay sales against Fonepay settlements</h3><div className="row"><RangePicker days={days} setDays={setDays} /><button className="btn sm" onClick={() => setS({ provider: 'fonepay', day: sinceDays(2), amount: '' })}>Enter settlement</button></div></div>
         <p className="small muted" style={{ marginBottom: 8 }}>Reconcile every month. A difference is usually a provider fee or a refund; anything else needs an explanation.</p>
         {!rec.data ? <Loading /> : !rec.data.length ? <Empty>Nothing to reconcile in this period.</Empty> : <table><thead><tr><th>Day</th><th>Provider</th><th className="num">App says</th><th className="num">Provider paid</th><th className="num">Difference</th></tr></thead>
           <tbody>{rec.data.map((r, i) => <tr key={i}><td>{fmtDate(r.day)}</td><td>{r.provider}</td><td className="num">{rs(r.app_amount)}</td><td className="num">{r.settled == null ? <span className="chip marigold">Not entered</span> : rs(r.settled)}</td><td className="num" style={{ color: r.diff ? 'var(--cherry)' : undefined, fontWeight: r.diff ? 700 : 400 }}>{r.settled == null ? '–' : r.diff ? rs(r.diff) : 'Matches'}</td></tr>)}</tbody></table>}
@@ -188,7 +188,7 @@ export function FinanceTab() {
       {s && (
         <Modal title="Provider settlement" onClose={() => setS(null)}>
           <div className="col">
-            <Field label="Provider"><select value={s.provider} onChange={(e) => setS({ ...s, provider: e.target.value })}><option value="esewa">eSewa</option><option value="khalti">Khalti</option><option value="fonepay">Fonepay</option></select></Field>
+            <Field label="Provider"><select value={s.provider} onChange={(e) => setS({ ...s, provider: e.target.value })}><option value="fonepay">Fonepay</option></select></Field>
             <Field label="Sales day"><input type="date" value={s.day} onChange={(e) => setS({ ...s, day: e.target.value })} /></Field>
             <Field label="Amount credited to the bank (Rs)"><input type="number" value={s.amount} onChange={(e) => setS({ ...s, amount: e.target.value })} /></Field>
             <button className="btn primary" disabled={s.amount === ''} onClick={enter}>Save</button>

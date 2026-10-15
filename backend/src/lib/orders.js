@@ -300,7 +300,17 @@ async function alertLowStock(stationId, names) {
 
 /* ---------------------------------------------------------------- orders */
 
-export async function fullOrder(id, db = { query }) {
+/** The handover code is shown only to the customer (and on the kiosk screen). Station views get has_code instead. */
+export async function fullOrder(id, db = { query }, { reveal = false } = {}) {
+  const o = await loadOrder(id, db);
+  if (!o) return null;
+  o.has_code = !!o.handover_code;
+  if (!reveal) delete o.handover_code;
+  delete o.code_attempts;
+  return o;
+}
+
+async function loadOrder(id, db) {
   const { rows } = await db.query(
     `SELECT o.*, s.name AS station_name, s.name_ne AS station_name_ne, s.code AS station_code, s.address AS station_address,
             u.name AS user_name, u.phone AS user_phone,
@@ -339,19 +349,18 @@ export async function createOrder(user, input) {
   const result = await tx(async (db) => {
     const q = await quote(db, user, { ...input, channel });
     const method = q.total === 0 && q.pass_id ? 'pass' : input.payment_method;
-    if (!['cash', 'esewa', 'khalti', 'fonepay', 'pass'].includes(method)) throw bad('Choose how you will pay');
-    if (channel === 'counter' && ['esewa', 'khalti', 'fonepay'].includes(method) && !input.paid_now) throw bad('Counter orders are paid on the spot');
+    if (!['cash', 'fonepay', 'pass'].includes(method)) throw bad('Choose how you will pay');
 
     const code = await nextPickupCode(db, q.station);
-    const digital = ['esewa', 'khalti', 'fonepay'].includes(method) && q.total > 0 && !(channel === 'counter');
-    const paidNow = q.total === 0 || (channel === 'counter' && input.paid_now !== false);
+    const digital = method === 'fonepay' && q.total > 0; // counter Fonepay orders show a QR too; they are never taken on trust
+    const paidNow = q.total === 0 || (channel === 'counter' && !digital && input.paid_now !== false);
     const { rows } = await db.query(
       `INSERT INTO orders(station_id, user_id, customer_name, pickup_code, channel, status, subtotal, discount, total, discount_label,
-         payment_method, payment_status, coupon_id, promo_code_id, pass_id, drop_id, note, scheduled_for, customer_phone)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
+         payment_method, payment_status, coupon_id, promo_code_id, pass_id, drop_id, note, scheduled_for, customer_phone, handover_code)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
       [q.station.id, user?.id || null, input.customer_name || null, code, channel, digital ? 'awaiting_payment' : 'placed',
         q.subtotal, q.discount, q.total, q.discount_label, method, paidNow ? 'paid' : 'unpaid', q.coupon_id, q.promo_code_id, q.pass_id,
-        [...q.drops.keys()][0] || null, input.note?.slice(0, 200) || null, input.scheduled_for || null, input.customer_phone || null],
+        [...q.drops.keys()][0] || null, input.note?.slice(0, 200) || null, input.scheduled_for || null, input.customer_phone || null, String(crypto.randomInt(1000, 10000))],
     );
     const order = rows[0];
     for (const l of q.lines) {
@@ -390,7 +399,7 @@ export async function createOrder(user, input) {
     let paymentInit = null;
     if (digital) {
       paymentInit = await initiate(method, pay[0], { orderLabel: `Sadhai ${code}` });
-      if (paymentInit.provider_ref) await db.query('UPDATE payments SET provider_ref=$2 WHERE id=$1', [pay[0].id, paymentInit.provider_ref]);
+      await db.query('UPDATE payments SET provider_ref=COALESCE($2, provider_ref), raw=$3 WHERE id=$1', [pay[0].id, paymentInit.provider_ref || null, paymentInit.raw || null]);
     } else {
       low = await placeOrder(db, order, q.lines, user?.id);
     }
@@ -398,7 +407,7 @@ export async function createOrder(user, input) {
     return { id: order.id, low, paymentInit, stationId: q.station.id };
   });
 
-  const order = await fullOrder(result.id);
+  const order = await fullOrder(result.id, undefined, { reveal: true });
   if (order.status === 'placed') {
     emitOrder(order, 'order_new');
     if (order.user_id) await notify(order.user_id, { kind: 'order', title: `Order ${order.pickup_code} received`, body: `${order.station_name} is on it. Your coffee in 90 seconds.`, data: { order_id: order.id } });
@@ -510,18 +519,39 @@ export async function cancelOrder(orderId, actor, reason) {
   return order;
 }
 
-const FLOW = { placed: ['preparing', 'ready', 'cancelled'], preparing: ['ready', 'cancelled'], ready: ['picked_up'], awaiting_payment: ['cancelled'] };
+const FLOW = { placed: ['preparing', 'cancelled'], preparing: ['ready', 'cancelled'], ready: ['picked_up'], awaiting_payment: ['cancelled'] };
 
-export async function advanceOrder(orderId, next, actor) {
-  if (next === 'cancelled') return cancelOrder(orderId, actor, 'Cancelled by the station');
+/**
+ * The customer reads a 4-digit code from their phone or kiosk receipt and says it at the counter.
+ * A manager or owner can hand an order over without it, with a reason that stays on record.
+ * Returns the override reason when one was used. Walk-in counter orders need no code.
+ */
+async function checkHandover(orderId, actor, code, override) {
+  const o = (await query('SELECT status, channel, handover_code, code_attempts FROM orders WHERE id=$1', [orderId])).rows[0];
+  if (!o) throw notFound('Order not found');
+  if (o.status !== 'ready') throw conflict(`Cannot move an order from ${o.status} to picked_up`);
+  if (o.channel === 'counter' || !o.handover_code) return null;
+  const reason = String(override || '').trim();
+  const canOverride = ['manager', 'owner'].includes(actor.role) && reason.length >= 3;
+  if (String(code || '').trim() === o.handover_code && o.code_attempts < 5) return null;
+  if (canOverride) return reason.slice(0, 120);
+  if (code) await query('UPDATE orders SET code_attempts = code_attempts + 1 WHERE id=$1', [orderId]);
+  if (o.code_attempts >= 4) throw forbidden('Too many wrong codes. Ask the manager to hand this order over.');
+  throw bad(code ? 'That code does not match this order' : 'Ask the customer for their 4-digit code');
+}
+
+export async function advanceOrder(orderId, next, actor, { code, override } = {}) {
+  if (next === 'cancelled') return cancelOrder(orderId, actor, override || 'Cancelled by the station');
+  let overridden = null;
+  if (next === 'picked_up') overridden = await checkHandover(orderId, actor, code, override);
   const res = await tx(async (db) => {
     const o = (await db.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [orderId])).rows[0];
     if (!o) throw notFound('Order not found');
     if (!FLOW[o.status]?.includes(next)) throw conflict(`Cannot move an order from ${o.status} to ${next}`);
     const col = { preparing: 'accepted_at', ready: 'ready_at', picked_up: 'picked_up_at' }[next];
     await db.query(
-      `UPDATE orders SET status=$2, ${col}=now(), ${next === 'ready' ? 'accepted_at=COALESCE(accepted_at, now()), ready_by=$3,' : ''} ${next === 'preparing' ? 'accepted_by=$3,' : ''} payment_status = payment_status WHERE id=$1`,
-      next === 'ready' || next === 'preparing' ? [orderId, next, actor.id] : [orderId, next],
+      `UPDATE orders SET status=$2, ${col}=now(), ${next === 'picked_up' ? 'picked_up_by=$3, handover_override=$4,' : ''} ${next === 'ready' ? 'accepted_at=COALESCE(accepted_at, now()), ready_by=$3,' : ''} ${next === 'preparing' ? 'accepted_by=$3,' : ''} payment_status = payment_status WHERE id=$1`,
+      next === 'picked_up' ? [orderId, next, actor.id, overridden] : next === 'ready' || next === 'preparing' ? [orderId, next, actor.id] : [orderId, next],
     );
     let referral = null;
     if (next === 'picked_up') {
@@ -543,7 +573,7 @@ export async function advanceOrder(orderId, next, actor) {
   if (order.user_id) {
     const msg = {
       preparing: { title: `${order.pickup_code} is being made`, body: 'Your barista has started your coffee.' },
-      ready: { title: `${order.pickup_code} is ready`, body: `Your ${order.items[0]?.name || 'coffee'} is ready. See you at the counter.` },
+      ready: { title: `${order.pickup_code} is ready`, body: `Your ${order.items[0]?.name || 'coffee'} is ready. Show your 4-digit code at the counter.` },
       picked_up: { title: 'Enjoy your coffee', body: 'You earned beans for this order. Tell us how it was.' },
     }[next];
     if (msg) await notify(order.user_id, { kind: 'order', ...msg, data: { order_id: order.id } });
@@ -628,9 +658,9 @@ export async function buyPass(user, method, { stationId = null, soldBy = null } 
     await notify(user.id, { kind: 'pass', title: 'Your 10-cup pass is ready', body: `Pass ${pass.code}. It starts when you use your first cup, then lasts 30 days.`, data: { pass_id: pass.id } });
     return { pass, payment: null };
   }
-  if (method === 'cash') throw bad('Pay for a pass in the app with eSewa, Khalti or Fonepay, or buy it at the counter');
+  if (method === 'cash') throw bad('Pay for a pass in the app with Fonepay, or buy it at the counter');
   const init = await initiate(method, pay, { orderLabel: 'Sadhai 10-cup pass' });
-  if (init.provider_ref) await query('UPDATE payments SET provider_ref=$2 WHERE id=$1', [pay.id, init.provider_ref]);
+  await query('UPDATE payments SET provider_ref=COALESCE($2, provider_ref), raw=$3 WHERE id=$1', [pay.id, init.provider_ref || null, init.raw || null]);
   return { pass, payment: init };
 }
 

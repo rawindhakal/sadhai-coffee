@@ -2,81 +2,68 @@ import crypto from 'node:crypto';
 import { rt } from './runtime.js';
 import { bad } from './http.js';
 
-const hmac = (secret, msg) => crypto.createHmac('sha256', secret).update(msg).digest('base64');
-
-export function esewaFields(payment) {
-  const fields = {
-    amount: String(payment.amount), tax_amount: '0', total_amount: String(payment.amount), transaction_uuid: payment.id,
-    product_code: rt('esewa_product_code'), product_service_charge: '0', product_delivery_charge: '0',
-    success_url: `${rt('public_api_url')}/payments/esewa/callback?payment_id=${payment.id}`,
-    failure_url: `${rt('public_web_url')}/order?payment=failed`,
-    signed_field_names: 'total_amount,transaction_uuid,product_code',
-  };
-  fields.signature = hmac(rt('esewa_secret'), `total_amount=${fields.total_amount},transaction_uuid=${fields.transaction_uuid},product_code=${fields.product_code}`);
-  return fields;
-}
-
 /**
- * Starts a digital payment. Returns what the client must do next:
- *  - { mode:'sandbox' }                      development: client calls POST /payments/:id/confirm
- *  - { mode:'redirect', method, url, fields } live eSewa/Khalti hosted checkout
- *  - { mode:'qr', ref }                      Fonepay dynamic QR, confirmed by signed webhook
+ * Fonepay is the only online payment method. Customers pay by scanning a Fonepay dynamic QR with any
+ * mobile-banking or wallet app. Cash (at the counter or at pickup) and passes are not online payments.
+ *
+ * Live mode follows Fonepay's merchant "third party dynamic QR" API: we ask Fonepay for a QR for a payment reference (PRN),
+ * show the returned QR message, and confirm either from Fonepay's signed notification or by asking Fonepay for the status.
+ * Every request is signed with the shared key: dataValidation = HMAC-SHA512(key, fields joined by commas), hex.
+ * Field names and endpoints are settings, so they can be matched to the merchant agreement without a deploy.
+ *
+ * Sandbox mode (the default) makes no network call: the QR is a test code and POST /payments/:id/confirm completes it.
  */
+const sign = (message) => crypto.createHmac('sha512', rt('fonepay_secret_key')).update(message).digest('hex');
+const fixed = (n) => Number(n).toFixed(2);
+
+export const FONEPAY_LIVE_FIELDS = ['fonepay_merchant_code', 'fonepay_username', 'fonepay_password', 'fonepay_secret_key'];
+
+export function fonepayMissing() {
+  return FONEPAY_LIVE_FIELDS.filter((k) => !rt(k));
+}
+
+export function testQrMessage(payment) {
+  return `SADHAI-TEST|${payment.id}|${fixed(payment.amount)}`;
+}
+
+/** Starts an online payment. Returns { mode:'sandbox'|'qr', qr_message, ... } for the client to display. */
 export async function initiate(provider, payment, { orderLabel } = {}) {
+  if (provider !== 'fonepay') throw bad('Fonepay is the only online payment method');
   const base = { payment_id: payment.id, provider, amount: payment.amount };
-  if (rt('payment_mode') === 'sandbox') return { ...base, mode: 'sandbox' };
+  if (rt('payment_mode') === 'sandbox') return { ...base, mode: 'sandbox', qr_message: testQrMessage(payment), raw: { qr_message: testQrMessage(payment), sandbox: true } };
 
-  const callback = (p) => `${rt('public_api_url')}/payments/${p}/callback?payment_id=${payment.id}`;
-  if (provider === 'esewa') {
-    return {
-      ...base, mode: 'redirect', method: 'POST', url: rt('esewa_form_url'), fields: esewaFields(payment),
-      start_url: `${rt('public_api_url')}/payments/esewa/start?payment_id=${payment.id}`, // opens the signed form in a browser (mobile apps)
-    };
-  }
-  if (provider === 'khalti') {
-    if (!rt('khalti_secret')) throw bad('Khalti is not configured');
-    const r = await fetch(`${rt('khalti_base_url')}/epayment/initiate/`, {
-      method: 'POST',
-      headers: { Authorization: `Key ${rt('khalti_secret')}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        return_url: callback('khalti'),
-        website_url: rt('public_web_url'),
-        amount: payment.amount * 100,
-        purchase_order_id: payment.id,
-        purchase_order_name: orderLabel || 'Sadhai Coffee',
-      }),
-    });
-    const j = await r.json();
-    if (!r.ok || !j.payment_url) throw bad('Khalti could not start the payment');
-    return { ...base, mode: 'redirect', method: 'GET', url: j.payment_url, provider_ref: j.pidx };
-  }
-  if (provider === 'fonepay') return { ...base, mode: 'qr', ref: payment.id };
-  throw bad('Unknown payment provider');
+  const missing = fonepayMissing();
+  if (missing.length) throw bad('Fonepay is not set up yet. Please pay with cash or a pass.');
+  const body = {
+    amount: fixed(payment.amount), remarks1: (orderLabel || 'Sadhai Coffee').slice(0, 25), remarks2: 'sadhai',
+    prn: payment.id, merchantCode: rt('fonepay_merchant_code'), username: rt('fonepay_username'), password: rt('fonepay_password'),
+  };
+  body.dataValidation = sign([body.amount, body.prn, body.merchantCode, body.remarks1, body.remarks2].join(','));
+  let j;
+  try {
+    const r = await fetch(rt('fonepay_qr_url'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+    j = await r.json();
+  } catch { throw bad('Fonepay could not be reached. Please try again, or pay with cash.'); }
+  if (!j?.qrMessage) throw bad('Fonepay could not make a QR code. Please try again, or pay with cash.');
+  return { ...base, mode: 'qr', qr_message: j.qrMessage, raw: { qr_message: j.qrMessage, socket: j.thirdpartyQrWebSocketUrl || null }, provider_ref: payment.id };
 }
 
-// Verifies the eSewa success redirect (base64 JSON with HMAC signature) and the transaction status.
-export async function verifyEsewa(dataB64) {
-  const data = JSON.parse(Buffer.from(dataB64, 'base64').toString('utf8'));
-  const msg = data.signed_field_names.split(',').map((f) => `${f}=${data[f]}`).join(',');
-  if (hmac(rt('esewa_secret'), msg) !== data.signature) throw bad('Bad eSewa signature');
-  if (data.status !== 'COMPLETE') throw bad('Payment not complete');
-  const url = `${rt('esewa_status_url')}?product_code=${data.product_code}&total_amount=${data.total_amount}&transaction_uuid=${data.transaction_uuid}`;
-  const j = await (await fetch(url)).json();
-  if (j.status !== 'COMPLETE') throw bad('eSewa did not confirm the payment');
-  return { paymentId: data.transaction_uuid, ref: data.transaction_code, amount: Number(String(data.total_amount).replace(/,/g, '')), raw: data };
-}
-
-export async function lookupKhalti(pidx) {
-  const r = await fetch(`${rt('khalti_base_url')}/epayment/lookup/`, {
-    method: 'POST',
-    headers: { Authorization: `Key ${rt('khalti_secret')}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pidx }),
-  });
+/** Asks Fonepay whether a payment reference has been paid. Used while the customer or kiosk is waiting. */
+export async function checkFonepay(payment) {
+  const body = { prn: payment.id, merchantCode: rt('fonepay_merchant_code'), username: rt('fonepay_username'), password: rt('fonepay_password') };
+  body.dataValidation = sign([body.prn, body.merchantCode].join(','));
+  const r = await fetch(rt('fonepay_status_url'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
   const j = await r.json();
-  if (j.status !== 'Completed') throw bad('Khalti did not confirm the payment');
-  return { ref: j.transaction_id || pidx, amount: Math.round(j.total_amount / 100), raw: j };
+  const state = String(j.paymentStatus || j.status || '').toLowerCase();
+  if (['success', 'paid', 'completed'].includes(state) || j.fonepayTraceId) {
+    if (j.amount != null && Math.round(Number(j.amount)) !== Number(payment.amount)) throw bad('Fonepay amount does not match this order');
+    return { paid: true, ref: String(j.fonepayTraceId || j.traceId || payment.id), raw: j };
+  }
+  if (['failed', 'cancelled', 'expired'].includes(state)) return { paid: false, failed: true, raw: j };
+  return { paid: false, raw: j };
 }
 
+/** Signed notification from Fonepay (or our own gateway adapter): HMAC-SHA256 hex over "payment_id|provider_ref|status". */
 export function verifyWebhookSignature(body, signature) {
   const secret = rt('fonepay_webhook_secret');
   if (!secret) return false;

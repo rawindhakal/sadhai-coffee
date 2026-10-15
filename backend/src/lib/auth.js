@@ -58,7 +58,7 @@ export async function scopeStations(user) {
     const { rows } = await query('SELECT id FROM stations WHERE active ORDER BY name');
     return rows.map((r) => r.id);
   }
-  if (user.role === 'manager') {
+  if (user.role === 'manager' || user.role === 'partner') {
     const { rows } = await query('SELECT station_id FROM station_managers WHERE user_id=$1', [user.id]);
     return rows.map((r) => r.station_id);
   }

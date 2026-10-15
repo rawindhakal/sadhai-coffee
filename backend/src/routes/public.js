@@ -26,7 +26,7 @@ pub.get('/config', wrap(async (_req, res) => {
     pass: { price: s.pass_price, cups: s.pass_cups, valid_days: s.pass_valid_days },
     pricing: { hot: s.price_hot, flavored: s.price_flavored, iced: s.price_iced },
     partner_share_pct: s.partner_share_pct,
-    payment_methods: ['cash', 'esewa', 'khalti', 'fonepay'],
+    payment_methods: ['cash', 'fonepay'],
     referral: { cap_month: s.referral_cap_month }, pass_use_by_days: s.pass_use_by_days, pass_valid_days: s.pass_valid_days,
     vapid_public_key: vapidPublicKey(),
     site: { company: rt('company_name'), address: rt('company_address'), support_email: rt('support_email'), privacy_email: rt('privacy_email') },

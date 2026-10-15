@@ -20,16 +20,6 @@ export const config = {
   paymentMode: process.env.PAYMENT_MODE || 'sandbox',
   apiUrl: process.env.PUBLIC_API_URL || `http://localhost:${process.env.PORT || 4747}`,
   webUrl: process.env.PUBLIC_WEB_URL || 'http://localhost:3000',
-  esewa: {
-    productCode: process.env.ESEWA_PRODUCT_CODE || 'EPAYTEST',
-    secret: process.env.ESEWA_SECRET || '8gBm/:&EnhH.1/q',
-    formUrl: process.env.ESEWA_FORM_URL || 'https://rc-epay.esewa.com.np/api/epay/main/v2/form',
-    statusUrl: process.env.ESEWA_STATUS_URL || 'https://rc.esewa.com.np/api/epay/transaction/status/',
-  },
-  khalti: {
-    secret: process.env.KHALTI_SECRET || '',
-    baseUrl: process.env.KHALTI_BASE_URL || 'https://dev.khalti.com/api/v2',
-  },
   fonepaySecret: process.env.FONEPAY_WEBHOOK_SECRET || '',
 };
 

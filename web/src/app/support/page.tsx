@@ -10,7 +10,7 @@ export default function Support() {
       <h2>Common questions</h2>
       <ul>
         <li><strong>My order is late.</strong> Show your pickup number to the barista. If it is more than five minutes past the time shown, tell us and we will refund or remake it.</li>
-        <li><strong>I paid but have no order.</strong> Open Orders in the app. If it is missing, email us the eSewa, Khalti or Fonepay reference.</li>
+        <li><strong>I paid but have no order.</strong> Open Orders in the app. If it is missing, email us the Fonepay reference.</li>
         <li><strong>How do I delete my account or download my data?</strong> In the app: Account, Profile. Or see <a href="/delete-account">Delete your account</a>.</li>
         <li><strong>My pass or coupon is missing.</strong> Check Offers. Expired and used ones are hidden there. Email us if you think one is wrong.</li>
       </ul>

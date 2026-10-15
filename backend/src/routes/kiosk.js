@@ -16,7 +16,7 @@ const orderSchema = z.object({
   items: z.array(z.object({ product_id: z.string().uuid(), qty: z.number().int().min(1).max(10).default(1), option_ids: z.array(z.string().uuid()).default([]) })).min(1).max(20),
   customer_name: z.string().trim().min(2, 'Enter your name').max(40),
   customer_phone: z.string(),
-  payment: z.enum(['counter', 'pass', 'esewa', 'khalti', 'fonepay']),
+  payment: z.enum(['counter', 'pass', 'fonepay']),
   pass_code: z.string().trim().max(20).optional(),
   consent: z.literal(true, { errorMap: () => ({ message: 'Please accept so we can call your order' }) }),
   note: z.string().max(200).optional(),
@@ -58,9 +58,9 @@ kiosk.post('/orders', wrap(async (req, res) => {
 }));
 
 kiosk.get('/orders/:id', wrap(async (req, res) => {
-  const o = await fullOrder(req.params.id);
+  const o = await fullOrder(req.params.id, undefined, { reveal: true });
   if (!o) throw notFound('Order not found');
   const stationId = await sid(req);
   if (o.station_id !== stationId) throw forbidden();
-  res.json({ id: o.id, pickup_code: o.pickup_code, status: o.status, payment_status: o.payment_status, payment_method: o.payment_method, total: o.total, customer_name: o.customer_name, payment_id: o.payment_id });
+  res.json({ id: o.id, pickup_code: o.pickup_code, handover_code: o.handover_code, status: o.status, payment_status: o.payment_status, payment_method: o.payment_method, total: o.total, customer_name: o.customer_name, payment_id: o.payment_id });
 }));

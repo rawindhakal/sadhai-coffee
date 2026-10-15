@@ -1,0 +1,299 @@
+// End-to-end business flows, as the owner described them. Needs a freshly seeded database and a running API:
+//   npm run seed && API_URL=http://localhost:4747 node scripts/flows.js
+import crypto from 'node:crypto';
+const API = process.env.API_URL || 'http://localhost:4000';
+let failed = 0, n = 0;
+const ok = (c, m) => { n++; console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) failed++; };
+const section = (t) => console.log(`\n== ${t}`);
+async function call(method, path, body, token) {
+  const r = await fetch(API + path, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; }
+  return { status: r.status, body: j };
+}
+const login = async (phone) => (await call('POST', '/auth/login', { phone, password: 'Sadhai@123' })).body;
+const tok = (u) => u.access_token;
+
+const owner = await login('9800000001'), mgrCo = await login('9800000002'), mgrPartner = await login('9800000003');
+const tuStaff = await login('9800000011'), kalankiStaff = await login('9800000013'), newRoadStaff = await login('9800000014');
+const partner = await login('9801111111'), partner2 = await login('9802222222');
+ok(partner.user?.role === 'partner' && partner2.user?.role === 'partner', 'partner cafe owners can sign in');
+
+const stations = (await call('GET', '/stations')).body;
+const tu = stations.find((s) => s.code === 'TU-GATE'), kal = stations.find((s) => s.code === 'KALANKI'), road = stations.find((s) => s.code === 'NEWROAD');
+ok(kal.operator_type === 'partner' && tu.operator_type === 'company', 'a station is either Sadhai-run or partner-run');
+
+const homeOf = async (st) => (await call('GET', `/stations/${st.id}/home`)).body;
+const home = await homeOf(tu);
+const all = home.categories.flatMap((c) => c.products);
+const ame = all.find((p) => p.sku === 'AMR'), latte = all.find((p) => p.sku === 'LAT');
+const sizeOpt = (p) => p.option_groups.find((g) => g.name === 'Size').options.find((o) => o.is_default).id;
+const line = (p, qty = 1) => ({ product_id: p.id, qty, option_ids: [sizeOpt(p)] });
+
+let seq = 0;
+async function newCustomer() {
+  const phone = `98${String(Date.now()).slice(-7)}${seq++}`.slice(0, 10);
+  const r = (await call('POST', '/auth/register', { name: `Flow Customer ${seq}`, phone, password: 'Sadhai@123' })).body;
+  return { phone, token: r.access_token, id: r.user.id };
+}
+const queue = async (staff, view) => (await call('GET', `/station/orders${view ? `?view=${view}` : ''}`, null, tok(staff))).body;
+const setStatus = (staff, id, status, extra = {}) => call('POST', `/station/orders/${id}/status`, { status, ...extra }, tok(staff));
+const stockOf = async (staff, name) => (await call('GET', '/station/inventory', null, tok(staff))).body.find((i) => i.name.startsWith(name))?.qty;
+
+/* ---------------------------------------------------------------- 1 */
+section('1. Kiosk: guest pays online with a Fonepay QR, then the order reaches the station');
+{
+  const before = await stockOf(tuStaff, 'Coffee');
+  const k = await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Kiosk Guest', customer_phone: '9801234567', payment: 'fonepay', consent: true }, tok(tuStaff));
+  ok(k.status === 201 && k.body.order.status === 'awaiting_payment', 'kiosk order waits for payment');
+  ok(!!k.body.payment.qr_message && k.body.payment.mode === 'sandbox', 'the kiosk gets a QR to show');
+  ok(/^\d{4}$/.test(k.body.order.handover_code), 'the guest gets a 4-digit handover code on the screen');
+  ok(!(await queue(tuStaff)).some((o) => o.id === k.body.order.id), 'an unpaid kiosk order is NOT in the station queue');
+  ok((await stockOf(tuStaff, 'Coffee')) === before, 'no ingredients are reserved until it is paid');
+  ok((await call('GET', `/kiosk/orders/${k.body.order.id}`, null, tok(tuStaff))).body.status === 'awaiting_payment', 'kiosk screen keeps waiting');
+  const pay = await call('POST', `/payments/${k.body.payment.payment_id}/confirm`, {}, tok(tuStaff));
+  ok(pay.body.status === 'paid', 'Fonepay confirms the payment');
+  const q1 = await queue(tuStaff);
+  const mine = q1.find((o) => o.id === k.body.order.id);
+  ok(mine && mine.status === 'placed' && mine.customer_name === 'Kiosk Guest', 'now it appears at the station with the guest name');
+  ok(mine.handover_code === undefined && mine.has_code === true, 'the station can see an order has a code, but not what it is');
+  ok((await stockOf(tuStaff, 'Coffee')) < before, 'ingredients are reserved once paid');
+  ok((await call('POST', `/payments/${k.body.payment.payment_id}/confirm`, {}, tok(tuStaff))).status === 200, 'paying twice is harmless');
+
+  section('   station accepts, prepares, marks prepared, then hands over with the code');
+  ok((await setStatus(tuStaff, mine.id, 'ready')).status === 409, 'cannot mark prepared before accepting');
+  ok((await setStatus(tuStaff, mine.id, 'preparing')).body.status === 'preparing', 'station accepts and starts preparing');
+  ok((await setStatus(tuStaff, mine.id, 'ready')).body.status === 'ready', 'station marks it prepared');
+  ok((await setStatus(tuStaff, mine.id, 'picked_up')).status === 400, 'handover without a code is refused');
+  ok((await setStatus(tuStaff, mine.id, 'picked_up', { code: '0000' })).status === 400, 'a wrong code is refused');
+  const done = await setStatus(tuStaff, mine.id, 'picked_up', { code: k.body.order.handover_code });
+  ok(done.body.status === 'picked_up', 'the right code completes the pickup');
+  ok((await queue(tuStaff, 'done')).some((o) => o.id === mine.id), 'it moves to today’s finished orders');
+}
+
+/* ---------------------------------------------------------------- 2 */
+section('2. App order paid by Fonepay QR');
+const cust = await newCustomer();
+let appOrder;
+{
+  const o = await call('POST', '/orders', { station_id: tu.id, items: [line(latte, 2)], payment_method: 'fonepay', channel: 'qr' }, cust.token);
+  ok(o.status === 201 && o.body.order.status === 'awaiting_payment' && o.body.payment.qr_message, 'customer gets a QR to pay');
+  const pid = o.body.payment.payment_id;
+  const poll = (await call('GET', `/payments/${pid}`, null, cust.token)).body;
+  ok(poll.status === 'pending' && poll.qr_message, 'the app can check the payment and re-show the QR');
+  ok(!(await queue(tuStaff)).some((x) => x.id === o.body.order.id), 'the station does not see it before payment');
+  await call('POST', `/payments/${pid}/confirm`, {}, cust.token);
+  ok((await call('GET', `/payments/${pid}`, null, cust.token)).body.status === 'paid', 'payment shows paid');
+  const mine = (await call('GET', `/orders/${o.body.order.id}`, null, cust.token)).body;
+  ok(mine.status === 'placed' && /^\d{4}$/.test(mine.handover_code), 'customer sees the order and its pickup code');
+  const other = await newCustomer();
+  ok((await call('GET', `/orders/${o.body.order.id}`, null, other.token)).status === 404, 'another customer cannot see it or its code');
+  await setStatus(tuStaff, mine.id, 'preparing');
+  ok((await call('POST', `/orders/${mine.id}/cancel`, {}, cust.token)).status === 409, 'customer cannot cancel once the barista has started');
+  await setStatus(tuStaff, mine.id, 'ready');
+  const before = (await call('GET', '/me', null, cust.token)).body.beans ?? 0;
+  const done = await setStatus(tuStaff, mine.id, 'picked_up', { code: mine.handover_code });
+  ok(done.body.status === 'picked_up', 'pickup with the customer’s code');
+  const after = (await call('GET', '/me', null, cust.token)).body.beans ?? 0;
+  ok(after === before + 2, 'two cups earn two beans');
+  appOrder = mine;
+}
+
+/* ---------------------------------------------------------------- 3 */
+section('3. Other ways to pay or save: coupon, promo, pass, cash at pickup');
+{
+  const c = await newCustomer();
+  const coupons = (await call('GET', '/coupons', null, c.token)).body;
+  const free = coupons.find((x) => x.kind === 'first_cup');
+  const o = await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'cash', coupon_id: free.id }, c.token);
+  ok(o.body.order.total === 0 && o.body.order.status === 'placed' && o.body.order.payment_status === 'paid', 'a free-cup coupon makes it Rs 0 and sends it straight to the station');
+  ok((await queue(tuStaff)).some((x) => x.id === o.body.order.id), 'the station sees the coupon order');
+
+  const cash = await call('POST', '/orders', { station_id: tu.id, items: [line(latte)], payment_method: 'cash' }, c.token);
+  ok(cash.body.order.status === 'placed' && cash.body.order.payment_status === 'unpaid', 'cash order is sent to the station and paid at pickup');
+  const id = cash.body.order.id;
+  await setStatus(tuStaff, id, 'preparing'); await setStatus(tuStaff, id, 'ready');
+  const code = (await call('GET', `/orders/${id}`, null, c.token)).body.handover_code;
+  await setStatus(tuStaff, id, 'picked_up', { code });
+  ok((await call('GET', `/orders/${id}`, null, c.token)).body.payment_status === 'paid', 'cash is marked paid at pickup');
+
+  const pass = await call('POST', '/passes', { payment_method: 'fonepay' }, c.token);
+  ok(pass.status === 201 && pass.body.payment.qr_message, 'buying a pass also pays by Fonepay QR');
+  await call('POST', `/payments/${pass.body.payment.payment_id}/confirm`, {}, c.token);
+  const passOrder = await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'pass' }, c.token);
+  ok(passOrder.body.order.total === 0 && passOrder.body.order.payment_method === 'pass' && passOrder.body.order.status === 'placed', 'a pass pays for a drink and the order reaches the station');
+  ok((await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'esewa' }, c.token)).status === 400, 'eSewa is no longer accepted');
+  ok((await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'khalti' }, c.token)).status === 400, 'Khalti is no longer accepted');
+  ok((await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Guest', customer_phone: '9801234500', payment: 'esewa', consent: true }, tok(tuStaff))).status === 400, 'kiosk refuses old gateways too');
+  ok((await call('GET', '/config')).body.payment_methods.join() === 'cash,fonepay', 'the public config offers only cash and Fonepay');
+}
+
+/* ---------------------------------------------------------------- 4 */
+section('4. Things going wrong');
+{
+  const c = await newCustomer();
+  const before = await stockOf(tuStaff, 'Coffee');
+  const o = await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'fonepay' }, c.token);
+  await call('POST', `/payments/${o.body.payment.payment_id}/confirm`, { outcome: 'fail' }, c.token);
+  const got = (await call('GET', `/orders/${o.body.order.id}`, null, c.token)).body;
+  ok(got.status === 'cancelled', 'a failed Fonepay payment cancels the order');
+  ok(!(await queue(tuStaff)).some((x) => x.id === o.body.order.id) && (await stockOf(tuStaff, 'Coffee')) === before, 'it never reached the station and no stock was used');
+
+  const o2 = await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'fonepay' }, c.token);
+  ok((await call('POST', `/orders/${o2.body.order.id}/cancel`, {}, c.token)).body.status === 'cancelled', 'customer can cancel while still unpaid');
+
+  const o3 = await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'fonepay' }, c.token);
+  await call('POST', `/payments/${o3.body.payment.payment_id}/confirm`, {}, c.token);
+  const cs = await setStatus(tuStaff, o3.body.order.id, 'cancelled', { reason: 'Machine broke' });
+  ok(cs.body.status === 'cancelled', 'station can decline a paid order');
+  const pays = (await call('GET', `/admin/orders/${o3.body.order.id}`, null, tok(mgrCo))).body;
+  ok(pays.payments.some((p) => p.status === 'refunded') && pays.payment_status === 'refunded', 'the Fonepay payment is marked refunded');
+
+  const o4 = await call('POST', '/orders', { station_id: tu.id, items: [line(latte)], payment_method: 'cash' }, c.token);
+  const id = o4.body.order.id;
+  await setStatus(tuStaff, id, 'preparing'); await setStatus(tuStaff, id, 'ready');
+  const code = (await call('GET', `/orders/${id}`, null, c.token)).body.handover_code;
+  const wrong = code === '1234' ? '4321' : '1234';
+  const res = [];
+  for (let i = 0; i < 5; i++) res.push((await setStatus(tuStaff, id, 'picked_up', { code: wrong })).status);
+  ok(res.slice(0, 4).every((s) => s === 400) && res[4] === 403, 'five wrong codes lock the handover');
+  ok((await setStatus(tuStaff, id, 'picked_up', { code })).status === 403, 'even the right code is refused after the lock');
+  ok((await setStatus(tuStaff, id, 'picked_up', { reason: 'Customer showed ID' })).status === 403, 'counter staff cannot override the code');
+  ok((await setStatus(mgrCo, id, 'picked_up', { reason: 'x' })).status !== 200, 'a manager needs a real reason');
+  const ov = await setStatus(mgrCo, id, 'picked_up', { reason: 'Customer lost phone, showed ID' });
+  ok(ov.body.status === 'picked_up', 'a manager can hand over with a reason');
+  ok((await call('GET', `/admin/orders/${id}`, null, tok(mgrCo))).body.handover_override?.includes('showed ID'), 'the reason stays on record');
+
+  const walk = await call('POST', '/station/orders', { items: [line(ame)], payment_method: 'cash' }, tok(tuStaff));
+  const wid = walk.body.order.id;
+  await setStatus(tuStaff, wid, 'preparing'); await setStatus(tuStaff, wid, 'ready');
+  ok((await setStatus(tuStaff, wid, 'picked_up')).body.status === 'picked_up', 'a walk-in order paid at the counter needs no code');
+
+  await call('POST', `/station/products/${ame.id}/availability`, { available: false }, tok(tuStaff));
+  const so = await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'cash' }, c.token);
+  ok(so.status === 409, 'a product marked finished cannot be ordered');
+  await call('POST', `/station/products/${ame.id}/availability`, { available: true }, tok(tuStaff));
+}
+
+/* ---------------------------------------------------------------- 5 */
+section('5. Fonepay notification (webhook)');
+{
+  const secret = 'flow-test-secret';
+  await call('PUT', '/owner/integrations', { values: { fonepay_webhook_secret: secret } }, tok(owner));
+  const c = await newCustomer();
+  const o = await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'fonepay' }, c.token);
+  const body = { payment_id: o.body.payment.payment_id, provider_ref: 'FP-TRACE-1', status: 'success' };
+  const sig = (b) => crypto.createHmac('sha256', secret).update(`${b.payment_id}|${b.provider_ref}|${b.status}`).digest('hex');
+  const bad = await fetch(API + '/payments/webhook/fonepay', { method: 'POST', headers: { 'content-type': 'application/json', 'x-signature': 'nope' }, body: JSON.stringify(body) });
+  ok(bad.status === 401, 'a notification with a bad signature is rejected');
+  ok((await call('GET', `/orders/${o.body.order.id}`, null, c.token)).body.status === 'awaiting_payment', 'the order stays unpaid');
+  const good = await fetch(API + '/payments/webhook/fonepay', { method: 'POST', headers: { 'content-type': 'application/json', 'x-signature': sig(body) }, body: JSON.stringify(body) });
+  ok(good.status === 200 && (await call('GET', `/orders/${o.body.order.id}`, null, c.token)).body.status === 'placed', 'a signed notification confirms the order');
+  const again = await fetch(API + '/payments/webhook/fonepay', { method: 'POST', headers: { 'content-type': 'application/json', 'x-signature': sig(body) }, body: JSON.stringify(body) });
+  ok(again.status === 200, 'the same notification twice is harmless');
+  await call('PUT', '/owner/integrations', { values: { fonepay_webhook_secret: null } }, tok(owner));
+  const live = await call('PUT', '/owner/integrations', { values: { payment_mode: 'live' } }, tok(owner));
+  const blocked = await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'fonepay' }, c.token);
+  ok(blocked.status === 400 && /not set up/i.test(blocked.body.error), 'live mode without Fonepay keys refuses online payment politely');
+  ok((await call('POST', `/payments/${o.body.payment.payment_id}/confirm`, {}, c.token)).status === 403, 'live mode never accepts the test confirm button');
+  await call('PUT', '/owner/integrations', { values: { payment_mode: 'sandbox' } }, tok(owner));
+  ok(live.status === 200, 'owner can switch the payment mode');
+}
+
+/* ---------------------------------------------------------------- 6 */
+section('6. Partner cafe: the same flow at Kalanki, and what the partner owner sees');
+const kHome = await homeOf(kal);
+const kAme = kHome.categories.flatMap((c) => c.products).find((p) => p.sku === 'AMR');
+const kLine = { product_id: kAme.id, qty: 1, option_ids: [sizeOpt(kAme)] };
+{
+  const c = await newCustomer();
+  for (let i = 0; i < 3; i++) {
+    const o = await call('POST', '/orders', { station_id: kal.id, items: [kLine], payment_method: i === 0 ? 'cash' : 'fonepay' }, c.token);
+    if (i > 0) await call('POST', `/payments/${o.body.payment.payment_id}/confirm`, {}, c.token);
+    const id = o.body.order.id;
+    ok((await queue(kalankiStaff)).some((x) => x.id === id), `partner station sees order ${i + 1}`);
+    ok(!(await queue(tuStaff)).some((x) => x.id === id) && !(await queue(newRoadStaff)).some((x) => x.id === id), 'no other station sees it');
+    await setStatus(kalankiStaff, id, 'preparing'); await setStatus(kalankiStaff, id, 'ready');
+    const code = (await call('GET', `/orders/${id}`, null, c.token)).body.handover_code;
+    ok((await setStatus(kalankiStaff, id, 'picked_up', { code })).body.status === 'picked_up', `partner staff hand over order ${i + 1} with the code`);
+  }
+  ok((await setStatus(tuStaff, (await queue(kalankiStaff))[0]?.id || '00000000-0000-0000-0000-000000000000', 'preparing')).status >= 400, 'staff of another station cannot touch it');
+
+  const mine = (await call('GET', '/admin/stations', null, tok(partner))).body;
+  ok(mine.length === 1 && mine[0].code === 'KALANKI', 'the partner owner sees only their own cafe');
+  const ov = (await call('GET', '/admin/overview', null, tok(partner))).body;
+  ok(ov.totals.revenue > 0 && ov.totals.orders > 0, 'they see their sales and orders');
+  ok(ov.totals.food_cost === undefined && ov.totals.gross_margin === undefined && ov.labour === null, 'but not Sadhai’s costs, margins or pay');
+  ok(ov.stations.length === 1, 'the overview covers only their cafe');
+  const orders = (await call('GET', '/admin/orders?limit=5', null, tok(partner))).body;
+  ok(orders.length > 0 && orders.every((o) => o.station_name.includes('Kalanki')), 'their order list is only their cafe');
+  const od = (await call('GET', `/admin/orders/${orders[0].id}`, null, tok(partner))).body;
+  ok(od.user_phone === undefined, 'customer phone numbers are hidden from partners');
+  const stock = (await call('GET', '/admin/inventory', null, tok(partner))).body;
+  ok(Array.isArray(stock) && stock.length > 0 && JSON.stringify(stock).includes('Kalanki'), 'they see their stock');
+  ok(!JSON.stringify(stock).includes('Teaching'), 'and nobody else’s');
+  ok((await call('GET', `/admin/orders?station_id=${tu.id}`, null, tok(partner))).status === 403, 'they cannot look at another station');
+  ok((await call('GET', '/admin/reviews', null, tok(partner))).status === 200, 'they see ratings');
+  const st = (await call('GET', '/admin/partner-statement', null, tok(partner))).body;
+  const row = Array.isArray(st) ? st[0] : st;
+  ok(row && row.station?.code === 'KALANKI' && row.partner_share > 0, 'they see their settlement statement and revenue share');
+  ok((await call('GET', '/admin/partner-statement', null, tok(partner2))).body[0].station.code === 'NEWROAD', 'the other partner sees only theirs');
+
+  for (const [m, p, b] of [['POST', '/admin/offers', { title: 'x' }], ['POST', '/admin/promos', {}], ['PUT', `/admin/stations/${kal.id}/products/${kAme.id}`, { price_override: 50 }], ['POST', '/admin/push/campaigns', { title: 'x', audience: { type: 'all' } }], ['GET', '/admin/costing'], ['GET', '/admin/customers'], ['POST', `/admin/orders/${orders[0].id}/refund`, { reason: 'abc' }]]) {
+    ok((await call(m, p, b, tok(partner))).status === 403, `partner cannot ${m} ${p}`);
+  }
+  ok((await call('GET', '/owner/settings', null, tok(partner))).status === 403 && (await call('GET', '/hr/payroll/runs', null, tok(partner))).status === 403, 'partner cannot reach owner or payroll');
+  const paused = await call('PATCH', `/admin/stations/${kal.id}`, { accepting_orders: false }, tok(partner));
+  ok(paused.status === 200, 'they can pause their own orders');
+  await call('PATCH', `/admin/stations/${kal.id}`, { accepting_orders: true }, tok(partner));
+  ok((await call('PATCH', `/admin/stations/${tu.id}`, { accepting_orders: false }, tok(partner))).status === 403, 'but not another cafe');
+
+  const phone = `98${String(Date.now()).slice(-8)}`;
+  const staff = await call('POST', '/admin/staff', { name: 'Partner Barista', phone, password: 'Sadhai@123', station_id: kal.id }, tok(partner));
+  ok(staff.status === 201, 'the partner adds a login for their own counter staff');
+  ok((await call('POST', '/admin/staff', { name: 'X Y', phone: '9801110000', password: 'Sadhai@123', station_id: tu.id }, tok(partner))).status === 403, 'but not for another station');
+  const pb = await login(phone);
+  ok((await call('GET', '/hr/me', null, tok(pb))).status === 403, 'partner staff are not part of Sadhai’s roster, check-in or payslips');
+  ok((await call('GET', '/station/summary', null, tok(pb))).status === 200, 'they still run the queue');
+}
+
+/* ---------------------------------------------------------------- 7 */
+section('7. Self-operated vs partner: staff, duty and pay');
+{
+  const kr = await call('GET', `/hr/roster?station_id=${kal.id}&from=2026-10-12&to=2026-10-18`, null, tok(mgrPartner));
+  ok(kr.status === 200 && kr.body.shifts.length === 0 && kr.body.templates.length === 0, 'a partner cafe has no Sadhai roster');
+  ok((await call('POST', '/hr/roster/auto-assign', { station_id: kal.id, from: '2026-10-19', to: '2026-10-25' }, tok(mgrPartner))).status === 403, 'auto-assign refuses a partner cafe');
+  ok((await call('POST', '/hr/staff', { name: 'No Pay', phone: '9801110099', password: 'Sadhai@123', station_id: kal.id }, tok(owner))).status === 403, 'Sadhai does not put partner staff on its payroll');
+  const staff = (await call('GET', '/hr/staff', null, tok(owner))).body;
+  ok(staff.length > 0 && staff.every((s) => !/Kalanki|New Road/.test(s.station_name || '')), 'the staff and pay list holds only Sadhai-run stations');
+  const from = '2026-10-19', to = '2026-10-25';
+  const out = await call('POST', '/hr/roster/auto-assign', { station_id: tu.id, from, to }, tok(mgrCo));
+  ok(out.status === 200 && out.body.created > 0, 'a Sadhai-run station gets an auto-assigned roster');
+  const sched = (await call('GET', `/hr/roster?station_id=${tu.id}&from=${from}&to=${to}`, null, tok(mgrCo))).body;
+  ok(sched.shifts.every((s) => (Date.parse(s.end_at) - Date.parse(s.start_at)) / 36e5 === 6), 'every shift is 6 hours');
+  ok((await call('GET', '/hr/me', null, tok(tuStaff))).status === 200, 'Sadhai staff see My shift');
+  const mine = (await call('GET', '/admin/stations', null, tok(mgrPartner))).body;
+  ok(mine.length === 2, 'a Sadhai manager supervises the partner cafes assigned to them');
+}
+
+/* ---------------------------------------------------------------- 8 */
+section('8. Owner and managers supervise every outlet');
+{
+  const ov = (await call('GET', '/admin/overview', null, tok(owner))).body;
+  ok(ov.stations.length === 4 && ov.totals.food_cost !== undefined, 'the owner sees all four outlets with costs and margin');
+  const sc = (await call('GET', '/admin/scorecard', null, tok(owner))).body;
+  ok(sc.stations?.length === 4, 'the scorecard compares all outlets');
+  ok((await call('GET', '/admin/live', null, tok(owner))).body.stations?.length === 4, 'the live board shows every outlet');
+  ok((await call('GET', '/admin/reviews', null, tok(owner))).status === 200, 'ratings across the network');
+  ok((await call('GET', '/admin/inventory', null, tok(owner))).status === 200 && (await call('GET', '/admin/cash-closes', null, tok(owner))).status === 200, 'stock and cash counts across the network');
+  const mo = (await call('GET', '/admin/overview', null, tok(mgrCo))).body;
+  ok(mo.stations.length === 2, 'a manager sees only the outlets they look after');
+  const stm = (await call('GET', '/admin/partner-statement', null, tok(owner))).body;
+  ok(Array.isArray(stm) && stm.length === 2 && stm.every((x) => x.station.operator_type === 'partner'), 'the owner sees a statement for each partner cafe');
+  const kst = stm.find((x) => x.station.code === 'KALANKI');
+  ok(kst.digital_held_by_sadhai >= 0 && kst.cash_held >= 0 && kst.net_due === kst.partner_share - kst.cash_held, 'statement nets the share against cash the cafe holds; Fonepay money is held by Sadhai');
+  const users = (await call('GET', '/owner/users?role=partner', null, tok(owner))).body;
+  ok(users.length === 2, 'the owner manages partner logins');
+}
+
+console.log(`\n${n - failed} of ${n} checks passed`);
+if (failed) { console.log(`${failed} FAILED`); process.exit(1); }

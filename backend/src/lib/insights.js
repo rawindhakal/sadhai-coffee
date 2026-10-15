@@ -113,7 +113,7 @@ export async function alerts(stationIds, isOwner) {
     if (refunds.rows[0].n) push('warning', 'refund', `${refunds.rows[0].n} digital refund${refunds.rows[0].n > 1 ? 's' : ''} to pay out`, `Rs ${refunds.rows[0].amt} to send from the provider dashboards.`, 'finance');
     const unrec = await query(
       `SELECT count(DISTINCT (p.created_at AT TIME ZONE 'Asia/Kathmandu')::date || p.provider)::int AS n FROM payments p
-        WHERE p.status='paid' AND p.provider IN ('esewa','khalti','fonepay') AND p.created_at < now() - interval '2 days' AND p.created_at > now() - interval '9 days'
+        WHERE p.status='paid' AND p.provider NOT IN ('cash','pass') AND p.created_at < now() - interval '2 days' AND p.created_at > now() - interval '9 days'
           AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.provider=p.provider AND s.day=(p.created_at AT TIME ZONE 'Asia/Kathmandu')::date)`);
     if (unrec.rows[0].n) push('warning', 'settlement', `${unrec.rows[0].n} provider day${unrec.rows[0].n > 1 ? 's' : ''} not reconciled`, 'Enter what each provider paid into the bank.', 'finance');
   }

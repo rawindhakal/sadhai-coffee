@@ -7,9 +7,10 @@ import '../theme.dart';
 import 'account.dart';
 import 'cart.dart';
 import 'home.dart';
+import 'fonepay.dart';
 import 'offers.dart';
 
-const payLabel = {'cash': 'Cash at counter', 'esewa': 'eSewa', 'khalti': 'Khalti', 'fonepay': 'Fonepay', 'pass': '10-cup pass'};
+const payLabel = {'cash': 'Cash at counter', 'fonepay': 'Fonepay QR', 'pass': '10-cup pass', 'esewa': 'eSewa (old)', 'khalti': 'Khalti (old)'};
 
 void toast(BuildContext c, String m, {bool bad = false}) => ScaffoldMessenger.of(c)
   ..hideCurrentSnackBar()
@@ -110,6 +111,15 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 Text(o['pickup_code'], style: display(96, color: Brand.cherry)),
                 Chip2.status(o['status']),
                 const SizedBox(height: 12),
+                if (o['handover_code'] != null && ['placed', 'preparing', 'ready'].contains(o['status'])) Container(
+                  margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                  decoration: BoxDecoration(color: Brand.surfaceSunk, borderRadius: BorderRadius.circular(Brand.radiusMd)),
+                  child: Semantics(label: 'Pickup code ${(o['handover_code'] as String).split('').join(' ')}', child: Column(children: [
+                    const Text('YOUR PICKUP CODE', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: Brand.inkMuted)),
+                    Text(o['handover_code'], style: display(44)),
+                    const Text('Say this code at the counter to collect your coffee.', style: TextStyle(color: Brand.inkMuted, fontSize: 13)),
+                  ])),
+                ),
                 if (o['status'] == 'ready') Text('${o['pickup_code']} is ready. See you at the counter.', textAlign: TextAlign.center, style: display(20, color: Brand.hill)),
                 if (o['status'] == 'placed' || o['status'] == 'preparing') Text((o['ahead'] ?? 0) > 0 ? '${o['ahead']} ahead of you · about ${((o['eta_seconds'] ?? 90) / 60).ceil()} min' : 'Your coffee in 90 seconds.', style: const TextStyle(color: Brand.inkMuted)),
                 if (o['status'] == 'cancelled') Text('${o['cancel_reason'] ?? 'Cancelled'}${o['payment_status'] == 'refunded' ? ' · Refund on its way' : ''}', style: const TextStyle(color: Brand.cherry, fontWeight: FontWeight.w600)),
@@ -131,7 +141,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 Row(children: [Text(payLabel[o['payment_method']] ?? ''), const SizedBox(width: 8), Chip2.status(o['payment_status'])]),
                 if (o['payment_method'] == 'cash' && o['payment_status'] == 'unpaid') const Text('Pay when you pick up.', style: TextStyle(color: Brand.inkMuted)),
               ]))),
-              if (o['status'] == 'awaiting_payment') Padding(padding: const EdgeInsets.only(top: 16), child: FilledButton(onPressed: () async { try { await Api.instance.post('/payments/${o['payment_id']}/confirm'); _load(); } on ApiException catch (e) { if (!mounted) return; toast(context, e.message, bad: true); } }, child: const Text('Complete payment (test mode)'))),
+              if (o['status'] == 'awaiting_payment') Padding(padding: const EdgeInsets.only(top: 16), child: FilledButton(onPressed: () async { try { final p = await Api.instance.get('/payments/${o['payment_id']}'); if (!mounted) return; await showFonepay(context, {'payment_id': p['id'], 'qr_message': p['qr_message'], 'mode': p['mode'] ?? rtMode(p)}, p['amount'] as num); _load(); } on ApiException catch (e) { if (!mounted) return; toast(context, e.message, bad: true); } }, child: const Text('Pay with Fonepay QR'))),
               if (o['status'] == 'placed' || o['status'] == 'awaiting_payment') Padding(padding: const EdgeInsets.only(top: 12), child: OutlinedButton(onPressed: _cancel, child: const Text('Cancel order'))),
               if (o['status'] == 'picked_up') Padding(padding: const EdgeInsets.only(top: 16), child: Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
                 Text(o['rating'] != null ? 'Thank you for rating' : 'How was your coffee?', style: display(20)),
@@ -142,3 +152,6 @@ class _TrackingScreenState extends State<TrackingScreen> {
     );
   }
 }
+
+/// Test-mode payments are marked by the server when it sets up the QR; a QR from a live Fonepay account starts with a real merchant payload.
+String rtMode(Map p) => (p['qr_message'] as String? ?? '').startsWith('SADHAI-TEST') ? 'sandbox' : 'qr';

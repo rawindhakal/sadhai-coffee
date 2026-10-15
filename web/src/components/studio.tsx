@@ -50,7 +50,7 @@ export function RulesPanel() {
 }
 
 const GROUPS: Record<string, { title: string; note: string }> = {
-  payments: { title: 'Payments', note: 'eSewa, Khalti and Fonepay. Keys are stored encrypted and are never shown again after saving.' },
+  payments: { title: 'Payments', note: 'Fonepay is the only online payment. Keys are stored encrypted and are never shown again after saving. Start in Sandbox mode, then switch to Live when Fonepay approves your merchant account.' },
   push: { title: 'Push notifications', note: 'Firebase sends to Android and iPhone. Browser push uses a key pair. With neither, push runs in test mode.' },
   app: { title: 'Addresses and app versions', note: 'Where customers reach you and which app versions may still run.' },
   company: { title: 'Company details', note: 'Shown on the privacy policy, terms and support pages.' },
@@ -73,7 +73,7 @@ export function IntegrationsPanel() {
     if (has && !confirm('Replacing the browser push keys stops push on every browser that turned it on. Replace them?')) return;
     try { await api('/owner/integrations/vapid', { method: 'POST', body: { replace: !!has } }); reload(); toast('New browser push keys saved'); } catch (e: any) { toast(e.message, true); }
   }
-  const tests: Record<string, [string, string][]> = { payments: [['esewa', 'Check eSewa'], ['khalti', 'Check Khalti key']], push: [['fcm', 'Check Firebase key'], ['push', 'Send me a test push']] };
+  const tests: Record<string, [string, string][]> = { payments: [['fonepay', 'Check Fonepay keys']], push: [['fcm', 'Check Firebase key'], ['push', 'Send me a test push']] };
   return (
     <div className="col" style={{ gap: 16 }}>
       {Object.entries(GROUPS).map(([g, meta]) => (

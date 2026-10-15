@@ -9,7 +9,7 @@ Everything below is available on the web (`/owner`, `/manager`, `/station`) and 
 
 ## Owner: first day
 
-1. **Settings and keys**: company details, payment keys (eSewa, Khalti, Fonepay), Firebase and web push keys. Secrets are stored encrypted and shown masked. Every key has a *Test* button.
+1. **Settings and keys**: company details, Fonepay keys, Firebase and web push keys. Secrets are stored encrypted and shown masked. Every key has a *Test* button.
 2. **Home page and pictures**: replace every hero layer, section picture, partner and investor page text and product picture. Anything left empty falls back to the built-in artwork.
 3. **Stations**, **Managers**, **Staff and pay**: add the cafes, their managers, and each staff member with an hourly rate.
 4. The *Get Sadhai ready* checklist on the overview tracks what is still missing.
@@ -37,3 +37,26 @@ Everything below is available on the web (`/owner`, `/manager`, `/station`) and 
 ## Partner cafes and investors
 
 Public pages `/partners` and `/investors` show the model, the standard prices and an enquiry form. Enquiries arrive under *Enquiries* in the owner dashboard. Their text and pictures are edited under *Home page and pictures*.
+
+## From order to cup (every channel)
+
+1. **Order.** The customer orders in the app or web (QR at the counter, or the app), at the kiosk, or the counter staff key it in.
+2. **Pay.** Fonepay QR, a pass, a coupon or promo that brings it to Rs 0, or cash at pickup. A Fonepay order waits as *awaiting payment*: the station does not see it and no ingredients are used until Fonepay confirms. A failed or abandoned payment cancels the order.
+3. **Accept.** The order appears on the station queue as *New*. Staff press **Accept and start**, or **Decline** with a reason (a paid order is refunded and the customer is told).
+4. **Prepare.** **Mark prepared** moves it to *Ready for pickup* and notifies the customer.
+5. **Hand over.** The customer says the **4-digit pickup code** shown on their phone or kiosk screen. Staff enter it and press **Check code and hand over**. Wrong codes are refused; five wrong codes lock the order to a manager. A manager or owner can hand over without the code by writing a reason, which stays in the order's audit trail. Walk-in counter orders paid on the spot need no code.
+6. Cash orders are marked paid at hand-over. Beans are credited and the referral reward is released when the order is picked up.
+
+## Sadhai-run station or partner cafe
+
+| | Sadhai-run station | Partner cafe |
+|---|---|---|
+| Who the staff work for | Sadhai | The cafe owner |
+| Roster, 6-hour shifts, duties, attendance, payroll | Yes, managed under *Staff and pay* | No. Sadhai does not roster, schedule or pay them. |
+| Staff screen | Queue, new order, stock, recipes, **My shift** | Queue, new order, stock, recipes |
+| Who sees it | Owner, the manager assigned to it | Owner, the manager assigned to it, **and the partner cafe owner** |
+| Partner cafe owner sign-in | not applicable | Sees sales, orders, live queue, stock, ratings, cash counts, their settlement statement; can add logins for their own counter staff, pause orders, and update their stock counts. Cannot see costs, margins, customer phone numbers, other cafes, or change prices, offers, recipes or push messages. |
+| Money | All sales belong to Sadhai | Fonepay money is received by Sadhai. Cash stays at the cafe. Each period the cafe's share (a percentage of net sales) is netted against the cash it holds; the statement says who pays whom. |
+| Stock | Sadhai buys centrally and dispatches; managers count and record loss | Same dispatches; the partner owner can update counts |
+
+The owner creates a partner login under *Managers > Add person > Partner cafe owner* and links it to the cafe.

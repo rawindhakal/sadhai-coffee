@@ -11,6 +11,7 @@ import { DEFS, describeRuntime, setRuntime, rt } from '../lib/runtime.js';
 import { pushStatus, sendToUser, testFcm } from '../lib/push.js';
 import { SITE_DEFAULTS, loadSite, mediaUrl } from '../lib/site.js';
 import { getSettings } from '../lib/settings.js';
+import { fonepayMissing, initiate } from '../lib/payments.js';
 import { todayNpt, addDays } from '../lib/roster.js';
 
 /** Owner-only: integration keys, pictures and website content. */
@@ -52,15 +53,14 @@ studio.post('/integrations/test/:name', wrap(async (req, res) => {
     const out = await sendToUser(req.user.id, { kind: 'system', title: 'Test from Sadhai', body: 'If you can read this, push notifications work.' });
     const st = pushStatus();
     res.json({ ok: true, message: !mine ? 'You have no registered device. Turn notifications on in your Account (web) or in the app, then test again.' : st.dry_run ? `Test mode: ${out.dry} delivery logged, nothing was really sent. Add Firebase or browser keys to send for real.` : `Sent ${out.sent} and failed ${out.failed}.`, status: st });
-  } else if (name === 'esewa') {
-    const missing = ['esewa_product_code', 'esewa_secret', 'esewa_form_url', 'esewa_status_url'].filter((k) => !rt(k));
-    res.json({ ok: !missing.length, message: missing.length ? `Missing: ${missing.map((k) => DEFS[k].label).join(', ')}.` : rt('esewa_secret') === DEFS.esewa_secret.def ? 'eSewa is set up with its public test key. Use your own secret key for live payments.' : 'eSewa details are saved. Make a small live payment to confirm.' });
-  } else if (name === 'khalti') {
-    if (!rt('khalti_secret')) return res.json({ ok: false, message: 'No Khalti secret key is saved.' });
+  } else if (name === 'fonepay') {
+    const missing = fonepayMissing();
+    if (missing.length) return res.json({ ok: false, message: `Missing: ${missing.map((k) => DEFS[k].label).join(', ')}.` });
+    if (rt('payment_mode') === 'sandbox') return res.json({ ok: true, message: 'The keys are saved. Payment mode is still Sandbox, so customers see a test QR. Switch to Live when Fonepay has approved you.' });
     try {
-      const r = await fetch(`${rt('khalti_base_url')}/epayment/lookup/`, { method: 'POST', headers: { Authorization: `Key ${rt('khalti_secret')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ pidx: 'sadhai-key-check' }), signal: AbortSignal.timeout(8000) });
-      res.json({ ok: r.status !== 401, message: r.status === 401 ? 'Khalti rejected this key. Check you copied the secret key for the right environment.' : 'Khalti accepted the key.' });
-    } catch (e) { res.json({ ok: false, message: `Could not reach Khalti: ${e.message}` }); }
+      const r = await initiate('fonepay', { id: `TEST${Date.now()}`, amount: 10 }, { orderLabel: 'Key test' });
+      res.json({ ok: true, message: `Fonepay made a QR code (${r.qr_message.slice(0, 18)}…). Real payments are ready.` });
+    } catch (e) { res.json({ ok: false, message: e.message }); }
   } else throw notFound('Unknown test');
 }));
 
@@ -145,7 +145,7 @@ studio.get('/setup', wrap(async (_req, res) => {
     one(`SELECT count(*)::int AS n FROM enquiries WHERE status='new'`),
   ]);
   const live = rt('payment_mode') === 'live';
-  const pay = live && (rt('khalti_secret') || rt('esewa_secret') !== DEFS.esewa_secret.def);
+  const pay = live && fonepayMissing().length === 0;
   const push = pushStatus();
   const companyDone = rt('support_email') !== DEFS.support_email.def && rt('company_name') !== 'Sadhai Coffee';
   const steps = [
@@ -155,7 +155,7 @@ studio.get('/setup', wrap(async (_req, res) => {
     { key: 'ingredients', title: 'Enter ingredient prices and suppliers', done: ing.unpriced === 0 && ing.no_supplier === 0, detail: ing.unpriced || ing.no_supplier ? `${ing.unpriced} without a price, ${ing.no_supplier} without a supplier` : 'All priced', section: 'inventory' },
     { key: 'team', title: 'Add your team and their hourly rates', done: team.n > 0 && team.unpaid === 0, detail: team.n ? (team.unpaid ? `${team.unpaid} of ${team.n} have no hourly rate` : `${team.n} staff with rates`) : 'No staff yet', section: 'people' },
     { key: 'roster', title: 'Fill and publish this week’s roster', done: ros.n > 0 && ros.open === 0 && ros.unpublished === 0, detail: ros.n ? `${ros.open} open slots, ${ros.unpublished} not published` : 'No shifts planned for the next 7 days', section: 'roster' },
-    { key: 'payments', title: 'Connect real payments', done: !!pay, detail: live ? (pay ? 'Live payments are on' : 'Live mode is on but no merchant key is saved') : 'Still in test mode', section: 'settings' },
+    { key: 'payments', title: 'Connect Fonepay', done: !!pay, detail: live ? (pay ? 'Live payments are on' : 'Live mode is on but the Fonepay keys are not all saved') : 'Still in test mode', section: 'settings' },
     { key: 'push', title: 'Turn on push notifications', done: !push.dry_run && push.mode !== 'off', detail: push.dry_run ? 'Test mode: add Firebase or browser keys' : 'Sending for real', section: 'settings' },
     { key: 'company', title: 'Add your company details for the legal pages', done: companyDone, detail: companyDone ? 'Saved' : 'Still showing the placeholder name and email', section: 'settings' },
     { key: 'site', title: 'Make the home page yours', done: site.n > 0, detail: site.n ? 'Customised' : 'Using the built-in hero artwork', section: 'site' },

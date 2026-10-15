@@ -5,7 +5,7 @@ import { range } from './reports.js';
 /**
  * Partner-cafe statement. Sadhai runs on existing cafes, so money moves two ways:
  *  - the cafe holds the CASH it takes at the counter (and for passes sold over the counter)
- *  - Sadhai holds the DIGITAL money (eSewa, Khalti, Fonepay)
+ *  - Sadhai holds the DIGITAL money (Fonepay)
  * The cafe earns revenue_share_pct of net sales. Pass cups count at the pass's per-cup value, so the cafe is paid for them.
  * net_due > 0: Sadhai pays the cafe. net_due < 0: the cafe remits to Sadhai.
  */
@@ -23,7 +23,7 @@ export async function statement(stationId, from, to) {
   const pay = (await query(
     `SELECT COALESCE(sum(amount) FILTER (WHERE provider='cash' AND purpose='order'),0)::int AS cash_orders,
             COALESCE(sum(amount) FILTER (WHERE provider='cash' AND purpose='pass'),0)::int AS cash_passes,
-            COALESCE(sum(amount) FILTER (WHERE provider IN ('esewa','khalti','fonepay') AND purpose='order'),0)::int AS digital
+            COALESCE(sum(amount) FILTER (WHERE provider NOT IN ('cash','pass') AND purpose='order'),0)::int AS digital
        FROM payments WHERE station_id=$1 AND status='paid' AND settled_at >= $2 AND settled_at < $3`, [stationId, start, end])).rows[0];
   const refunds = (await query(
     `SELECT COALESCE(sum(amount),0)::int AS n FROM payments WHERE station_id=$1 AND status='refunded' AND created_at >= $2 AND created_at < $3`, [stationId, start, end])).rows[0].n;

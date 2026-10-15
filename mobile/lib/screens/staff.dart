@@ -80,7 +80,7 @@ class _StationWorkspaceState extends State<StationWorkspace> {
         ]),
       ])),
       Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: SingleChildScrollView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), child: Row(children: [
-        for (final (i, l) in ['Queue', 'Sold out', 'Stock', 'Close day', 'Recipes', 'My shift'].indexed) Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(label: Text(l), selected: _tab == i, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _tab == i ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) => setState(() => _tab = i))),
+        for (final (i, l) in ['Queue', 'Sold out', 'Stock', 'Close day', 'Recipes', if (st['operator_type'] != 'partner') 'My shift'].indexed) Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(label: Text(l), selected: _tab == i, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _tab == i ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) => setState(() => _tab = i))),
       ]))),
       Expanded(child: switch (_tab) {
         0 => _Queue(q: q, target: st['prep_target_seconds'] as int, tick: _reloadTick, onChange: _load),
@@ -132,9 +132,38 @@ class _QueueState extends State<_Queue> {
     on ApiException catch (e) { if (mounted) setState(() => _error = e.message); }
   }
 
-  Future<void> _move(Map o, String status) async {
-    try { await Api.instance.post('/station/orders/${o['id']}/status${widget.q}', {'status': status}); await _load(); widget.onChange(); }
-    on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); }
+  Future<bool> _move(Map o, String status, [Map<String, dynamic> extra = const {}]) async {
+    try { await Api.instance.post('/station/orders/${o['id']}/status${widget.q}', {'status': status, ...extra}); await _load(); widget.onChange(); return true; }
+    on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); return false; }
+  }
+
+  // Hand-over: the customer says the 4-digit code from their phone or kiosk screen.
+  Future<void> _handover(Map o) async {
+    if (o['has_code'] != true || o['channel'] == 'counter') { await _move(o, 'picked_up'); return; }
+    final ctl = TextEditingController();
+    final isManager = ['manager', 'owner'].contains(Api.instance.user?['role']);
+    final code = await showDialog<String>(context: context, builder: (c) => AlertDialog(
+      title: Text('Hand over ${o['pickup_code']}'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('Ask the customer for their 4-digit pickup code. It is on their phone or on the kiosk screen.'),
+        const SizedBox(height: 12),
+        TextField(controller: ctl, autofocus: true, keyboardType: TextInputType.number, maxLength: 4, textAlign: TextAlign.center, style: display(32), decoration: const InputDecoration(counterText: '')),
+      ]),
+      actions: [
+        if (isManager) TextButton(onPressed: () => Navigator.pop(c, '!'), child: const Text('No code')),
+        TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(c, ctl.text.trim()), child: const Text('Hand over')),
+      ],
+    ));
+    if (code == null || code.isEmpty) return;
+    if (!mounted) return;
+    if (code == '!') {
+      final rc = TextEditingController();
+      final why = await showDialog<String>(context: context, builder: (c) => AlertDialog(title: const Text('Why no code?'), content: TextField(controller: rc, decoration: const InputDecoration(hintText: 'Lost phone, showed ID')), actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(c, rc.text.trim()), child: const Text('Hand over'))]));
+      if (why != null && why.length >= 3) await _move(o, 'picked_up', {'reason': why});
+      return;
+    }
+    await _move(o, 'picked_up', {'code': code});
   }
 
   Future<void> _cash(Map o) async {
@@ -147,23 +176,24 @@ class _QueueState extends State<_Queue> {
     if (_error != null) return Center(child: Text(_error!));
     if (_orders.isEmpty) return const Center(child: Text('No open orders. A quiet moment.', style: TextStyle(color: Brand.inkMuted)));
     return RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(16), children: [
-      for (final o in _orders) Padding(padding: const EdgeInsets.only(bottom: 12), child: _TicketCard(o: o, target: widget.target, onMove: _move, onCash: _cash)),
+      for (final o in _orders) Padding(padding: const EdgeInsets.only(bottom: 12), child: _TicketCard(o: o, target: widget.target, onMove: _move, onHandover: _handover, onCash: _cash)),
     ]));
   }
 }
 
 class _TicketCard extends StatelessWidget {
-  const _TicketCard({required this.o, required this.target, required this.onMove, required this.onCash});
+  const _TicketCard({required this.o, required this.target, required this.onMove, required this.onHandover, required this.onCash});
   final Map o;
   final int target;
-  final Future<void> Function(Map, String) onMove;
+  final Future<bool> Function(Map, String, [Map<String, dynamic>]) onMove;
+  final Future<void> Function(Map) onHandover;
   final Future<void> Function(Map) onCash;
   @override
   Widget build(BuildContext context) {
     final from = DateTime.parse(o['status'] == 'ready' ? o['ready_at'] : o['created_at']);
     final secs = DateTime.now().difference(from).inSeconds;
     final late = (o['status'] == 'placed' || o['status'] == 'preparing') && secs > target;
-    const next = {'placed': ('preparing', 'Start'), 'preparing': ('ready', 'Ready'), 'ready': ('picked_up', 'Handed over')};
+    const next = {'placed': ('preparing', 'Accept and start'), 'preparing': ('ready', 'Mark prepared'), 'ready': ('picked_up', 'Hand over')};
     final n = next[o['status']];
     final unpaid = o['payment_status'] == 'unpaid' && (o['total'] as int) > 0;
     return Card(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Brand.radiusLg), side: BorderSide(color: late ? Brand.cherry : Brand.hairline, width: late ? 2 : 1)), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -187,11 +217,12 @@ class _TicketCard extends StatelessWidget {
       if (o['status'] == 'ready' && unpaid) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Collect ${rs(o['total'])} cash at hand-over.', style: const TextStyle(color: Brand.cherry, fontWeight: FontWeight.w700))),
       const SizedBox(height: 10),
       Row(children: [
-        if (n != null) Expanded(child: FilledButton(onPressed: () => onMove(o, n.$1), child: Text(n.$2))),
+        if (n != null) Expanded(child: FilledButton(onPressed: () => o['status'] == 'ready' ? onHandover(o) : onMove(o, n.$1), child: Text(n.$2))),
         if (unpaid) ...[const SizedBox(width: 8), OutlinedButton(onPressed: () => onCash(o), child: const Text('Got cash'))],
         if (o['status'] == 'placed' || o['status'] == 'preparing') ...[const SizedBox(width: 8), IconButton.outlined(tooltip: 'Cancel order', onPressed: () async {
-          final yes = await showDialog<bool>(context: context, builder: (c) => AlertDialog(title: Text('Cancel ${o['pickup_code']}?'), actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Cancel order'))]));
-          if (yes == true) onMove(o, 'cancelled');
+          final rc = TextEditingController();
+          final why = await showDialog<String>(context: context, builder: (c) => AlertDialog(title: Text('Decline ${o['pickup_code']}?'), content: TextField(controller: rc, decoration: const InputDecoration(hintText: 'Why? The customer is told, and a paid order is refunded.')), actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Keep')), FilledButton(onPressed: () => Navigator.pop(c, rc.text.trim()), child: const Text('Decline'))]));
+          if (why != null && why.length >= 3) onMove(o, 'cancelled', {'reason': why});
         }, icon: const Icon(Icons.close))],
       ]),
     ])));

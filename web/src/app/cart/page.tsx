@@ -7,7 +7,8 @@ import { useAuth } from '@/lib/auth';
 import { useCart } from '@/lib/cart';
 import { useI18n } from '@/lib/i18n';
 import { Empty, ErrorNote, Field, Modal, useData } from '@/components/ui';
-import { CustomerShell, PAY_LABEL, startRedirect } from '@/components/customer';
+import { CustomerShell, PAY_LABEL } from '@/components/customer';
+import { FonepayQr } from '@/components/fonepay';
 import { Icon } from '@/components/icons';
 
 export default function Cart() {
@@ -46,15 +47,9 @@ export default function Cart() {
     setBusy(true); setError(null);
     try {
       const out = await api('/orders', { method: 'POST', body: payload });
-      if (out.payment && out.payment.mode === 'sandbox') { setPayment(out); return; }
-      if (out.payment && startRedirect(out.payment)) { cart.clear(); return; }
+      if (out.payment) { setPayment(out); return; }
       cart.clear(); router.push(`/order/${out.order.id}`);
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
-  }
-  async function sandboxPay(outcome: 'paid' | 'fail') {
-    setBusy(true);
-    try { await api(`/payments/${payment.payment.payment_id}/confirm`, { method: 'POST', body: { outcome } }); cart.clear(); router.push(`/order/${payment.order.id}`); }
-    catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
   if (!cart.ready) return <CustomerShell><p className="muted">Loading…</p></CustomerShell>;
@@ -92,7 +87,7 @@ export default function Cart() {
           {offer.type !== 'pass' && (
             <>
               <h4 style={{ margin: '20px 0 8px' }}>{t('pay_with')}</h4>
-              <div className="row wrap">{['cash', 'esewa', 'khalti', 'fonepay'].map((m) => <button key={m} className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>{PAY_LABEL[m]}</button>)}</div>
+              <div className="row wrap">{['cash', 'fonepay'].map((m) => <button key={m} className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>{PAY_LABEL[m]}</button>)}</div>
             </>
           )}
           <div style={{ marginTop: 16 }}><Field label="Note for the barista (optional)"><input maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} /></Field></div>
@@ -108,10 +103,10 @@ export default function Cart() {
       )}
 
       {payment && (
-        <Modal title={`Pay with ${PAY_LABEL[payment.payment.provider]}`} onClose={() => { cart.clear(); router.push(`/order/${payment.order.id}`); }}>
-          <p>Test payments are on, so no real money moves. Confirm to place order <strong>{payment.order.pickup_code}</strong> for {rs(payment.order.total)}.</p>
-          <ErrorNote error={error} />
-          <div className="row" style={{ marginTop: 16 }}><button className="btn primary grow" disabled={busy} onClick={() => sandboxPay('paid')}>Confirm payment</button><button className="btn ghost" disabled={busy} onClick={() => sandboxPay('fail')}>Fail it</button></div>
+        <Modal title="Pay with Fonepay" onClose={() => { cart.clear(); router.push(`/order/${payment.order.id}`); }}>
+          <p>Scan to pay for order <strong>{payment.order.pickup_code}</strong>. Your order goes to the barista as soon as Fonepay confirms.</p>
+          <FonepayQr payment={payment.payment} amount={payment.order.total} onDone={() => { cart.clear(); router.push(`/order/${payment.order.id}`); }} />
+          <button className="btn ghost block" onClick={() => { cart.clear(); router.push(`/order/${payment.order.id}`); }}>I will pay from my orders</button>
         </Modal>
       )}
     </CustomerShell>

@@ -6,7 +6,7 @@ import { authenticate, requireRole, verifyAccess } from '../lib/auth.js';
 import { subscribe } from '../lib/hub.js';
 import { createOrder, quote, fullOrder, cancelOrder, rateOrder, confirmPayment, buyPass } from '../lib/orders.js';
 import { rt } from '../lib/runtime.js';
-import { verifyEsewa, lookupKhalti, verifyWebhookSignature, esewaFields } from '../lib/payments.js';
+import { verifyWebhookSignature, checkFonepay } from '../lib/payments.js';
 import { pool } from '../lib/db.js';
 
 export const customer = Router();
@@ -15,7 +15,7 @@ const itemSchema = z.object({ product_id: z.string().uuid(), qty: z.number().int
 const orderSchema = z.object({
   station_id: z.string().uuid(),
   items: z.array(itemSchema).min(1).max(20),
-  payment_method: z.enum(['cash', 'esewa', 'khalti', 'fonepay', 'pass']),
+  payment_method: z.enum(['cash', 'fonepay', 'pass']),
   coupon_id: z.string().uuid().optional().nullable(),
   promo_code: z.string().trim().max(30).optional().nullable(),
   note: z.string().max(200).optional(),
@@ -23,34 +23,7 @@ const orderSchema = z.object({
   scheduled_for: z.string().datetime().optional(),
 });
 
-// Auto-submitting eSewa form, so native apps can hand the customer to eSewa in a browser.
-customer.get('/payments/esewa/start', wrap(async (req, res) => {
-  const { rows } = await query(`SELECT * FROM payments WHERE id=$1 AND provider='esewa' AND status='pending'`, [req.query.payment_id]);
-  if (!rows[0]) throw notFound('Payment not found');
-  const inputs = Object.entries(esewaFields(rows[0])).map(([k, v]) => `<input type="hidden" name="${k}" value="${String(v).replace(/"/g, '&quot;')}">`).join('');
-  res.setHeader('Content-Security-Policy', "default-src 'none'; form-action *; script-src 'unsafe-inline'");
-  res.send(`<!doctype html><meta name="viewport" content="width=device-width"><body style="font-family:sans-serif;padding:24px">Opening eSewa…<form id="f" method="POST" action="${rt('esewa_form_url')}">${inputs}</form><script>document.getElementById('f').submit()</script>`);
-}));
-
-// --- Provider callbacks (no bearer token: the provider's browser redirect / signed webhook) ---
-customer.get('/payments/esewa/callback', wrap(async (req, res) => {
-  try {
-    const v = await verifyEsewa(String(req.query.data || ''));
-    await confirmPayment(v.paymentId, { ref: v.ref, raw: v.raw });
-    const { rows } = await query('SELECT order_id, pass_id FROM payments WHERE id=$1', [v.paymentId]);
-    res.redirect(`${rt('public_web_url')}${rows[0]?.order_id ? `/order/${rows[0].order_id}` : '/account'}`);
-  } catch { res.redirect(`${rt('public_web_url')}/order?payment=failed`); }
-}));
-customer.get('/payments/khalti/callback', wrap(async (req, res) => {
-  try {
-    const { rows } = await query(`SELECT * FROM payments WHERE id=$1 AND provider='khalti' AND provider_ref=$2`, [req.query.payment_id, req.query.pidx]);
-    if (!rows[0]) throw bad('Unknown payment');
-    const v = await lookupKhalti(String(req.query.pidx));
-    if (v.amount !== rows[0].amount) throw bad('Amount mismatch');
-    await confirmPayment(rows[0].id, { ref: v.ref, raw: v.raw });
-    res.redirect(`${rt('public_web_url')}${rows[0].order_id ? `/order/${rows[0].order_id}` : '/account'}`);
-  } catch { res.redirect(`${rt('public_web_url')}/order?payment=failed`); }
-}));
+// --- Fonepay sends a signed notification when a customer has paid (no bearer token) ---
 customer.post('/payments/webhook/fonepay', wrap(async (req, res) => {
   if (!verifyWebhookSignature(req.body, req.headers['x-signature'])) throw new HttpError(401, 'Bad signature');
   const r = await confirmPayment(req.body.payment_id, { ref: req.body.provider_ref, raw: req.body, outcome: req.body.status === 'success' ? 'paid' : 'failed' });
@@ -65,13 +38,30 @@ customer.get('/events', wrap(async (req, res) => {
   if (!u) throw new HttpError(401, 'Sign in again');
   const chans = [`user:${u.id}`];
   if (u.role === 'station' && u.station_id) chans.push(`station:${u.station_id}`);
-  if (u.role === 'manager') (await query('SELECT station_id FROM station_managers WHERE user_id=$1', [u.id])).rows.forEach((r) => chans.push(`station:${r.station_id}`));
+  if (u.role === 'manager' || u.role === 'partner') (await query('SELECT station_id FROM station_managers WHERE user_id=$1', [u.id])).rows.forEach((r) => chans.push(`station:${r.station_id}`));
   if (u.role === 'owner') (await query('SELECT id FROM stations WHERE active')).rows.forEach((r) => chans.push(`station:${r.id}`));
   subscribe(res, chans);
   res.write(`event: hello\ndata: ${JSON.stringify({ ok: true })}\n\n`);
 }));
 
 customer.use(authenticate);
+
+// Status of a payment. While it is pending in live mode, this asks Fonepay and confirms the order if it has been paid.
+customer.get('/payments/:id', wrap(async (req, res) => {
+  const { rows } = await query('SELECT * FROM payments WHERE id=$1', [req.params.id]);
+  let p = rows[0];
+  const mine = p && (p.user_id === req.user.id || req.user.role !== 'customer');
+  if (!mine) throw notFound('Payment not found');
+  if (p.status === 'pending' && p.provider === 'fonepay' && rt('payment_mode') === 'live') {
+    try {
+      const c = await checkFonepay(p);
+      if (c.paid) await confirmPayment(p.id, { ref: c.ref, raw: c.raw });
+      else if (c.failed) await confirmPayment(p.id, { raw: c.raw, outcome: 'failed' });
+    } catch { /* still waiting; the customer can try again */ }
+    p = (await query('SELECT * FROM payments WHERE id=$1', [p.id])).rows[0];
+  }
+  res.json({ id: p.id, status: p.status, amount: p.amount, provider: p.provider, mode: p.raw?.sandbox ? 'sandbox' : 'qr', qr_message: p.raw?.qr_message || null, order: p.order_id ? await fullOrder(p.order_id) : null });
+}));
 
 customer.post('/payments/:id/confirm', wrap(async (req, res) => {
   if (rt('payment_mode') !== 'sandbox') throw forbidden('Payments are confirmed by the provider');
@@ -101,7 +91,7 @@ customer.post('/orders', wrap(async (req, res) => {
 customer.get('/orders', wrap(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 30, 100);
   const { rows } = await query(
-    `SELECT o.id, o.pickup_code, o.status, o.total, o.discount, o.payment_method, o.payment_status, o.created_at, o.rating, s.name AS station_name,
+    `SELECT o.id, o.pickup_code, o.handover_code, o.status, o.total, o.discount, o.payment_method, o.payment_status, o.created_at, o.rating, s.name AS station_name,
             (SELECT string_agg(i.qty || '× ' || i.name, ', ') FROM order_items i WHERE i.order_id=o.id) AS summary
        FROM orders o JOIN stations s ON s.id=o.station_id WHERE o.user_id=$1 ORDER BY o.created_at DESC LIMIT $2`, [req.user.id, limit],
   );
@@ -109,8 +99,9 @@ customer.get('/orders', wrap(async (req, res) => {
 }));
 
 customer.get('/orders/:id', wrap(async (req, res) => {
-  const o = await fullOrder(req.params.id);
+  const o = await fullOrder(req.params.id, undefined, { reveal: true });
   if (!o || (o.user_id !== req.user.id && req.user.role === 'customer')) throw notFound('Order not found');
+  if (o.user_id !== req.user.id) delete o.handover_code;
   const ahead = ['placed', 'preparing'].includes(o.status)
     ? (await query(`SELECT count(*)::int AS n FROM orders WHERE station_id=$1 AND status IN ('placed','preparing') AND created_at < $2`, [o.station_id, o.created_at])).rows[0].n
     : 0;
@@ -143,7 +134,7 @@ customer.get('/passes', wrap(async (req, res) => {
 }));
 
 customer.post('/passes', requireRole('customer'), wrap(async (req, res) => {
-  const b = z.object({ payment_method: z.enum(['esewa', 'khalti', 'fonepay', 'cash']) }).parse(req.body);
+  const b = z.object({ payment_method: z.enum(['fonepay', 'cash']) }).parse(req.body);
   res.status(201).json(await buyPass(req.user, b.payment_method));
 }));
 

@@ -52,7 +52,7 @@ class _SadhaiAppState extends State<SadhaiApp> {
             ? AuthScreen(onDone: _changed)
             : switch (Api.instance.user!['role']) {
                 'station' => StaffHome(onSignOut: _changed),
-                'manager' || 'owner' => ManagerHome(onSignOut: _changed),
+                'manager' || 'owner' || 'partner' => ManagerHome(onSignOut: _changed),
                 _ => CustomerHome(onSignOut: _changed),
               }),
       ),

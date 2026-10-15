@@ -13,7 +13,7 @@ export default function Privacy() {
         <tr><td>Name, mobile number, password (stored as a one-way hash)</td><td>Create and secure your account, show your name on your order</td><td>Required to order</td></tr>
         <tr><td>Email address</td><td>Receipts and account help</td><td>Optional</td></tr>
         <tr><td>Orders, items, pickup number, ratings and notes</td><td>Make and hand over your order, support, refunds, loyalty and our accounts</td><td>Required to order</td></tr>
-        <tr><td>Payment method and provider reference (eSewa, Khalti, Fonepay, cash, pass)</td><td>Confirm payment and reconcile with providers. We never see or store your card, wallet PIN or bank login</td><td>Required to pay</td></tr>
+        <tr><td>Payment method and provider reference (Fonepay, cash, pass)</td><td>Confirm payment and reconcile with providers. We never see or store your card, wallet PIN or bank login</td><td>Required to pay</td></tr>
         <tr><td>Approximate or precise location, only while you use “Use my location”</td><td>Sort stations by distance. Your coordinates are sent with that one request and are not saved or logged</td><td>Optional. You can pick a station by hand</td></tr>
         <tr><td>Notification token and device type (if you allow notifications)</td><td>Send push notifications: your order is ready, your pass is ending, and offers if you have not opted out. Offers are limited to one a day and can be turned off in Profile</td><td>Optional</td></tr>
         <tr><td>Name and mobile number typed at a self-order kiosk</td><td>Call your order and, if the number belongs to a Sadhai account, link the order to it. You are asked to agree on the kiosk screen</td><td>Required to use the kiosk. You can order at the counter instead</td></tr>
@@ -26,7 +26,7 @@ export default function Privacy() {
       <ul>
         <li><strong>The station or partner cafe you order from</strong> sees your first name, pickup number and order so they can make it. Partner cafes do not receive your phone number.</li>
         <li><strong>Our staff</strong> (managers and owners) see orders and account details to run the service, handle refunds and keep accurate records. Access is by role and every sensitive action is logged.</li>
-        <li><strong>Payment providers</strong> (eSewa, Khalti, Fonepay) process payments under their own privacy policies.</li>
+        <li><strong>Fonepay</strong> processes online payments under their own privacy policies.</li>
         <li><strong>Hosting and infrastructure providers</strong> store data on our behalf under contract.</li>
         <li>Authorities, where the law requires it.</li>
       </ul>

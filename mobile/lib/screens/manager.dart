@@ -18,10 +18,11 @@ class _ManagerHomeState extends State<ManagerHome> {
   @override
   Widget build(BuildContext context) {
     final u = Api.instance.user!;
+    final partner = u['role'] == 'partner'; // a partner cafe owner sees their own numbers only
     return Scaffold(
-      appBar: AppBar(title: SadhaiLogo(suffix: u['role'] == 'owner' ? 'owner' : 'manager'), actions: [IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: () async { await Api.instance.logout(); widget.onSignOut(); })]),
-      body: IndexedStack(index: _i, children: const [Dashboard(), StationsRunner(), PromosScreen()]),
-      bottomNavigationBar: NavigationBar(selectedIndex: _i, onDestinationSelected: (i) => setState(() => _i = i), destinations: const [
+      appBar: AppBar(title: SadhaiLogo(suffix: u['role'] == 'owner' ? 'owner' : u['role'] == 'partner' ? 'partner cafe' : 'manager'), actions: [IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: () async { await Api.instance.logout(); widget.onSignOut(); })]),
+      body: partner ? const Dashboard() : IndexedStack(index: _i, children: const [Dashboard(), StationsRunner(), PromosScreen()]),
+      bottomNavigationBar: partner ? null : NavigationBar(selectedIndex: _i, onDestinationSelected: (i) => setState(() => _i = i), destinations: const [
         NavigationDestination(icon: Icon(Icons.insights_outlined), selectedIcon: Icon(Icons.insights), label: 'Numbers'),
         NavigationDestination(icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: 'Stations'),
         NavigationDestination(icon: Icon(Icons.sell_outlined), selectedIcon: Icon(Icons.sell), label: 'Promos'),
@@ -57,7 +58,7 @@ class _DashboardState extends State<Dashboard> {
       SegmentedButton<int>(segments: const [ButtonSegment(value: 7, label: Text('7 days')), ButtonSegment(value: 30, label: Text('30 days'))], selected: {_days}, onSelectionChanged: (s) { setState(() { _days = s.first; _o = null; }); _load(); }),
       const SizedBox(height: 12),
       GridView.count(crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1.6, children: [
-        _Stat('Sales', rs(t['revenue']), '${rs(t['gross_margin'])} after food cost'),
+        _Stat('Sales', rs(t['revenue']), t['gross_margin'] != null ? '${rs(t['gross_margin'])} after food cost' : '${t['orders']} orders'),
         _Stat('Cups a day', '${t['cups_per_day']}', '${t['cups']} cups'),
         _Stat('Orders', '${t['orders']}', '${rs(t['avg_ticket'])} average'),
         _Stat('App or QR', '${t['app_share_pct']}%', 'of all orders'),
