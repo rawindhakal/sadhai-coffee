@@ -6,12 +6,15 @@ import { Empty, ErrorNote, Meter, Status, useData, useToast } from '../ui';
 import { AreaChart, compact, Donut, HBars, Heatmap } from './charts';
 import { DataTable, Kpi, Seg, Skeleton, pctDelta } from './kit';
 import { AlertsPanel, useDash } from './shell';
+import { SetupChecklist } from '../studio';
+import { useAuth } from '@/lib/auth';
 
 const qs = (o: Record<string, any>) => { const p = Object.entries(o).filter(([, v]) => v); return p.length ? '?' + p.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&') : ''; };
 const PAY_COLORS: Record<string, string> = { cash: '#5A3322', esewa: '#2F5D46', khalti: '#7C97A6', fonepay: '#F2A81D', pass: '#A81F2A' };
 
 /* ============================== Overview ============================== */
 export function OverviewSection() {
+  const { user } = useAuth();
   const { stationId, days, from, tick, setStationId, go } = useDash();
   const { data: o, error } = useData<any>(`/admin/overview${qs({ station_id: stationId, from })}`, [stationId, days, tick]);
   const [metric, setMetric] = useState<'revenue' | 'orders' | 'cups'>('revenue');
@@ -37,7 +40,9 @@ export function OverviewSection() {
         <Kpi label="Average ticket" value={rs(t.avg_ticket)} delta={pctDelta(t.avg_ticket, p.avg_ticket)} />
         <Kpi label="Gross margin" value={`${Math.round((t.gross_margin / Math.max(1, t.revenue)) * 100)}%`} hint={`${rs(t.gross_margin)} after food cost`} />
         <Kpi label="Through app or QR" value={`${t.app_share_pct}%`} hint="of all orders" />
+        {o.labour && <Kpi label="Staff hours" value={`${Math.round(o.labour.hours)} h`} hint={o.labour.sales_per_hour != null ? `${rs(o.labour.sales_per_hour)} sales an hour${o.labour.cost_pct != null ? ` · pay is ${o.labour.cost_pct}% of sales` : ''}` : undefined} onClick={() => go('staff')} />}
       </div>
+      {user?.role === 'owner' && <SetupChecklist />}
 
       <div className="cols c-21">
         <div className="panel">

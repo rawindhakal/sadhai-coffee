@@ -2,6 +2,7 @@ import { query } from './db.js';
 import { notify } from './notify.js';
 import { getSettings } from './settings.js';
 import { normalizePhone } from './http.js';
+import { addDays, closeStaleShifts, todayNpt } from './roster.js';
 
 const CUSTOMER = `u.role='customer' AND u.active`;
 
@@ -80,7 +81,7 @@ const fmtDay = (d) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', 
 
 export async function runAutomations({ ignoreQuietHours = false } = {}) {
   const s = await getSettings();
-  const out = { pass_expiry: 0, pass_low: 0, winback: 0, offers: 0, drops: 0 };
+  const out = { pass_expiry: 0, pass_low: 0, winback: 0, offers: 0, drops: 0, shift_reminder: 0, shifts_closed: 0 };
   const quiet = !ignoreQuietHours && inQuietHours();
 
   if (s.auto_pass_expiry) {
@@ -95,6 +96,17 @@ export async function runAutomations({ ignoreQuietHours = false } = {}) {
         WHERE p.status='active' AND p.activated_at IS NOT NULL AND p.used_cups < p.total_cups AND p.total_cups - p.used_cups <= 2 AND p.expires_at > now() + interval '3 days'`);
     for (const p of rows) if (await once(p.user_id, `pass_low:${p.id}:${p.remaining}`, { kind: 'pass', title: `${p.remaining === 1 ? 'One cup' : 'Two cups'} left on your pass`, body: `Renew before ${fmtDay(p.expires_at)} and keep your price.`, data: { url: '/offers' } })) out.pass_low++;
   }
+  // Shift reminders are service messages for staff: sent the evening before.
+  const hourNow = Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hour12: false, timeZone: 'Asia/Kathmandu' }).format(new Date()));
+  if (s.auto_shift_reminder && (ignoreQuietHours || (hourNow >= 17 && hourNow < 21))) {
+    const { rows } = await query(
+      `SELECT sh.id, sh.user_id, sh.start_at, sh.end_at, sh.duty, st.name AS station FROM shifts sh JOIN stations st ON st.id=sh.station_id
+        WHERE sh.shift_date=$1 AND sh.status='scheduled' AND sh.published AND sh.user_id IS NOT NULL`, [addDays(todayNpt(), 1)]);
+    const t = (d) => new Date(d).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kathmandu' });
+    for (const r of rows) if (await once(r.user_id, `shift:${r.id}`, { kind: 'system', title: `Tomorrow: ${t(r.start_at)} to ${t(r.end_at)} at ${r.station}`, body: r.duty ? `Your duty: ${r.duty}` : 'Open My shifts for your duties.', data: { url: '/station#shift' } })) out.shift_reminder++;
+  }
+  out.shifts_closed = (await closeStaleShifts()).closed;
+
   if (quiet) return { ...out, skipped: 'quiet hours (promotions resume at 07:00)' };
 
   const cap = s.promo_push_daily_cap;

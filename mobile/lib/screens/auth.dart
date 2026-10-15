@@ -42,9 +42,7 @@ class _AuthScreenState extends State<AuthScreen> {
           ClipRRect(borderRadius: BorderRadius.circular(Brand.radiusLg), child: Container(color: Brand.surfaceSunk, child: const HillsScene(height: 150))),
           const SizedBox(height: 20),
           Row(children: [
-            Container(width: 44, height: 44, decoration: BoxDecoration(color: Brand.cherry, borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.coffee, color: Brand.onCherry)),
-            const SizedBox(width: 12),
-            Text('sadhai', style: display(34, color: Brand.cherry)),
+            const SadhaiLogo(size: 44),
             const Spacer(),
             TextButton(onPressed: () => setState(() => _ne = !_ne), child: Text(_ne ? 'English' : 'नेपाली')),
           ]),

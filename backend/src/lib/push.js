@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import webpush from 'web-push';
-import { push as cfg } from './config.js';
+import { rt } from './runtime.js';
 import { query } from './db.js';
 
 /**
@@ -11,18 +11,22 @@ import { query } from './db.js';
  * pipeline (tokens, audiences, caps, campaigns, automations) can be exercised before Firebase is set up.
  */
 
+// Providers are rebuilt whenever the owner changes the keys in the dashboard.
+let sig = '';
 let fcm = null;
-try {
-  if (cfg.fcmJson) {
-    const raw = cfg.fcmJson.trim().startsWith('{') ? cfg.fcmJson : Buffer.from(cfg.fcmJson, 'base64').toString('utf8');
-    fcm = JSON.parse(raw);
-  }
-} catch (e) { console.error('FCM_SERVICE_ACCOUNT_JSON is not valid JSON:', e.message); }
-const webReady = !!(cfg.vapidPublic && cfg.vapidPrivate);
-if (webReady) webpush.setVapidDetails(cfg.vapidSubject, cfg.vapidPublic, cfg.vapidPrivate);
-
-export const pushStatus = () => ({ mode: cfg.mode, fcm: !!fcm, web: webReady, dry_run: cfg.mode !== 'off' && !(fcm || webReady) });
-export const vapidPublicKey = () => cfg.vapidPublic || null;
+let webReady = false;
+function providers() {
+  const next = JSON.stringify([rt('fcm_service_account_json'), rt('vapid_public_key'), rt('vapid_private_key'), rt('vapid_subject')]);
+  if (next === sig) return;
+  sig = next;
+  fcm = null; fcmToken = { value: null, exp: 0 };
+  try { const raw = rt('fcm_service_account_json'); if (raw) fcm = JSON.parse(raw.trim().startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8')); } catch (e) { console.error('Firebase key is not valid JSON:', e.message); }
+  webReady = !!(rt('vapid_public_key') && rt('vapid_private_key'));
+  if (webReady) { try { webpush.setVapidDetails(rt('vapid_subject') || 'mailto:support@sadhai.example', rt('vapid_public_key'), rt('vapid_private_key')); } catch (e) { webReady = false; console.error('Web push keys rejected:', e.message); } }
+}
+export const pushStatus = () => { providers(); const mode = rt('push_mode'); return { mode, fcm: !!fcm, web: webReady, dry_run: mode !== 'off' && !(fcm || webReady) }; };
+export const vapidPublicKey = () => rt('vapid_public_key') || null;
+export async function testFcm() { providers(); if (!fcm) throw new Error('No Firebase key is saved yet'); fcmToken = { value: null, exp: 0 }; await fcmAccessToken(); return { project_id: fcm.project_id, client_email: fcm.client_email }; }
 
 let fcmToken = { value: null, exp: 0 };
 async function fcmAccessToken() {
@@ -70,7 +74,8 @@ const log = (row) => query(
 
 /** Send one notification to every active device of a user. Marketing kinds respect the user's opt-out. */
 export async function sendToUser(userId, { kind = 'order', title, body, data = {} }) {
-  if (cfg.mode === 'off' || !userId) return { sent: 0, failed: 0, dry: 0 };
+  providers();
+  if (rt('push_mode') === 'off' || !userId) return { sent: 0, failed: 0, dry: 0 };
   const campaign_id = data.campaign_id || null;
   if (kind === 'promo') {
     const u = (await query('SELECT notif_offers FROM users WHERE id=$1', [userId])).rows[0];

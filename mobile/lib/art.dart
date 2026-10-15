@@ -1,10 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'api.dart' show apiBase;
+import 'theme.dart';
 
 const _bySku = {
   'ESP': 'espresso', 'AMR': 'cup-hot', 'CAP': 'cup-hot', 'LAT': 'latte', 'MOC': 'cup-hot', 'ICL': 'cup-iced', 'CLB': 'cup-iced', 'CHL': 'chiya', 'SCB': 'cup-iced-orange',
   'GPO': 'pourover', 'GUR': 'chiya', 'CRO': 'croissant', 'BUN': 'bun', 'MUG': 'mug', 'TOT': 'tote', 'BAG': 'bag', 'HAT': 'hat',
 };
+
+/// The one Sadhai logo: bean mark plus the lowercase wordmark. Used on sign-in and every app bar.
+class SadhaiLogo extends StatelessWidget {
+  const SadhaiLogo({super.key, this.size = 28, this.suffix});
+  final double size;
+  final String? suffix;
+  @override
+  Widget build(BuildContext context) => Semantics(label: 'Sadhai Coffee', child: ExcludeSemantics(child: Row(mainAxisSize: MainAxisSize.min, children: [
+        SvgPicture.asset('assets/img/mark-cherry.svg', width: size, height: size),
+        SizedBox(width: size * 0.3),
+        Text('sadhai', style: display(size * 0.95, color: Brand.cherry)),
+        if (suffix != null) Padding(padding: const EdgeInsets.only(left: 8), child: Text(suffix!, style: TextStyle(fontSize: size * 0.5, color: Brand.inkMuted))),
+      ])));
+}
 
 String artFor(Map p) => 'assets/img/${_bySku[p['sku']] ?? (p['kind'] == 'merch' ? 'bag' : p['kind'] == 'food' ? 'croissant' : 'cup-hot')}.svg';
 
@@ -14,7 +30,16 @@ class ProductArt extends StatelessWidget {
   final Map p;
   final double size;
   @override
-  Widget build(BuildContext context) => SvgPicture.asset(artFor(p), width: size, height: size, fit: BoxFit.contain, excludeFromSemantics: true);
+  Widget build(BuildContext context) {
+    final url = p['image_url'] as String?;
+    final fallback = SvgPicture.asset(artFor(p), width: size, height: size, fit: BoxFit.contain, excludeFromSemantics: true);
+    if (url == null || url.isEmpty) return fallback;
+    final full = url.startsWith('http') ? url : '$apiBase$url';
+    final img = full.toLowerCase().endsWith('.svg')
+        ? SvgPicture.network(full, width: size, height: size, fit: BoxFit.contain, excludeFromSemantics: true, placeholderBuilder: (_) => fallback)
+        : Image.network(full, width: size, height: size, fit: BoxFit.cover, excludeFromSemantics: true, errorBuilder: (_, _, _) => fallback);
+    return img;
+  }
 }
 
 /// The brand hills as four layers that drift gently, used behind the sign-in and the home hero.

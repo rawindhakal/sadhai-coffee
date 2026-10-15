@@ -4,6 +4,12 @@ import { wrap, notFound } from '../lib/http.js';
 import { stationMenu, bestSellers, liveOffers } from '../lib/orders.js';
 import { getSettings } from '../lib/settings.js';
 import { vapidPublicKey } from '../lib/push.js';
+import { rt } from '../lib/runtime.js';
+import { loadSite } from '../lib/site.js';
+import rateLimit from 'express-rate-limit';
+import crypto from 'node:crypto';
+import { z } from 'zod';
+import { notify, audit } from '../lib/notify.js';
 
 export const pub = Router();
 
@@ -18,9 +24,12 @@ pub.get('/config', wrap(async (_req, res) => {
   res.json({
     brand: 'Sadhai Coffee', tagline: 'Good coffee, every day.', tagline_ne: 'सधैं राम्रो कफी।',
     pass: { price: s.pass_price, cups: s.pass_cups, valid_days: s.pass_valid_days },
+    pricing: { hot: s.price_hot, flavored: s.price_flavored, iced: s.price_iced },
+    partner_share_pct: s.partner_share_pct,
     payment_methods: ['cash', 'esewa', 'khalti', 'fonepay'],
     referral: { cap_month: s.referral_cap_month }, pass_use_by_days: s.pass_use_by_days, pass_valid_days: s.pass_valid_days,
     vapid_public_key: vapidPublicKey(),
+    site: { company: rt('company_name'), address: rt('company_address'), support_email: rt('support_email'), privacy_email: rt('privacy_email') },
   });
 }));
 
@@ -79,4 +88,47 @@ pub.get('/stations/:id/home', wrap(async (req, res) => {
     }),
     drops: drops.rows.map((d) => ({ ...d, remaining: d.cap - d.sold })),
   });
+}));
+
+// Public website, kiosk and app content (hero pictures and text). Pictures the owner uploaded come back as urls.
+pub.get('/site', wrap(async (_req, res) => { res.setHeader('Cache-Control', 'public, max-age=60'); res.json(await loadSite()); }));
+
+// Uploaded pictures are immutable (new upload = new id), so they cache for a year. Only <img> use is expected.
+pub.get('/media/:file', wrap(async (req, res) => {
+  const id = req.params.file.split('.')[0];
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Picture not found');
+  const { rows } = await query('SELECT mime, data FROM media WHERE id=$1', [id]);
+  if (!rows[0]) throw notFound('Picture not found');
+  res.set({ 'Content-Type': rows[0].mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox", 'Cross-Origin-Resource-Policy': 'cross-origin' });
+  res.send(rows[0].data);
+}));
+
+// Unit economics for the investor page. Shown only when the owner switches it on, from the live standard recipes and prices.
+pub.get('/site/economics', wrap(async (_req, res) => {
+  const inv = await loadSite('investors');
+  if (!inv.show_unit_economics) return res.json({ enabled: false });
+  const { rows } = await query(
+    `SELECT price_tier AS tier, count(*)::int AS items, round(avg(price))::int AS price, round(avg(cost))::int AS cost FROM products WHERE active AND price_tier IS NOT NULL GROUP BY 1 ORDER BY min(price)`);
+  res.json({ enabled: true, note: 'Per cup, from the current standard recipes and prices, before labour, rent and payment fees.', tiers: rows.map((r) => ({ ...r, margin: r.price - r.cost, food_cost_pct: Math.round((r.cost / r.price) * 1000) / 10 })) });
+}));
+
+// Partner and investor enquiries: open to anyone, so rate limited, consent-based and checked for bots.
+const enquiryLimit = rateLimit({ windowMs: 60 * 60_000, limit: 6, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many messages from this connection. Please try again later.' } });
+pub.post('/enquiries', enquiryLimit, wrap(async (req, res) => {
+  const b = z.object({
+    kind: z.enum(['partner', 'investor', 'other']), name: z.string().trim().min(2).max(80), email: z.string().email().max(120).optional().or(z.literal('')),
+    phone: z.string().trim().max(30).optional(), org: z.string().trim().max(100).optional(), city: z.string().trim().max(60).optional(),
+    message: z.string().trim().max(1000).optional(), extra: z.record(z.union([z.string().max(100), z.number()])).optional(), consent: z.literal(true, { errorMap: () => ({ message: 'Please agree so we can contact you' }) }),
+    website: z.string().max(0).optional(), // hidden field: real people leave it empty
+  }).parse(req.body);
+  if (!b.email && !b.phone) return res.status(400).json({ error: 'Add an email or a phone number so we can reply.' });
+  const ip = crypto.createHash('sha256').update(`${req.ip}|${process.env.JWT_SECRET || 'x'}`).digest('hex').slice(0, 24);
+  const { rows } = await query(
+    `INSERT INTO enquiries(kind, name, email, phone, org, city, message, extra, consent, ip_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,$9) RETURNING id`,
+    [b.kind, b.name, b.email || null, b.phone || null, b.org || null, b.city || null, b.message || null, JSON.stringify(b.extra || {}), ip]);
+  const owners = (await query(`SELECT id FROM users WHERE role='owner' AND active`)).rows;
+  for (const o of owners) await notify(o.id, { kind: 'system', title: `New ${b.kind} enquiry`, body: `${b.name}${b.org ? `, ${b.org}` : ''}${b.city ? ` in ${b.city}` : ''}`, data: { url: '/owner#enquiries' } });
+  await audit(null, 'enquiry.new', 'enquiry', rows[0].id, { kind: b.kind });
+  res.status(201).json({ ok: true });
 }));

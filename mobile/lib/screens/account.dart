@@ -49,10 +49,15 @@ class PassPanel extends StatefulWidget {
 class _PassPanelState extends State<PassPanel> {
   List<Map> _passes = [];
   bool _loaded = false;
+  Map<String, dynamic>? _pass;
   @override
   void initState() { super.initState(); _load(); }
   Future<void> _load() async {
-    try { final p = await Api.instance.get('/passes') as List; if (mounted) setState(() { _passes = p.cast<Map>(); _loaded = true; }); } catch (_) {}
+    try {
+      final p = await Api.instance.get('/passes') as List;
+      try { final c = await Api.instance.request('GET', '/config', auth: false); _pass = Map<String, dynamic>.from(c['pass'] as Map); } catch (_) {}
+      if (mounted) setState(() { _passes = p.cast<Map>(); _loaded = true; });
+    } catch (_) {}
   }
 
   @override
@@ -86,7 +91,7 @@ class _PassPanelState extends State<PassPanel> {
         ]),
       )),
       if (live.isEmpty) Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('10 cups. One pass. Rs 1,200.', style: display(20)),
+        Text('${_pass?['cups'] ?? 10} cups. One pass. ${rs(_pass?['price'] ?? 900)}.', style: display(20)),
         const SizedBox(height: 4),
         const Text('Drinks only, at any Sadhai station.', style: TextStyle(color: Brand.inkMuted)),
       ]))),

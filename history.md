@@ -17,6 +17,19 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.3.0 (2026-10-15)
+
+### Added
+- **Tiered pricing**: hot coffee Rs 100, flavored Rs 120, iced Rs 150 at every station. Tier prices live in settings and reprice all products on the tier.
+- **Standard recipes**: versioned recipes, read-only recipe cards for stations (web and Flutter), owner-only edits.
+- **Owner control without redeploys**: encrypted, masked settings and API keys with test buttons (payments, push, company); every hero layer, section picture, partner and investor page content and product pictures editable from the owner dashboard; setup checklist.
+- **Staff management**: staff directory with roles, skills, days off and hourly rate; 6-hour shift templates; auto-assign roster with fairness, rest and leave rules, duty rotation and checklists; publish with notifications; attendance with check-in/out, flags and manual correction; time off; payroll with overtime, social security, adjustments, approval, payment, CSV and payslips; labour KPIs on the overview; "My shift" for staff on web and in the app.
+- **Public pages** `/partners` and `/investors` with enquiry form and an owner inbox; `/help` guide; `docs/WORKFLOWS.md`.
+- One shared logo component on web and in Flutter.
+
+### Changed
+- Pass price is Rs 900 (editable) and is read from the API by the apps. Product pictures use uploaded images when set.
+
 ## v1.2.0 (2026-10-15)
 
 ### Added

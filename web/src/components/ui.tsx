@@ -1,4 +1,5 @@
 'use client';
+import { Logo } from './logo';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
@@ -24,7 +25,7 @@ export function Shell({ nav, children, wide = true }: { nav?: NavItem[]; childre
     <>
       <header className="topbar">
         <div className="container">
-          <Link href="/" className="brand"><img src="/mark-cherry.svg" alt="" />sadhai</Link>
+          <Logo />
           <nav className="nav grow" aria-label="Main">
             {nav?.map((n) => <Link key={n.href} href={n.href} className={path === n.href || (n.href !== '/' && path.startsWith(n.href + '/')) ? 'active' : ''}>{n.label}</Link>)}
           </nav>

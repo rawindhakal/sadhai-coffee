@@ -5,7 +5,7 @@ import { wrap, bad, notFound, forbidden, HttpError } from '../lib/http.js';
 import { authenticate, requireRole, verifyAccess } from '../lib/auth.js';
 import { subscribe } from '../lib/hub.js';
 import { createOrder, quote, fullOrder, cancelOrder, rateOrder, confirmPayment, buyPass } from '../lib/orders.js';
-import { config } from '../lib/config.js';
+import { rt } from '../lib/runtime.js';
 import { verifyEsewa, lookupKhalti, verifyWebhookSignature, esewaFields } from '../lib/payments.js';
 import { pool } from '../lib/db.js';
 
@@ -29,7 +29,7 @@ customer.get('/payments/esewa/start', wrap(async (req, res) => {
   if (!rows[0]) throw notFound('Payment not found');
   const inputs = Object.entries(esewaFields(rows[0])).map(([k, v]) => `<input type="hidden" name="${k}" value="${String(v).replace(/"/g, '&quot;')}">`).join('');
   res.setHeader('Content-Security-Policy', "default-src 'none'; form-action *; script-src 'unsafe-inline'");
-  res.send(`<!doctype html><meta name="viewport" content="width=device-width"><body style="font-family:sans-serif;padding:24px">Opening eSewa…<form id="f" method="POST" action="${config.esewa.formUrl}">${inputs}</form><script>document.getElementById('f').submit()</script>`);
+  res.send(`<!doctype html><meta name="viewport" content="width=device-width"><body style="font-family:sans-serif;padding:24px">Opening eSewa…<form id="f" method="POST" action="${rt('esewa_form_url')}">${inputs}</form><script>document.getElementById('f').submit()</script>`);
 }));
 
 // --- Provider callbacks (no bearer token: the provider's browser redirect / signed webhook) ---
@@ -38,8 +38,8 @@ customer.get('/payments/esewa/callback', wrap(async (req, res) => {
     const v = await verifyEsewa(String(req.query.data || ''));
     await confirmPayment(v.paymentId, { ref: v.ref, raw: v.raw });
     const { rows } = await query('SELECT order_id, pass_id FROM payments WHERE id=$1', [v.paymentId]);
-    res.redirect(`${config.webUrl}${rows[0]?.order_id ? `/order/${rows[0].order_id}` : '/account'}`);
-  } catch { res.redirect(`${config.webUrl}/order?payment=failed`); }
+    res.redirect(`${rt('public_web_url')}${rows[0]?.order_id ? `/order/${rows[0].order_id}` : '/account'}`);
+  } catch { res.redirect(`${rt('public_web_url')}/order?payment=failed`); }
 }));
 customer.get('/payments/khalti/callback', wrap(async (req, res) => {
   try {
@@ -48,8 +48,8 @@ customer.get('/payments/khalti/callback', wrap(async (req, res) => {
     const v = await lookupKhalti(String(req.query.pidx));
     if (v.amount !== rows[0].amount) throw bad('Amount mismatch');
     await confirmPayment(rows[0].id, { ref: v.ref, raw: v.raw });
-    res.redirect(`${config.webUrl}${rows[0].order_id ? `/order/${rows[0].order_id}` : '/account'}`);
-  } catch { res.redirect(`${config.webUrl}/order?payment=failed`); }
+    res.redirect(`${rt('public_web_url')}${rows[0].order_id ? `/order/${rows[0].order_id}` : '/account'}`);
+  } catch { res.redirect(`${rt('public_web_url')}/order?payment=failed`); }
 }));
 customer.post('/payments/webhook/fonepay', wrap(async (req, res) => {
   if (!verifyWebhookSignature(req.body, req.headers['x-signature'])) throw new HttpError(401, 'Bad signature');
@@ -74,7 +74,7 @@ customer.get('/events', wrap(async (req, res) => {
 customer.use(authenticate);
 
 customer.post('/payments/:id/confirm', wrap(async (req, res) => {
-  if (config.paymentMode !== 'sandbox') throw forbidden('Payments are confirmed by the provider');
+  if (rt('payment_mode') !== 'sandbox') throw forbidden('Payments are confirmed by the provider');
   const { rows } = await query('SELECT * FROM payments WHERE id=$1', [req.params.id]);
   const p = rows[0];
   if (!p || (p.user_id !== req.user.id && req.user.role === 'customer')) throw notFound('Payment not found');

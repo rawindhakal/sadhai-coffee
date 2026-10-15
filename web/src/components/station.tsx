@@ -4,12 +4,13 @@ import { api, ago, fmtTime, rs } from '@/lib/api';
 import { useEvents } from '@/lib/auth';
 import { Empty, ErrorNote, Field, Loading, Modal, Stat, Status, Tabs, useData, useToast } from './ui';
 import { CountPanel, TransfersPanel } from './inventory';
+import { MyShift } from './people';
 
 /** Station workspace. Staff are pinned to their station; managers/owners pass stationId. */
-export function StationWorkspace({ stationId, forcedTab }: { stationId?: string; forcedTab?: 'queue' | 'pos' | 'menu' | 'stock' | 'close' }) {
+export function StationWorkspace({ stationId, forcedTab }: { stationId?: string; forcedTab?: 'queue' | 'pos' | 'menu' | 'stock' | 'close' | 'recipes' | 'shift' }) {
   const q = stationId ? `?station_id=${stationId}` : '';
   const qa = (p: string) => `${p}${q}`;
-  const [tabState, setTab] = useState<'queue' | 'pos' | 'menu' | 'stock' | 'close'>('queue');
+  const [tabState, setTab] = useState<'queue' | 'pos' | 'menu' | 'stock' | 'close' | 'recipes' | 'shift'>('queue');
   const tab = forcedTab || tabState;
   const summary = useData<any>(qa('/station/summary'), [stationId]);
   const toast = useToast();
@@ -33,11 +34,13 @@ export function StationWorkspace({ stationId, forcedTab }: { stationId?: string;
         <Stat label="Waiting" value={s.queue.waiting} /><Stat label="Making" value={s.queue.making} /><Stat label="Ready" value={s.queue.ready} />
         <Stat label="Cups today" value={s.today.cups} delta={`${Math.round((s.today.cups / s.station.breakeven_cups) * 100)}% of break-even`} />
       </div>
-      {!forcedTab && <Tabs value={tab} onChange={setTab} tabs={[{ id: 'queue', label: 'Queue' }, { id: 'pos', label: 'New order' }, { id: 'menu', label: 'Sold out' }, { id: 'stock', label: 'Stock' }, { id: 'close', label: 'Close day' }]} />}
+      {!forcedTab && <Tabs value={tab} onChange={setTab} tabs={[{ id: 'queue', label: 'Queue' }, { id: 'pos', label: 'New order' }, { id: 'menu', label: 'Sold out' }, { id: 'stock', label: 'Stock' }, { id: 'close', label: 'Close day' }, { id: 'recipes', label: 'Recipes' }, { id: 'shift', label: 'My shift' }]} />}
       {tab === 'queue' && <Queue q={q} target={s.station.prep_target_seconds} onChange={summary.reload} />}
       {tab === 'pos' && <Pos q={q} stationId={stationId} onDone={() => { summary.reload(); setTab('queue'); }} />}
       {tab === 'menu' && <SoldOut q={q} />}
       {tab === 'stock' && <Stock q={q} stationId={stationId} />}
+      {tab === 'recipes' && <RecipeCards q={q} />}
+      {tab === 'shift' && <MyShift />}
       {tab === 'close' && <CloseDay q={q} s={s} reload={summary.reload} />}
     </>
   );
@@ -279,6 +282,29 @@ function CloseDay({ q, s, reload }: { q: string; s: any; reload: () => void }) {
         <button className="btn primary" disabled={counted === ''} onClick={close}>Close the day</button>
         {c && <p className="small muted">Closed today: counted {rs(c.counted_cash)}, difference {rs(c.diff)}.</p>}
       </div>
+    </div>
+  );
+}
+
+
+/** Standard recipe cards: every station makes each drink the same way. */
+function RecipeCards({ q }: { q: string }) {
+  const { data, error } = useData<any[]>(`/station/recipes${q}`);
+  const [find, setFind] = useState('');
+  if (error) return <ErrorNote error={error} />;
+  if (!data) return <Loading />;
+  const list = data.filter((p) => p.name.toLowerCase().includes(find.toLowerCase()));
+  return (
+    <div className="col" style={{ gap: 12 }}>
+      <input type="search" aria-label="Find a recipe" placeholder="Find a drink" value={find} onChange={(e) => setFind(e.target.value)} />
+      <div className="grid g3">{list.map((p) => (
+        <div key={p.id} className="panel">
+          <div className="row between"><strong>{p.name}</strong><span className="chip">v{p.recipe_version}</span></div>
+          <p className="small muted">{p.category}</p>
+          <ul style={{ margin: '8px 0', paddingLeft: 18 }}>{p.lines.map((l: any) => <li key={l.name}>{l.qty} {l.unit} {l.name.toLowerCase()}</li>)}</ul>
+          {Object.entries(p.options).map(([k, v]: any) => <p key={k} className="small"><strong>{k}</strong>: {v.map((l: any) => `${l.qty} ${l.unit} ${l.name.toLowerCase()}`).join(', ')}</p>)}
+          {p.recipe_method && <p className="small muted" style={{ marginTop: 8 }}>{p.recipe_method}</p>}
+        </div>))}</div>
     </div>
   );
 }

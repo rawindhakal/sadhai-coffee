@@ -572,3 +572,169 @@ CREATE TABLE IF NOT EXISTS stock_count_lines (
 );
 
 ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS tracked boolean NOT NULL DEFAULT true;  -- false for tap water: costed in recipes, never counted
+
+-- ---- v1.3: owner-managed settings and keys, media and site content, staff, rosters, payroll ----
+CREATE TABLE IF NOT EXISTS app_secrets (
+  key text PRIMARY KEY,
+  value text NOT NULL,                       -- plain for normal settings, enc:v1:... (AES-256-GCM) for secrets
+  secret boolean NOT NULL DEFAULT false,
+  updated_by uuid REFERENCES users(id),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS media (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  filename text NOT NULL,
+  mime text NOT NULL,
+  size int NOT NULL,
+  data bytea NOT NULL,
+  created_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS site_content (
+  key text PRIMARY KEY,
+  value jsonb NOT NULL,
+  updated_by uuid REFERENCES users(id),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS staff_profiles (
+  user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  employee_code text UNIQUE,
+  position text NOT NULL DEFAULT 'barista' CHECK (position IN ('barista','cashier','supervisor','all_rounder')),
+  skills text[] NOT NULL DEFAULT '{bar,counter}',
+  hourly_rate numeric(10,2) NOT NULL DEFAULT 0,
+  max_shifts_week int NOT NULL DEFAULT 6,
+  days_off int[] NOT NULL DEFAULT '{}',                    -- fixed weekly days off, 0 = Sunday
+  preferred_shift text NOT NULL DEFAULT 'any' CHECK (preferred_shift IN ('morning','evening','any')),
+  can_float boolean NOT NULL DEFAULT false,                -- may be sent to another station when one is short
+  joined_on date,
+  emergency_phone text,
+  notes text,
+  active boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS shift_templates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  station_id uuid NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  kind text NOT NULL DEFAULT 'any' CHECK (kind IN ('morning','midday','evening','any')),
+  start_time time NOT NULL,
+  hours numeric(4,2) NOT NULL DEFAULT 6 CHECK (hours > 0 AND hours <= 12),
+  min_staff int NOT NULL DEFAULT 1,
+  max_staff int NOT NULL DEFAULT 3,
+  sort int NOT NULL DEFAULT 0,
+  active boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS shifts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  station_id uuid NOT NULL REFERENCES stations(id),
+  template_id uuid REFERENCES shift_templates(id) ON DELETE SET NULL,
+  user_id uuid REFERENCES users(id),                       -- null = open slot
+  shift_date date NOT NULL,
+  start_at timestamptz NOT NULL,
+  end_at timestamptz NOT NULL,
+  status text NOT NULL DEFAULT 'scheduled' CHECK (status IN ('open','scheduled','checked_in','completed','absent','cancelled')),
+  published boolean NOT NULL DEFAULT false,
+  duty text,
+  auto_assigned boolean NOT NULL DEFAULT false,
+  checked_in_at timestamptz,
+  checked_out_at timestamptz,
+  paid_minutes int,
+  adjusted_minutes int,
+  adjust_reason text,
+  hourly_rate numeric(10,2),
+  note text,
+  created_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS shifts_one_per_day ON shifts(user_id, shift_date) WHERE user_id IS NOT NULL AND status <> 'cancelled';
+CREATE INDEX IF NOT EXISTS shifts_station_date ON shifts(station_id, shift_date);
+CREATE INDEX IF NOT EXISTS shifts_user_date ON shifts(user_id, shift_date);
+
+CREATE TABLE IF NOT EXISTS shift_tasks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  shift_id uuid NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  sort int NOT NULL DEFAULT 0,
+  done_at timestamptz,
+  done_by uuid REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS time_off (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  from_date date NOT NULL,
+  to_date date NOT NULL,
+  kind text NOT NULL DEFAULT 'leave' CHECK (kind IN ('leave','sick','other')),
+  reason text,
+  status text NOT NULL DEFAULT 'requested' CHECK (status IN ('requested','approved','rejected')),
+  decided_by uuid REFERENCES users(id),
+  decided_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (to_date >= from_date)
+);
+
+CREATE TABLE IF NOT EXISTS payroll_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  period_from date NOT NULL,
+  period_to date NOT NULL,
+  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','approved','paid')),
+  totals jsonb NOT NULL DEFAULT '{}',
+  reference text,
+  created_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  approved_at timestamptz,
+  paid_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS payroll_lines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id uuid NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES users(id),
+  name text NOT NULL,
+  regular_minutes int NOT NULL DEFAULT 0,
+  overtime_minutes int NOT NULL DEFAULT 0,
+  hourly_rate numeric(10,2) NOT NULL,
+  gross numeric(12,2) NOT NULL,
+  adjustments numeric(12,2) NOT NULL DEFAULT 0,
+  deductions numeric(12,2) NOT NULL DEFAULT 0,
+  net numeric(12,2) NOT NULL,
+  employer_cost numeric(12,2) NOT NULL DEFAULT 0,
+  details jsonb NOT NULL DEFAULT '{}',
+  UNIQUE (run_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS payroll_adjustments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  month date NOT NULL,                                     -- first day of the month it applies to
+  label text NOT NULL,
+  amount numeric(12,2) NOT NULL,                           -- positive pays more (bonus, allowance), negative pays less (advance)
+  created_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- ---- v1.3: price tiers, standard recipe versions, enquiries ----
+ALTER TABLE products ADD COLUMN IF NOT EXISTS price_tier text CHECK (price_tier IN ('hot','flavored','iced'));
+ALTER TABLE products ADD COLUMN IF NOT EXISTS recipe_version int NOT NULL DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS enquiries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind text NOT NULL CHECK (kind IN ('partner','investor','other')),
+  name text NOT NULL,
+  email text,
+  phone text,
+  org text,
+  city text,
+  message text,
+  extra jsonb NOT NULL DEFAULT '{}',
+  status text NOT NULL DEFAULT 'new' CHECK (status IN ('new','contacted','meeting','won','closed')),
+  note text,
+  consent boolean NOT NULL DEFAULT false,
+  ip_hash text,
+  handled_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS enquiries_status_idx ON enquiries(status, created_at DESC);
+ALTER TABLE payroll_adjustments ADD COLUMN IF NOT EXISTS run_id uuid REFERENCES payroll_runs(id) ON DELETE SET NULL;

@@ -4,14 +4,16 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../api.dart';
 import '../theme.dart';
+import '../art.dart';
 import 'customer.dart' show toast;
+import 'shift.dart';
 
 class StaffHome extends StatelessWidget {
   const StaffHome({super.key, required this.onSignOut});
   final VoidCallback onSignOut;
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('sadhai · station'), actions: [IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: () async { await Api.instance.logout(); onSignOut(); })]),
+        appBar: AppBar(title: const SadhaiLogo(suffix: 'station'), actions: [IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: () async { await Api.instance.logout(); onSignOut(); })]),
         body: const StationWorkspace(),
       );
 }
@@ -78,12 +80,14 @@ class _StationWorkspaceState extends State<StationWorkspace> {
         ]),
       ])),
       Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: SingleChildScrollView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), child: Row(children: [
-        for (final (i, l) in ['Queue', 'Sold out', 'Stock', 'Close day'].indexed) Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(label: Text(l), selected: _tab == i, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _tab == i ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) => setState(() => _tab = i))),
+        for (final (i, l) in ['Queue', 'Sold out', 'Stock', 'Close day', 'Recipes', 'My shift'].indexed) Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(label: Text(l), selected: _tab == i, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _tab == i ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) => setState(() => _tab = i))),
       ]))),
       Expanded(child: switch (_tab) {
         0 => _Queue(q: q, target: st['prep_target_seconds'] as int, tick: _reloadTick, onChange: _load),
         1 => _SoldOut(q: q),
         2 => _Stock(q: q),
+        4 => RecipeCards(q: q),
+        5 => const MyShift(),
         _ => _CloseDay(q: q, summary: s, onDone: _load),
       }),
     ]);

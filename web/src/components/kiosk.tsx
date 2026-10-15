@@ -1,4 +1,5 @@
 'use client';
+import { Logo } from './logo';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -164,7 +165,7 @@ function KioskTop({ name, lang, setLang, onExit, onSignOut, user, showBack, onHo
   async function unlock() { try { await login(user.phone, pw); onExit(); } catch (e: any) { setErr(e.message); } }
   return (
     <header className="k-top">
-      <button className="k-logo" onClick={() => { const n = taps + 1; setTaps(n); if (n >= 5) { setOpen(true); setTaps(0); } }} aria-label="Sadhai Coffee"><img src="/mark-cherry.svg" alt="" />sadhai</button>
+      <Logo size={40} as="button" onClick={() => { const n = taps + 1; setTaps(n); if (n >= 5) { setOpen(true); setTaps(0); } }} />
       <span className="k-station">{name}</span><div className="grow" />
       {showBack && <button className="btn ghost" onClick={onHome}>Start over</button>}
       <button className="btn ghost" onClick={() => setLang(lang === 'en' ? 'ne' : 'en')}>{lang === 'en' ? 'नेपाली' : 'English'}</button>
@@ -184,7 +185,7 @@ function SetUp({ onLogin }: { onLogin: (p: string, pw: string) => Promise<any> }
   const [phone, setPhone] = useState(''); const [pw, setPw] = useState(''); const [err, setErr] = useState('');
   return (
     <div className="k-full"><form className="k-card" onSubmit={async (e) => { e.preventDefault(); try { await onLogin(phone, pw); } catch (x: any) { setErr(x.message); } }}>
-      <img src="/mark-cherry.svg" alt="" width={56} /><h2 style={{ margin: '12px 0' }}>Set up this kiosk</h2>
+      <Logo size={56} as="plain" /><h2 style={{ margin: '12px 0' }}>Set up this kiosk</h2>
       <p className="muted">Sign in with the station account once. The tablet then stays signed in and only takes orders for that station.</p>
       <div className="col" style={{ marginTop: 16 }}><input placeholder="Station mobile number" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} aria-label="Mobile number" /><input type="password" placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} aria-label="Password" />{err && <p className="err">{err}</p>}<button className="btn primary lg">Set up</button></div>
     </form></div>

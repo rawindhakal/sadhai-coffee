@@ -107,6 +107,8 @@ export async function alerts(stationIds, isOwner) {
   if (stale.rows[0].n) push('info', 'pass', `${stale.rows[0].n} pass${stale.rows[0].n > 1 ? 'es' : ''} expire within 3 days with cups left`, 'Send a reminder so customers use them and keep their price.', isOwner ? 'marketing' : 'customers');
 
   if (isOwner) {
+    const enq = await query(`SELECT count(*)::int AS n FROM enquiries WHERE status='new'`);
+    if (enq.rows[0].n) push('info', 'enquiry', `${enq.rows[0].n} new partner or investor enquir${enq.rows[0].n > 1 ? 'ies' : 'y'}`, 'Someone is waiting to hear back.', 'enquiries');
     const refunds = await query(`SELECT count(*)::int AS n, COALESCE(sum(amount),0)::int AS amt FROM payments WHERE status='refunded' AND raw->>'refund_pending_manual'='true' AND provider <> 'cash'`);
     if (refunds.rows[0].n) push('warning', 'refund', `${refunds.rows[0].n} digital refund${refunds.rows[0].n > 1 ? 's' : ''} to pay out`, `Rs ${refunds.rows[0].amt} to send from the provider dashboards.`, 'finance');
     const unrec = await query(

@@ -1,4 +1,5 @@
 'use client';
+import { Logo } from './logo';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
@@ -27,7 +28,7 @@ export function CustomerShell({ children, bare }: { children: React.ReactNode; b
     <>
       {!bare && (
         <header className="topbar"><div className="container" style={{ maxWidth: 760 }}>
-          <Link href="/" className="brand"><img src="/mark-cherry.svg" alt="" />sadhai</Link><div className="grow" />
+          <Logo /><div className="grow" />
           {!user && <Link className="btn primary sm" href="/login">Sign in</Link>}
         </div></header>
       )}

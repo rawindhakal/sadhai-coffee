@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api.dart';
+import '../art.dart';
 import '../theme.dart';
 import 'customer.dart' show toast;
 import 'staff.dart';
@@ -18,7 +19,7 @@ class _ManagerHomeState extends State<ManagerHome> {
   Widget build(BuildContext context) {
     final u = Api.instance.user!;
     return Scaffold(
-      appBar: AppBar(title: Text(u['role'] == 'owner' ? 'sadhai · owner' : 'sadhai · manager'), actions: [IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: () async { await Api.instance.logout(); widget.onSignOut(); })]),
+      appBar: AppBar(title: SadhaiLogo(suffix: u['role'] == 'owner' ? 'owner' : 'manager'), actions: [IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: () async { await Api.instance.logout(); widget.onSignOut(); })]),
       body: IndexedStack(index: _i, children: const [Dashboard(), StationsRunner(), PromosScreen()]),
       bottomNavigationBar: NavigationBar(selectedIndex: _i, onDestinationSelected: (i) => setState(() => _i = i), destinations: const [
         NavigationDestination(icon: Icon(Icons.insights_outlined), selectedIcon: Icon(Icons.insights), label: 'Numbers'),

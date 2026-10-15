@@ -109,10 +109,14 @@ const productSchema = z.object({
   category_id: z.string().uuid().optional(), sku: z.string().min(2).max(20), name: z.string().min(2), name_ne: z.string().optional(),
   description: z.string().optional(), description_ne: z.string().optional(), price: z.number().int().min(0), cost: z.number().int().min(0).default(0),
   prep_seconds: z.number().int().min(10).max(600).default(90), is_signature: z.boolean().default(false), is_seasonal: z.boolean().default(false),
-  pass_eligible: z.boolean().default(true), origin: z.string().optional(), image_url: z.string().url().optional(), active: z.boolean().default(true), sort: z.number().int().default(0),
+  pass_eligible: z.boolean().default(true), origin: z.string().optional(), image_url: z.string().url().nullable().optional(), active: z.boolean().default(true), sort: z.number().int().default(0),
+  price_tier: z.enum(['hot', 'flavored', 'iced']).nullable().optional(),
 });
+async function tierPrice(tier) { return tier ? (await getSettings())[`price_${tier}`] : null; }
 owner.post('/products', wrap(async (req, res) => {
   const b = productSchema.parse(req.body);
+  if (b.price_tier) b.price = await tierPrice(b.price_tier);
+  else delete b.price_tier;
   const cols = Object.keys(b);
   const { rows } = await query(`INSERT INTO products(${cols.join(',')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`, cols.map((c) => b[c]));
   await audit(req.user.id, 'product.create', 'product', rows[0].id, { sku: b.sku });
@@ -120,6 +124,10 @@ owner.post('/products', wrap(async (req, res) => {
 }));
 owner.patch('/products/:id', wrap(async (req, res) => {
   const b = productSchema.partial().parse(req.body);
+  const cur = (await query('SELECT price_tier FROM products WHERE id=$1', [req.params.id])).rows[0];
+  if (!cur) throw notFound('Product not found');
+  if (b.price_tier) b.price = await tierPrice(b.price_tier);                 // tiered drinks take the tier price
+  else if (b.price_tier === undefined && cur.price_tier) delete b.price;    // ...and cannot be priced by hand
   const cols = Object.keys(b);
   if (!cols.length) throw bad('Nothing to update');
   const { rows } = await query(`UPDATE products SET ${cols.map((c, i) => `${c}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [req.params.id, ...cols.map((c) => b[c])]);
@@ -186,7 +194,13 @@ owner.put('/settings', wrap(async (req, res) => {
     await query(`INSERT INTO settings(key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=now()`, [k, JSON.stringify(v)]);
   }
   await audit(req.user.id, 'settings.update', 'settings', null, Object.fromEntries(entries));
-  res.json(await getSettings());
+  const out = await getSettings();
+  // One price per kind of drink, at every station: changing a tier price reprices every drink in it.
+  if (entries.some(([k]) => k.startsWith('price_'))) {
+    for (const t of ['hot', 'flavored', 'iced']) await query('UPDATE products SET price=$2 WHERE price_tier=$1', [t, out[`price_${t}`]]);
+    await query(`UPDATE station_products SET price_override=NULL WHERE product_id IN (SELECT id FROM products WHERE price_tier IS NOT NULL)`);
+  }
+  res.json(out);
 }));
 
 /* ---- audit, reconciliation, passes ---- */
@@ -288,8 +302,23 @@ owner.put('/recipes/:productId', wrap(async (req, res) => {
       for (const l of o.lines) await db.query('INSERT INTO option_recipes(option_id, ingredient_id, qty) VALUES ($1,$2,$3)', [o.option_id, l.ingredient_id, l.qty]);
     }
     if (b.method !== undefined) await db.query('UPDATE products SET recipe_method=$2 WHERE id=$1', [req.params.productId, b.method || null]);
+    await db.query('UPDATE products SET recipe_version = recipe_version + 1 WHERE id=$1', [req.params.productId]); // every station works from the same standard recipe
     await audit(req.user.id, 'recipe.update', 'product', req.params.productId, { lines: b.lines.length }, db);
     return recomputeProductCosts(db, { productId: req.params.productId });
   });
   res.json({ ok: true, recosted: moved });
+}));
+
+/* ---- enquiries from the partner and investor pages ---- */
+owner.get('/enquiries', wrap(async (req, res) => {
+  const { rows } = await query(
+    `SELECT e.id, e.kind, e.name, e.email, e.phone, e.org, e.city, e.message, e.extra, e.status, e.note, e.created_at, u.name AS handled_by_name FROM enquiries e LEFT JOIN users u ON u.id=e.handled_by
+      WHERE ($1::text IS NULL OR e.status=$1) AND ($2::text IS NULL OR e.kind=$2) ORDER BY (e.status='new') DESC, e.created_at DESC LIMIT 200`, [req.query.status || null, req.query.kind || null]);
+  res.json(rows);
+}));
+owner.patch('/enquiries/:id', wrap(async (req, res) => {
+  const b = z.object({ status: z.enum(['new', 'contacted', 'meeting', 'won', 'closed']).optional(), note: z.string().max(500).optional() }).parse(req.body);
+  await query('UPDATE enquiries SET status=COALESCE($2,status), note=COALESCE($3,note), handled_by=$4 WHERE id=$1', [req.params.id, b.status, b.note, req.user.id]);
+  await audit(req.user.id, 'enquiry.update', 'enquiry', req.params.id, b);
+  res.json({ ok: true });
 }));

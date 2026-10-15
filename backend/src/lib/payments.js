@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { config } from './config.js';
+import { rt } from './runtime.js';
 import { bad } from './http.js';
 
 const hmac = (secret, msg) => crypto.createHmac('sha256', secret).update(msg).digest('base64');
@@ -7,12 +7,12 @@ const hmac = (secret, msg) => crypto.createHmac('sha256', secret).update(msg).di
 export function esewaFields(payment) {
   const fields = {
     amount: String(payment.amount), tax_amount: '0', total_amount: String(payment.amount), transaction_uuid: payment.id,
-    product_code: config.esewa.productCode, product_service_charge: '0', product_delivery_charge: '0',
-    success_url: `${config.apiUrl}/payments/esewa/callback?payment_id=${payment.id}`,
-    failure_url: `${config.webUrl}/order?payment=failed`,
+    product_code: rt('esewa_product_code'), product_service_charge: '0', product_delivery_charge: '0',
+    success_url: `${rt('public_api_url')}/payments/esewa/callback?payment_id=${payment.id}`,
+    failure_url: `${rt('public_web_url')}/order?payment=failed`,
     signed_field_names: 'total_amount,transaction_uuid,product_code',
   };
-  fields.signature = hmac(config.esewa.secret, `total_amount=${fields.total_amount},transaction_uuid=${fields.transaction_uuid},product_code=${fields.product_code}`);
+  fields.signature = hmac(rt('esewa_secret'), `total_amount=${fields.total_amount},transaction_uuid=${fields.transaction_uuid},product_code=${fields.product_code}`);
   return fields;
 }
 
@@ -24,23 +24,23 @@ export function esewaFields(payment) {
  */
 export async function initiate(provider, payment, { orderLabel } = {}) {
   const base = { payment_id: payment.id, provider, amount: payment.amount };
-  if (config.paymentMode === 'sandbox') return { ...base, mode: 'sandbox' };
+  if (rt('payment_mode') === 'sandbox') return { ...base, mode: 'sandbox' };
 
-  const callback = (p) => `${config.apiUrl}/payments/${p}/callback?payment_id=${payment.id}`;
+  const callback = (p) => `${rt('public_api_url')}/payments/${p}/callback?payment_id=${payment.id}`;
   if (provider === 'esewa') {
     return {
-      ...base, mode: 'redirect', method: 'POST', url: config.esewa.formUrl, fields: esewaFields(payment),
-      start_url: `${config.apiUrl}/payments/esewa/start?payment_id=${payment.id}`, // opens the signed form in a browser (mobile apps)
+      ...base, mode: 'redirect', method: 'POST', url: rt('esewa_form_url'), fields: esewaFields(payment),
+      start_url: `${rt('public_api_url')}/payments/esewa/start?payment_id=${payment.id}`, // opens the signed form in a browser (mobile apps)
     };
   }
   if (provider === 'khalti') {
-    if (!config.khalti.secret) throw bad('Khalti is not configured');
-    const r = await fetch(`${config.khalti.baseUrl}/epayment/initiate/`, {
+    if (!rt('khalti_secret')) throw bad('Khalti is not configured');
+    const r = await fetch(`${rt('khalti_base_url')}/epayment/initiate/`, {
       method: 'POST',
-      headers: { Authorization: `Key ${config.khalti.secret}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Key ${rt('khalti_secret')}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         return_url: callback('khalti'),
-        website_url: config.webUrl,
+        website_url: rt('public_web_url'),
         amount: payment.amount * 100,
         purchase_order_id: payment.id,
         purchase_order_name: orderLabel || 'Sadhai Coffee',
@@ -58,18 +58,18 @@ export async function initiate(provider, payment, { orderLabel } = {}) {
 export async function verifyEsewa(dataB64) {
   const data = JSON.parse(Buffer.from(dataB64, 'base64').toString('utf8'));
   const msg = data.signed_field_names.split(',').map((f) => `${f}=${data[f]}`).join(',');
-  if (hmac(config.esewa.secret, msg) !== data.signature) throw bad('Bad eSewa signature');
+  if (hmac(rt('esewa_secret'), msg) !== data.signature) throw bad('Bad eSewa signature');
   if (data.status !== 'COMPLETE') throw bad('Payment not complete');
-  const url = `${config.esewa.statusUrl}?product_code=${data.product_code}&total_amount=${data.total_amount}&transaction_uuid=${data.transaction_uuid}`;
+  const url = `${rt('esewa_status_url')}?product_code=${data.product_code}&total_amount=${data.total_amount}&transaction_uuid=${data.transaction_uuid}`;
   const j = await (await fetch(url)).json();
   if (j.status !== 'COMPLETE') throw bad('eSewa did not confirm the payment');
   return { paymentId: data.transaction_uuid, ref: data.transaction_code, amount: Number(String(data.total_amount).replace(/,/g, '')), raw: data };
 }
 
 export async function lookupKhalti(pidx) {
-  const r = await fetch(`${config.khalti.baseUrl}/epayment/lookup/`, {
+  const r = await fetch(`${rt('khalti_base_url')}/epayment/lookup/`, {
     method: 'POST',
-    headers: { Authorization: `Key ${config.khalti.secret}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Key ${rt('khalti_secret')}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ pidx }),
   });
   const j = await r.json();
@@ -78,8 +78,9 @@ export async function lookupKhalti(pidx) {
 }
 
 export function verifyWebhookSignature(body, signature) {
-  if (!config.fonepaySecret) return false;
-  const expected = crypto.createHmac('sha256', config.fonepaySecret).update(`${body.payment_id}|${body.provider_ref}|${body.status}`).digest('hex');
+  const secret = rt('fonepay_webhook_secret');
+  if (!secret) return false;
+  const expected = crypto.createHmac('sha256', secret).update(`${body.payment_id}|${body.provider_ref}|${body.status}`).digest('hex');
   try {
     return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(String(signature)));
   } catch {

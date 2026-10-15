@@ -17,6 +17,7 @@ export default function Privacy() {
         <tr><td>Approximate or precise location, only while you use “Use my location”</td><td>Sort stations by distance. Your coordinates are sent with that one request and are not saved or logged</td><td>Optional. You can pick a station by hand</td></tr>
         <tr><td>Notification token and device type (if you allow notifications)</td><td>Send push notifications: your order is ready, your pass is ending, and offers if you have not opted out. Offers are limited to one a day and can be turned off in Profile</td><td>Optional</td></tr>
         <tr><td>Name and mobile number typed at a self-order kiosk</td><td>Call your order and, if the number belongs to a Sadhai account, link the order to it. You are asked to agree on the kiosk screen</td><td>Required to use the kiosk. You can order at the counter instead</td></tr>
+        <tr><td>Staff only: shifts, check-in and check-out times, hourly rate and payslips</td><td>Plan the roster and pay people correctly. Only that person, the managers of their station and the owner can see it</td><td>Required to work a shift</td></tr>
         <tr><td>Passes, coupons, referral code and bean balance</td><td>Run the offers you have earned</td><td>Part of your account</td></tr>
       </tbody></table>
       <p>We do not use advertising identifiers, we do not track you across other apps or websites, we do not sell personal data, and we do not collect contacts, photos or microphone data.</p>

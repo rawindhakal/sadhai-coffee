@@ -1,4 +1,5 @@
 'use client';
+import { Logo } from '../logo';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -72,7 +73,7 @@ export function DashShell({ sections, role, children }: { sections: Section[]; r
       <div className={`dash ${collapsed ? 'collapsed' : ''}`}>
         <div className={`overlay-mobile ${mobileOpen ? 'show' : ''}`} onClick={() => setMobileOpen(false)} />
         <aside className={`sidebar ${mobileOpen ? 'open' : ''}`} aria-label="Sections">
-          <div className="brandrow"><Link href="/" className="brand"><img src="/mark-cherry.svg" alt="" /><span>sadhai</span></Link></div>
+          <div className="brandrow"><Logo /></div>
           {Object.entries(groups).map(([g, items]) => (
             <div key={g}>
               {g && <div className="grouphead">{g}</div>}

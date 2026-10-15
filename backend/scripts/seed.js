@@ -3,6 +3,8 @@
 import bcrypt from 'bcryptjs';
 import { pool } from '../src/lib/db.js';
 import { recomputeProductCosts } from '../src/lib/costing.js';
+import { autoAssign, computePayroll, settle, todayNpt, addDays } from '../src/lib/roster.js';
+import { saveLines } from '../src/routes/hr.js';
 
 if (process.env.NODE_ENV === 'production' && !process.env.SEED_FORCE) {
   console.error('Refusing to seed in production (set SEED_FORCE=1 to override).');
@@ -25,7 +27,7 @@ const c = await pool.connect();
 const q = (t, p) => c.query(t, p);
 
 await q('BEGIN');
-await q(`TRUNCATE stock_count_lines, stock_counts, transfer_lines, stock_transfers, purchase_lines, purchase_orders, central_moves, central_inventory, ingredient_cost_history, option_recipes, suppliers, partner_settlements, daily_offers, audit_log, settlements, cash_closes, notifications, referrals, payments, order_items, orders, drops, promo_codes, coupons, passes,
+await q(`TRUNCATE payroll_adjustments, payroll_lines, payroll_runs, time_off, shift_tasks, shifts, shift_templates, staff_profiles, stock_count_lines, stock_counts, transfer_lines, stock_transfers, purchase_lines, purchase_orders, central_moves, central_inventory, ingredient_cost_history, option_recipes, suppliers, partner_settlements, daily_offers, audit_log, settlements, cash_closes, notifications, referrals, payments, order_items, orders, drops, promo_codes, coupons, passes,
   station_counters, inventory_moves, station_inventory, recipes, ingredients, station_products, options, option_groups, products, categories,
   refresh_tokens, station_managers, users, stations, settings RESTART IDENTITY CASCADE`);
 
@@ -113,16 +115,16 @@ const DS = 16; // a double shot of espresso is 16 g of coffee
 const products = [
   // sku, category, name, Nepali name, price, (cost is calculated from the recipe), flags, origin, description, recipe, pass-eligible, method
   ['ESP', 'Hot coffee', 'Espresso', 'एस्प्रेसो', 100, 0, {}, null, 'Double shot, short and strong.', { [B]: DS, 'Hot cups': 1 }, false, 'Dose 16 g, tamp level, pull 36 g in 28 seconds into a hot cup.'],
-  ['AMR', 'Hot coffee', 'Americano', 'अमेरिकानो', 130, 0, {}, null, 'Two shots, hot water. 200 ml, all taxes included.', { [B]: DS, Water: 120, 'Hot cups': 1 }, true, 'Pull a double shot, add 120 ml hot water to the cup.'],
-  ['CAP', 'Hot coffee', 'Cappuccino', 'क्यापुचिनो', 160, 0, {}, null, 'Equal parts espresso, milk and foam.', { [B]: DS, Milk: 120, 'Hot cups': 1 }, true, 'Double shot, steam 120 ml milk to 60 C with thick foam.'],
-  ['LAT', 'Hot coffee', 'Latte', 'ल्याते', 170, 0, {}, null, 'Smooth and milky.', { [B]: DS, Milk: 180, 'Hot cups': 1 }, true, 'Double shot, steam 180 ml milk to 60 C with light foam.'],
-  ['MOC', 'Hot coffee', 'Mocha', 'मोका', 190, 0, {}, null, 'Latte with chocolate.', { [B]: DS, Milk: 150, 'Chocolate syrup': 20, 'Hot cups': 1 }, true, '20 ml chocolate syrup in the cup, double shot, then 150 ml steamed milk.'],
-  ['ICL', 'Cold coffee', 'Iced latte', 'आइस्ड ल्याते', 180, 0, {}, null, 'Over ice, ready in 90 seconds.', { [B]: DS, Milk: 150, Ice: 120, 'Cold cups': 1 }, true, 'Fill cup with 120 g ice, pour 150 ml cold milk, top with a double shot.'],
-  ['CLB', 'Cold coffee', 'Cold brew', 'कोल्ड ब्रु', 190, 0, {}, null, 'Steeped 16 hours, poured in seconds.', { [B]: 20, Water: 200, Ice: 100, 'Cold cups': 1 }, true, 'Pour 200 ml of the 16-hour cold brew over 100 g ice.'],
-  ['CHL', 'Signature', 'Chiya latte', 'चिया ल्याते', 180, 0, { sig: true }, null, 'Espresso with milk tea spices. Our answer to the roadside chiya.', { [B]: DS, Milk: 170, 'Chiya masala syrup': 18, 'Hot cups': 1 }, true, '18 ml chiya masala syrup in the cup, double shot, 170 ml steamed milk.'],
-  ['SCB', 'Signature', 'Suntala cold brew', 'सुन्तला कोल्ड ब्रु', 210, 0, { sig: true, season: true }, null, 'Cold brew with Nepali mandarin. Seasonal.', { [B]: 20, Water: 150, 'Suntala syrup': 25, Ice: 100, 'Cold cups': 1 }, true, '25 ml suntala syrup, 100 g ice, 150 ml cold brew, stir.'],
-  ['GPO', 'Signature', 'Gulmi pour-over', 'गुल्मी पोर-ओभर', 220, 0, { sig: true }, 'Gulmi, 1,400 m', 'Single origin from the hills of Gulmi. Brown sugar and cherry.', { [B]: 20, Water: 300, 'Hot cups': 1 }, true, '20 g medium-fine, 300 ml water at 93 C in four pours over 2:45.'],
-  ['GUR', 'Signature', 'Gur cardamom latte', 'गुर अलैंची ल्याते', 190, 0, { sig: true, season: true }, null, 'Jaggery and cardamom. Monthly drop with TERAI bakery.', { [B]: DS, Milk: 170, 'Gur cardamom syrup': 18, 'Hot cups': 1 }, true, '18 ml gur cardamom syrup, double shot, 170 ml steamed milk.'],
+  ['AMR', 'Hot coffee', 'Americano', 'अमेरिकानो', 100, 0, {}, null, 'Two shots, hot water. 200 ml, all taxes included.', { [B]: DS, Water: 120, 'Hot cups': 1 }, true, 'Pull a double shot, add 120 ml hot water to the cup.'],
+  ['CAP', 'Hot coffee', 'Cappuccino', 'क्यापुचिनो', 100, 0, {}, null, 'Equal parts espresso, milk and foam.', { [B]: DS, Milk: 120, 'Hot cups': 1 }, true, 'Double shot, steam 120 ml milk to 60 C with thick foam.'],
+  ['LAT', 'Hot coffee', 'Latte', 'ल्याते', 100, 0, {}, null, 'Smooth and milky.', { [B]: DS, Milk: 180, 'Hot cups': 1 }, true, 'Double shot, steam 180 ml milk to 60 C with light foam.'],
+  ['MOC', 'Hot coffee', 'Mocha', 'मोका', 120, 0, {}, null, 'Latte with chocolate.', { [B]: DS, Milk: 150, 'Chocolate syrup': 20, 'Hot cups': 1 }, true, '20 ml chocolate syrup in the cup, double shot, then 150 ml steamed milk.'],
+  ['ICL', 'Cold coffee', 'Iced latte', 'आइस्ड ल्याते', 150, 0, {}, null, 'Over ice, ready in 90 seconds.', { [B]: DS, Milk: 150, Ice: 120, 'Cold cups': 1 }, true, 'Fill cup with 120 g ice, pour 150 ml cold milk, top with a double shot.'],
+  ['CLB', 'Cold coffee', 'Cold brew', 'कोल्ड ब्रु', 150, 0, {}, null, 'Steeped 16 hours, poured in seconds.', { [B]: 20, Water: 200, Ice: 100, 'Cold cups': 1 }, true, 'Pour 200 ml of the 16-hour cold brew over 100 g ice.'],
+  ['CHL', 'Signature', 'Chiya latte', 'चिया ल्याते', 120, 0, { sig: true }, null, 'Espresso with milk tea spices. Our answer to the roadside chiya.', { [B]: DS, Milk: 170, 'Chiya masala syrup': 18, 'Hot cups': 1 }, true, '18 ml chiya masala syrup in the cup, double shot, 170 ml steamed milk.'],
+  ['SCB', 'Signature', 'Suntala cold brew', 'सुन्तला कोल्ड ब्रु', 150, 0, { sig: true, season: true }, null, 'Cold brew with Nepali mandarin. Seasonal.', { [B]: 20, Water: 150, 'Suntala syrup': 25, Ice: 100, 'Cold cups': 1 }, true, '25 ml suntala syrup, 100 g ice, 150 ml cold brew, stir.'],
+  ['GPO', 'Signature', 'Gulmi pour-over', 'गुल्मी पोर-ओभर', 100, 0, { sig: true }, 'Gulmi, 1,400 m', 'Single origin from the hills of Gulmi. Brown sugar and cherry.', { [B]: 20, Water: 300, 'Hot cups': 1 }, true, '20 g medium-fine, 300 ml water at 93 C in four pours over 2:45.'],
+  ['GUR', 'Signature', 'Gur cardamom latte', 'गुर अलैंची ल्याते', 120, 0, { sig: true, season: true }, null, 'Jaggery and cardamom. Monthly drop with TERAI bakery.', { [B]: DS, Milk: 170, 'Gur cardamom syrup': 18, 'Hot cups': 1 }, true, '18 ml gur cardamom syrup, double shot, 170 ml steamed milk.'],
   ['CRO', 'Bites', 'Butter croissant', 'बटर क्रोइसाँ', 120, 0, {}, null, 'Baked this morning by TERAI bakery.', { 'Butter croissant': 1 }, false, 'Warm 3 minutes at 160 C.'],
   ['BUN', 'Bites', 'Cardamom bun', 'अलैंची बन', 90, 0, {}, null, 'Soft, sticky and warm.', { 'Cardamom bun': 1 }, false, 'Warm 2 minutes at 160 C.'],
   ['MUG', 'Merch', 'Sadhai mug', 'सधैं मग', 450, 0, {}, null, 'Ceramic mug, 300 ml. Cherry glaze.', { 'Sadhai mug': 1 }, false, null],
@@ -130,12 +132,13 @@ const products = [
   ['BAG', 'Merch', 'Gulmi beans 250g', 'गुल्मी बिन्स २५०ग्राम', 790, 0, {}, 'Gulmi, 1,400 m', 'Roasted by Sevya Coffee Processing. Roast date on the label.', { 'Gulmi beans 250g': 1 }, false, null],
   ['HAT', 'Merch', 'Sadhai cap', 'सधैं टोपी', 550, 0, {}, null, 'Cherry cap, adjustable.', { 'Sadhai cap': 1 }, false, null],
 ];
+const TIER = { ESP: 'hot', AMR: 'hot', CAP: 'hot', LAT: 'hot', GPO: 'hot', MOC: 'flavored', CHL: 'flavored', GUR: 'flavored', ICL: 'iced', CLB: 'iced', SCB: 'iced' };
 const prod = {};
 for (const [i, [sku, cn, name, name_ne, price, cost, f, origin, desc, recipe, passOk, method]] of products.entries()) {
   const p = (await q(
-    `INSERT INTO products(category_id, sku, name, name_ne, description, price, cost, is_signature, is_seasonal, pass_eligible, origin, sort, kind, recipe_method)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
-    [cat[cn], sku, name, name_ne, desc, price, cost, !!f.sig, !!f.season, passOk, origin, i, cn === 'Merch' ? 'merch' : cn === 'Bites' ? 'food' : 'drink', method],
+    `INSERT INTO products(category_id, sku, name, name_ne, description, price, cost, is_signature, is_seasonal, pass_eligible, origin, sort, kind, recipe_method, price_tier)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+    [cat[cn], sku, name, name_ne, desc, price, cost, !!f.sig, !!f.season, passOk, origin, i, cn === 'Merch' ? 'merch' : cn === 'Bites' ? 'food' : 'drink', method, TIER[sku] || null],
   )).rows[0];
   prod[sku] = p;
   for (const [n, qty] of Object.entries(recipe)) await q('INSERT INTO recipes VALUES ($1,$2,$3)', [p.id, ing[n], qty]);
@@ -313,10 +316,10 @@ for (const [i, cu] of customers.slice(0, 14).entries()) {
   const used = Math.min(10, Math.floor(rnd() * 11));
   const when = new Date(now - (3 + i * 3) * DAY);
   const pass = (await q(
-    `INSERT INTO passes(user_id,total_cups,used_cups,price_paid,status,purchased_at,expires_at,related_party,code,activated_at) VALUES ($1,10,$2,1200,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    `INSERT INTO passes(user_id,total_cups,used_cups,price_paid,status,purchased_at,expires_at,related_party,code,activated_at) VALUES ($1,10,$2,900,$3,$4,$5,$6,$7,$8) RETURNING id`,
     [cu.u.id, used, used >= 10 ? 'used' : 'active', when, new Date(when.getTime() + 30 * DAY), i === 13, `SP-DEMO-${1000 + i}`, used > 0 ? when : null],
   )).rows[0];
-  await q(`INSERT INTO payments(user_id,pass_id,station_id,purpose,provider,amount,status,created_at,settled_at) VALUES ($1,$2,$3,'pass',$4,1200,'paid',$5,$5)`, [cu.u.id, pass.id, stations[cu.home].id, wpick([['esewa', 3], ['khalti', 2], ['fonepay', 2], ['cash', 3]]), when]);
+  await q(`INSERT INTO payments(user_id,pass_id,station_id,purpose,provider,amount,status,created_at,settled_at) VALUES ($1,$2,$3,'pass',$4,900,'paid',$5,$5)`, [cu.u.id, pass.id, stations[cu.home].id, wpick([['esewa', 3], ['khalti', 2], ['fonepay', 2], ['cash', 3]]), when]);
   if (cu.u.id === demo.id) await q(`UPDATE passes SET used_cups=4, status='active', purchased_at=now() - interval '6 days', expires_at=now() + interval '24 days' WHERE id=$1`, [pass.id]);
 }
 
@@ -329,13 +332,13 @@ for (const cu of customers.slice(1, 6)) {
 await q(`INSERT INTO referrals(referrer_id,referee_id,status,rewarded_at) VALUES ($1,$2,'rewarded',now()-interval '12 days'),($1,$3,'pending',NULL)`, [demo.id, customers[1].u.id, customers[2].u.id]);
 
 /* promos, drops */
-await q(`INSERT INTO promo_codes(code,title,pct,min_total,max_uses,per_user_limit,valid_until,created_by) VALUES ('TUCAMPUS','Campus week',15,100,500,3,now()+interval '20 days',$1),('AMERICANO99','Americano Rs 99',24,0,NULL,1,now()+interval '4 days',$1)`, [owner.id]);
+await q(`INSERT INTO promo_codes(code,title,pct,min_total,max_uses,per_user_limit,valid_until,created_by) VALUES ('TUCAMPUS','Campus week',15,100,500,3,now()+interval '20 days',$1),('AMERICANO99','Americano Rs 80',20,0,NULL,1,now()+interval '4 days',$1)`, [owner.id]);
 await q(
-  `INSERT INTO drops(name,name_ne,partner,product_id,price,cap,sold,starts_at,ends_at) VALUES ('Drop 01: Gur cardamom latte','ड्रप ०१: गुर अलैंची ल्याते','TERAI bakery',$1,169,3000,1284,now()-interval '9 days',now()+interval '21 days')`,
+  `INSERT INTO drops(name,name_ne,partner,product_id,price,cap,sold,starts_at,ends_at) VALUES ('Drop 01: Gur cardamom latte','ड्रप ०१: गुर अलैंची ल्याते','TERAI bakery',$1,99,3000,1284,now()-interval '9 days',now()+interval '21 days')`,
   [prod.GUR.id],
 );
 
-await q(`INSERT INTO daily_offers(title,title_ne,blurb,scope,product_id,offer_price,ends_at,created_by) VALUES ('Americano, Rs 99 today','आज अमेरिकानो रु ९९','Everything included. One cup or two.','product',$1,99, date_trunc('day', now() AT TIME ZONE 'Asia/Kathmandu') + interval '1 day' - interval '5 hours 45 minutes',$2)`, [prod.AMR.id, owner.id]);
+await q(`INSERT INTO daily_offers(title,title_ne,blurb,scope,product_id,offer_price,ends_at,created_by) VALUES ('Iced latte, Rs 120 today','आज आइस्ड ल्याते रु १२०','Beat the heat. Everything included.','product',$1,120, date_trunc('day', now() AT TIME ZONE 'Asia/Kathmandu') + interval '1 day' - interval '5 hours 45 minutes',$2)`, [prod.ICL.id, owner.id]);
 await q(`INSERT INTO daily_offers(title,blurb,scope,product_id,pct,station_id,ends_at,max_uses,created_by) VALUES ('Cold brew 20% off at Kalanki','Beat the afternoon heat.','product',$1,20,$2, now() + interval '2 days', 200,$3)`, [prod.CLB.id, stations[2].id, mgr2.id]);
 await q(`INSERT INTO daily_offers(title,blurb,scope,category_id,pct,ends_at,created_by) VALUES ('Bites 15% off with any coffee','Croissant or bun, fresh from TERAI.','category',$1,15, now() + interval '3 days',$2)`, [cat.Bites, owner.id]);
 
@@ -361,16 +364,68 @@ for (let d = 7; d >= 1; d--) {
       [st.id, d, rows[0].n, rows[0].n + diff, diff, staff[stations.indexOf(st)].id]);
   }
 }
-await q(`INSERT INTO notifications(user_id,kind,title,body) VALUES ($1,'promo','Your Americano, Rs 99 until Sunday','Use code AMERICANO99. One per customer.')`, [demo.id]);
+
+/* ---------- staff: profiles, 6-hour shift times, leave, a bonus ---------- */
+const MORE_STAFF = [['Pratik Maharjan', 0], ['Nirmala Khadka', 0], ['Aayush Dahal', 1], ['Sita Pandey', 1], ['Rohan Bista', 2], ['Gita Oli', 2], ['Kamal Sherpa', 3], ['Binita Roka', 3]];
+const staffAll = [...staff, ...extra];
+for (const [i, [nm, si]] of MORE_STAFF.entries()) staffAll.push(await mkUser(nm, `+97798000000${19 + i}`, 'station', stations[si].id));
+const POS = ['supervisor', 'barista', 'all_rounder', 'cashier'];
+const perStation = new Map();
+for (const u of staffAll) { const n = perStation.get(u.station_id) || 0; perStation.set(u.station_id, n + 1); u.pos = POS[n % 4]; }
+for (const [i, u] of staffAll.entries()) {
+  const pos = u.pos;
+  const rate = { supervisor: 150, all_rounder: 130, barista: 120, cashier: 110 }[pos];
+  await q(`INSERT INTO staff_profiles(user_id, employee_code, position, skills, hourly_rate, max_shifts_week, days_off, preferred_shift, can_float, joined_on) VALUES ($1,$2,$3,$4,$5,6,$6,$7,$8,current_date - $9::int)`,
+    [u.id, `SC-${String(i + 1).padStart(4, '0')}`, pos, pos === 'cashier' ? ['counter'] : ['bar', 'counter'], rate, i % 5 === 2 ? [0] : [], ['morning', 'any', 'evening', 'any'][i % 4], pos === 'all_rounder', 120 + i * 11]);
+}
+for (const st of stations) {
+  for (const [i, [name, kind, start, min, max]] of [['Morning', 'morning', '07:00', 1, 3], ['Midday', 'midday', '10:00', 1, 2], ['Evening', 'evening', '14:00', 1, 3]].entries()) {
+    await q(`INSERT INTO shift_templates(station_id, name, kind, start_time, hours, min_staff, max_staff, sort) VALUES ($1,$2,$3,$4,6,$5,$6,$7)`, [st.id, name, kind, start, min, max, i]);
+  }
+}
+const todayStr = todayNpt();
+await q(`INSERT INTO time_off(user_id, from_date, to_date, kind, reason, status, decided_by, decided_at) VALUES ($1,$2,$3,'leave','Family wedding','approved',$4,now())`, [staffAll[1].id, addDays(todayStr, 2), addDays(todayStr, 3), mgr1.id]);
+await q(`INSERT INTO time_off(user_id, from_date, to_date, kind, reason) VALUES ($1,$2,$3,'leave','Visiting home')`, [staffAll[6].id, addDays(todayStr, 12), addDays(todayStr, 14)]);
+await q(`INSERT INTO payroll_adjustments(user_id, month, label, amount, created_by) VALUES ($1, date_trunc('month', now()), 'Festival bonus', 1000, $2)`, [staffAll[0].id, owner.id]);
+await q(`INSERT INTO notifications(user_id,kind,title,body) VALUES ($1,'promo','Iced latte, Rs 120 today','Beat the heat. Everything included.')`, [demo.id]);
 await q(`INSERT INTO audit_log(actor_id,action,entity,meta) VALUES ($1,'seed','system','{"note":"demo data created"}')`, [owner.id]);
 await q('COMMIT');
 c.release();
+
+/* ---------- rosters: four weeks of history with attendance, and this coming week published ---------- */
+const allIds = stations.map((x) => x.id);
+const pastFrom = addDays(todayStr, -28), pastTo = addDays(todayStr, -1);
+await autoAssign({ stationIds: allIds, from: pastFrom, to: pastTo, replace: true, userId: owner.id });
+const pastShifts = (await pool.query(`SELECT sh.*, p.hourly_rate AS rate FROM shifts sh LEFT JOIN staff_profiles p ON p.user_id=sh.user_id WHERE sh.shift_date BETWEEN $1 AND $2 AND sh.user_id IS NOT NULL`, [pastFrom, pastTo])).rows;
+let k = 0;
+for (const sh of pastShifts) {
+  k++;
+  const start = new Date(sh.start_at), end = new Date(sh.end_at);
+  if (k % 31 === 0) { await pool.query(`UPDATE shifts SET published=true, status='absent', paid_minutes=0, hourly_rate=$2 WHERE id=$1`, [sh.id, sh.rate]); continue; }
+  const inAt = new Date(start.getTime() + ((k * 7) % 17 - 5) * 60000);
+  const outAt = k % 47 === 0 ? new Date(end.getTime() - 40 * 60000) : new Date(end.getTime() + ((k * 3) % 23 - 3) * 60000);
+  const mins = settle(sh, inAt, outAt, 10);
+  await pool.query(`UPDATE shifts SET published=true, status='completed', checked_in_at=$2, checked_out_at=$3, paid_minutes=$4, hourly_rate=$5 WHERE id=$1`, [sh.id, inAt, outAt, mins, sh.rate]);
+  await pool.query(`UPDATE shift_tasks SET done_at=$2, done_by=$3 WHERE shift_id=$1 AND random() < 0.92`, [sh.id, inAt, sh.user_id]);
+}
+await autoAssign({ stationIds: allIds, from: todayStr, to: addDays(todayStr, 13), replace: true, userId: owner.id });
+await pool.query(`UPDATE shifts SET published=true WHERE shift_date BETWEEN $1 AND $2 AND user_id IS NOT NULL`, [todayStr, addDays(todayStr, 6)]);
+
+// payroll: one paid run, one draft
+const mkRun = async (from, to, status, ref) => {
+  const lines = await computePayroll(from, to);
+  const run = (await pool.query(`INSERT INTO payroll_runs(period_from, period_to, status, created_by, approved_at, paid_at, reference) VALUES ($1,$2,$3,$4, CASE WHEN $3::text <> 'draft' THEN now() - interval '5 days' END, CASE WHEN $3::text = 'paid' THEN now() - interval '4 days' END, $5) RETURNING id`, [from, to, status, owner.id, ref])).rows[0];
+  const cl = await pool.connect();
+  try { await saveLines(cl, run.id, lines); } finally { cl.release(); }
+};
+await mkRun(addDays(todayStr, -28), addDays(todayStr, -15), 'paid', 'DEMO-PAY-001');
+await mkRun(addDays(todayStr, -14), addDays(todayStr, -1), 'draft', null);
 
 const n = (await pool.query(`SELECT count(*)::int AS n FROM orders`)).rows[0].n;
 console.log(`Seeded: ${stations.length} stations, ${customers.length} customers, ${n} orders.`);
 console.log(`Demo logins (password ${PASSWORD}):`);
 console.log('  owner     9800000001');
 console.log('  manager   9800000002 (TU Gate + Teaching Hospital)   9800000003 (Kalanki + New Road)');
-console.log('  station   9800000011 (TU Gate)  9800000012  9800000013  9800000014');
+console.log('  station   9800000011 (TU Gate)  9800000012  9800000013  9800000014   (16 staff in all, 9800000011 to 9800000026)');
 console.log('  customer  9812345678 (Asha Gurung)');
 await pool.end();

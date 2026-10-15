@@ -9,6 +9,8 @@ import { CountPanel, IngredientsTab, InventoryHub, TransfersPanel, VariancePanel
 import { CustomersSection, LiveSection, OrdersSection, OverviewSection } from './sections';
 import { DashShell, Section, useDash } from './shell';
 import { useAuth, useRequireRole } from '@/lib/auth';
+import { EnquiriesSection, SettingsHub, SiteEditor } from '../studio';
+import { MyShift, PeopleSection } from '../people';
 
 const P = ({ children }: { children: React.ReactNode }) => <div className="panel">{children}</div>;
 
@@ -38,11 +40,13 @@ function Body({ section, role }: { section: string; role: 'owner' | 'manager' })
     case 'drops': return <P><DropsTab /></P>;
     case 'stations': return <P><StationsTab /></P>;
     case 'team': return <P><TeamTab /></P>;
-    case 'staff': return <P><StaffTab stations={stations} stationId={sid} /></P>;
+    case 'staff': return <PeopleSection isOwner={isOwner} />;
+    case 'site': return <SiteEditor />;
+    case 'enquiries': return <EnquiriesSection />;
     case 'accountability': return <AccountabilityTab stationId={sid} isOwner={isOwner} />;
     case 'finance': return <FinanceTab />;
     case 'cash': return <P><CashTab stationId={sid} /></P>;
-    case 'rules': return <SettingsTab />;
+    case 'rules': return <SettingsHub />;
     case 'audit': return <P><AuditTab /></P>;
     default: return null;
   }
@@ -55,16 +59,16 @@ const OWNER: Section[] = [
   { key: 'menu', label: 'Menu and prices', icon: 'list', group: 'Operate', keywords: 'products items' }, { key: 'reviews', label: 'Ratings', icon: 'star', group: 'Operate' },
   { key: 'inventory', label: 'Inventory', icon: 'box', group: 'Costing and stock', keywords: 'stock central purchase transfer warehouse count loss' }, { key: 'recipes', label: 'Recipes and costing', icon: 'coin', group: 'Costing and stock', keywords: 'recipe cost margin food cost wastage' }, { key: 'stock', label: 'Station stock', icon: 'store', group: 'Costing and stock', keywords: 'restock station inventory' },
   { key: 'offers', label: 'Offer of the day', icon: 'tag', group: 'Marketing' }, { key: 'promos', label: 'Promo codes', icon: 'ticket', group: 'Marketing' }, { key: 'push', label: 'Push notifications', icon: 'bell', group: 'Marketing', keywords: 'message notification send campaign' }, { key: 'drops', label: 'Limited drops', icon: 'flame', group: 'Marketing' },
-  { key: 'stations', label: 'Stations', icon: 'store', group: 'Network', keywords: 'partner cafe' }, { key: 'team', label: 'Team', icon: 'user', group: 'Network', keywords: 'managers staff' }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Network', keywords: 'scorecard partner statement' },
+  { key: 'stations', label: 'Stations', icon: 'store', group: 'Network', keywords: 'partner cafe' }, { key: 'team', label: 'Managers', icon: 'user', group: 'Network', keywords: 'managers accounts' }, { key: 'staff', label: 'Staff and pay', icon: 'users', group: 'Network', keywords: 'roster shift duty auto assign payroll salary attendance hourly leave' }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Network', keywords: 'scorecard partner statement' },
   { key: 'finance', label: 'Finance', icon: 'wallet', group: 'Money', keywords: 'reconcile settlements passes' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Money' },
-  { key: 'rules', label: 'Rules', icon: 'cog', group: 'Admin', keywords: 'settings pass price' }, { key: 'audit', label: 'Audit log', icon: 'clock', group: 'Admin' },
+  { key: 'rules', label: 'Settings and keys', icon: 'cog', group: 'Admin', keywords: 'settings pass price api key payment firebase push integration' }, { key: 'site', label: 'Home page and pictures', icon: 'image', group: 'Admin', keywords: 'hero images website partners investors content' }, { key: 'enquiries', label: 'Enquiries', icon: 'mail', group: 'Admin', keywords: 'partner investor leads' }, { key: 'audit', label: 'Audit log', icon: 'clock', group: 'Admin' },
 ];
 const MANAGER: Section[] = [
   { key: 'overview', label: 'Overview', icon: 'grid', group: 'Insight' }, { key: 'live', label: 'Live', icon: 'pulse', group: 'Insight' }, { key: 'customers', label: 'Customers', icon: 'users', group: 'Insight' },
   { key: 'orders', label: 'Orders', icon: 'receipt', group: 'Operate' }, { key: 'run', label: 'Run station', icon: 'cup', group: 'Operate' }, { key: 'stock', label: 'Stock and deliveries', icon: 'box', group: 'Operate' },
   { key: 'recipes', label: 'Recipes and costing', icon: 'coin', group: 'Operate' }, { key: 'menu', label: 'Menu', icon: 'list', group: 'Operate' }, { key: 'reviews', label: 'Ratings', icon: 'star', group: 'Operate' },
   { key: 'offers', label: 'Offer of the day', icon: 'tag', group: 'Marketing' }, { key: 'promos', label: 'Promo codes', icon: 'ticket', group: 'Marketing' }, { key: 'push', label: 'Push notifications', icon: 'bell', group: 'Marketing' },
-  { key: 'staff', label: 'Staff', icon: 'users', group: 'Team' }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Team' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Team' },
+  { key: 'staff', label: 'Staff and roster', icon: 'users', group: 'Team', keywords: 'roster shift duty auto assign attendance leave' }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Team' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Team' },
 ];
 
 export function OwnerDashboard() {
@@ -81,7 +85,7 @@ export function ManagerDashboard() {
 }
 
 const STATION: Section[] = [
-  { key: 'queue', label: 'Queue', icon: 'pulse' }, { key: 'pos', label: 'New order', icon: 'plus' }, { key: 'menu', label: 'Sold out', icon: 'list' }, { key: 'stock', label: 'Stock', icon: 'box' }, { key: 'close', label: 'Close day', icon: 'coin' },
+  { key: 'queue', label: 'Queue', icon: 'pulse' }, { key: 'pos', label: 'New order', icon: 'plus' }, { key: 'menu', label: 'Sold out', icon: 'list' }, { key: 'stock', label: 'Stock', icon: 'box' }, { key: 'close', label: 'Close day', icon: 'coin' }, { key: 'recipes', label: 'Recipes', icon: 'list' }, { key: 'shift', label: 'My shift', icon: 'clock' },
 ];
 export function StationDashboard() {
   const user = useRequireRole('station');

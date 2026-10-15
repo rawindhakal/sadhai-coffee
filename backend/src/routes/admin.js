@@ -9,6 +9,8 @@ import { audit } from '../lib/notify.js';
 import { adjustInventory, inventoryFor } from './station.js';
 import { fullOrder, cancelOrder } from '../lib/orders.js';
 import { statement, scorecard } from '../lib/partners.js';
+import { labour } from '../lib/roster.js';
+import { range as dateRange } from '../lib/reports.js';
 import { costingTable, recipeBreakdown, effectiveUnitCost } from '../lib/costing.js';
 import { getSettings } from '../lib/settings.js';
 import { audienceUsers, deviceCounts, processCampaign, runAutomations } from '../lib/campaigns.js';
@@ -58,7 +60,10 @@ admin.patch('/stations/:id', wrap(async (req, res) => {
 admin.get('/overview', wrap(async (req, res) => {
   const ids = await scoped(req);
   const [o, x] = await Promise.all([overview(ids, req.query.from, req.query.to), extras(ids, req.query.from, req.query.to)]);
-  res.json({ ...o, ...x });
+  const r = dateRange(req.query.from, req.query.to);
+  const l = await labour(ids, r.start, r.end);
+  // Pay rates are the owner's business: managers see hours, the owner also sees cost.
+  res.json({ ...o, ...x, labour: { hours: l.hours, cost: req.user.role === 'owner' ? l.cost : null, sales_per_hour: l.hours ? Math.round(o.totals.revenue / l.hours) : null, cost_pct: req.user.role === 'owner' && o.totals.revenue ? Math.round((l.cost / o.totals.revenue) * 1000) / 10 : null } });
 }));
 admin.get('/live', wrap(async (req, res) => res.json(await liveBoard(await scoped(req)))));
 admin.get('/alerts', wrap(async (req, res) => res.json(await alerts(await scoped(req), req.user.role === 'owner'))));
@@ -142,6 +147,7 @@ admin.post('/staff', wrap(async (req, res) => {
     `INSERT INTO users(name, phone, password_hash, role, station_id) VALUES ($1,$2,$3,'station',$4) RETURNING id, name, phone, role, station_id, active`,
     [b.name, normalizePhone(b.phone), await bcrypt.hash(b.password, 10), b.station_id],
   );
+  await query(`INSERT INTO staff_profiles(user_id, employee_code, joined_on) VALUES ($1, 'SC-' || lpad(((SELECT count(*) FROM staff_profiles) + 1)::text, 4, '0'), current_date) ON CONFLICT DO NOTHING`, [rows[0].id]);
   await audit(req.user.id, 'staff.create', 'user', rows[0].id);
   res.status(201).json(rows[0]);
 }));
@@ -199,7 +205,7 @@ admin.patch('/promos/:id', wrap(async (req, res) => {
 admin.get('/stations/:id/products', wrap(async (req, res) => {
   await assertStationAccess(req.user, req.params.id);
   const { rows } = await query(
-    `SELECT p.id, p.name, p.price, p.active, c.name AS category, COALESCE(sp.available, true) AS available, sp.price_override
+    `SELECT p.id, p.name, p.price, p.price_tier, p.active, c.name AS category, COALESCE(sp.available, true) AS available, sp.price_override
        FROM products p LEFT JOIN categories c ON c.id=p.category_id LEFT JOIN station_products sp ON sp.product_id=p.id AND sp.station_id=$1
       WHERE p.active ORDER BY c.sort, p.sort, p.name`, [req.params.id],
   );
@@ -209,6 +215,10 @@ admin.put('/stations/:sid/products/:pid', wrap(async (req, res) => {
   await assertStationAccess(req.user, req.params.sid);
   const b = z.object({ available: z.boolean().optional(), price_override: z.number().int().min(0).nullable().optional() }).parse(req.body);
   if (b.price_override !== undefined && req.user.role !== 'owner') throw forbidden('Only the owner changes prices');
+  if (b.price_override != null) {
+    const t = (await query('SELECT price_tier FROM products WHERE id=$1', [req.params.pid])).rows[0];
+    if (t?.price_tier) throw bad('Hot, flavored and iced drinks have one price at every station. Change the tier price under Rules.');
+  }
   await query(
     `INSERT INTO station_products(station_id, product_id, available, price_override) VALUES ($1,$2,COALESCE($3,true),$4)
      ON CONFLICT (station_id, product_id) DO UPDATE SET available=COALESCE($3, station_products.available),

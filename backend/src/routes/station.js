@@ -193,3 +193,18 @@ station.post('/cash-close', wrap(async (req, res) => {
   }
   res.json(rows[0]);
 }));
+
+// Standard recipe cards: every station and partner cafe makes each drink the same way. No costs are shown here.
+station.get('/recipes', wrap(async (req, res) => {
+  await sid(req);
+  const { rows: prods } = await query(
+    `SELECT p.id, p.name, p.sku, p.kind, p.recipe_method, p.recipe_version, p.price_tier, c.name AS category
+       FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.active AND p.kind <> 'merch' AND EXISTS (SELECT 1 FROM recipes r WHERE r.product_id=p.id) ORDER BY c.sort, p.sort`);
+  const { rows: lines } = await query(`SELECT r.product_id, i.name, i.unit, r.qty FROM recipes r JOIN ingredients i ON i.id=r.ingredient_id WHERE i.category <> 'retail' ORDER BY i.category, i.name`);
+  const { rows: opts } = await query(
+    `SELECT g.product_id, g.name AS grp, o.name AS opt, i.name, i.unit, orr.qty FROM option_recipes orr JOIN options o ON o.id=orr.option_id JOIN option_groups g ON g.id=o.group_id JOIN ingredients i ON i.id=orr.ingredient_id ORDER BY g.sort, o.sort`);
+  res.json(prods.map((p) => ({
+    ...p, lines: lines.filter((l) => l.product_id === p.id).map((l) => ({ name: l.name, unit: l.unit, qty: Number(l.qty) })),
+    options: opts.filter((o) => o.product_id === p.id).reduce((acc, o) => { const k = `${o.grp}: ${o.opt}`; (acc[k] ||= []).push({ name: o.name, unit: o.unit, qty: Number(o.qty) }); return acc; }, {}),
+  })));
+}));

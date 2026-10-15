@@ -4,7 +4,7 @@ import { publish } from './hub.js';
 import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
 import { initiate } from './payments.js';
-import { config } from './config.js';
+import { rtBool } from './runtime.js';
 import crypto from 'node:crypto';
 import { stockNeeds, recipeBreakdown } from './costing.js';
 
@@ -111,7 +111,7 @@ async function loadStationForOrder(db, stationId, channel) {
   const s = rows[0];
   if (!s) throw notFound('Station not found');
   if (channel !== 'counter') {
-    if (!s.is_open || (!s.within_hours && !config.ignoreHours)) throw conflict('This station is closed right now', 'station_closed');
+    if (!s.is_open || (!s.within_hours && !rtBool('ignore_station_hours'))) throw conflict('This station is closed right now', 'station_closed');
     if (!s.accepting_orders) throw conflict('This station is not taking new orders for a moment', 'station_busy');
   }
   return s;

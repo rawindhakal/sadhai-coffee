@@ -22,7 +22,10 @@ const home = (await call('GET', `/stations/${st.id}/home`)).body;
 const menu = home.categories;
 const all = menu.flatMap((c) => c.products);
 const americano = all.find((p) => p.sku === 'AMR');
-ok(americano && americano.list_price === 130 && americano.price === 99 && americano.offer, 'offer of the day: Americano Rs 99 (list Rs 130)');
+const iced = all.find((p) => p.sku === 'ICL');
+ok(americano.price === 100 && americano.list_price === 100 && !americano.offer, 'hot coffee is Rs 100');
+ok(all.find((p) => p.sku === 'CHL').price === 120 && all.find((p) => p.sku === 'MOC').price === 120, 'flavored drinks are Rs 120');
+ok(iced.list_price === 150 && iced.price === 120 && iced.offer, 'iced drinks are Rs 150 (offer of the day: iced latte Rs 120)');
 ok(home.offers.length >= 2 && home.best_sellers.length >= 4, 'home: offers and best sellers');
 ok(menu.some((c) => c.name === 'Merch' && c.products.length === 4), 'merch category with 4 items');
 
@@ -41,7 +44,7 @@ ok(bad.status === 400, 'required option enforced');
 
 const first = coupons.find((c) => c.kind === 'first_cup');
 const q = (await call('POST', '/orders/quote', { station_id: st.id, items: [item], payment_method: 'cash', coupon_id: first.id }, T)).body;
-ok(q.total === 0 && q.discount === 99, 'free first cup covers the offer price');
+ok(q.total === 0 && q.discount === 100, 'free first cup covers a Rs 100 coffee');
 
 const o1 = (await call('POST', '/orders', { station_id: st.id, items: [item], payment_method: 'cash', coupon_id: first.id }, T)).body;
 ok(o1.order?.status === 'placed' && /^A\d+$/.test(o1.order.pickup_code), `free-cup order placed (${o1.order?.pickup_code})`);
@@ -108,7 +111,7 @@ ok(mq.status === 200 && mq.body.total === 450, 'merch quote Rs 450');
 const kal = stations.find((s) => s.code === 'KALANKI');
 const mgr2 = await login('9800000003');
 const cold = (await call('GET', `/stations/${kal.id}/menu`)).body.categories.flatMap((c) => c.products).find((p) => p.sku === 'CLB');
-ok(cold.offer && cold.price === 152, 'station offer: cold brew 20% off at Kalanki');
+ok(cold.offer && cold.price === 120, 'station offer: cold brew 20% off at Kalanki (Rs 150 to Rs 120)');
 const below = await call('POST', '/admin/offers', { title: 'Too cheap', scope: 'product', product_id: cold.id, offer_price: 10, station_id: kal.id, hours: 4 }, mgr2.access_token);
 ok(below.status === 400, 'manager cannot price below food cost');
 const tooMuch = await call('POST', '/admin/offers', { title: 'Half off', scope: 'all_drinks', pct: 50, station_id: kal.id, hours: 4 }, mgr2.access_token);
@@ -118,7 +121,7 @@ ok(good.status === 201, 'manager creates offer for own station');
 const otherSt = await call('POST', '/admin/offers', { title: 'Nope', scope: 'all_drinks', pct: 10, station_id: st.id, hours: 4 }, mgr2.access_token);
 ok(otherSt.status === 403, 'manager cannot create offers for another manager station');
 const kalMenu2 = (await call('GET', `/stations/${kal.id}/menu`)).body.categories.flatMap((c) => c.products).find((p) => p.sku === 'LAT');
-ok(kalMenu2.price === 144, 'new offer is live on the menu immediately');
+ok(kalMenu2.price === 85, 'new offer is live on the menu immediately (latte Rs 100 less 15%)');
 await call('PATCH', `/admin/offers/${good.body.id}`, { active: false }, mgr2.access_token);
 
 // accountability
@@ -189,6 +192,7 @@ const costing = (await call('GET', '/admin/costing', null, owner.access_token)).
 const rowOf = (sku) => costing.rows.find((r) => r.sku === sku);
 ok(rowOf('ESP').cost === 53, 'costing: espresso = 16 g coffee at Rs 2,500/kg + 10% wastage (Rs 44) + cup (Rs 9)');
 ok(rowOf('AMR').cost === 54 && costing.target_pct === 35 && rowOf('CHL').over_target, 'costing: flags items above the target food-cost %');
+ok(rowOf('LAT').price === 100 && rowOf('LAT').food_cost_pct > 70, 'costing: shows the real food cost of a Rs 100 latte');
 const amrId = rowOf('AMR').id;
 const rec = (await call('GET', `/admin/recipes/${amrId}`, null, owner.access_token)).body;
 ok(Math.round(rec.breakdown.find((l) => l.name.startsWith('Coffee')).cost * 100) / 100 === 44 && rec.product.recipe_method, 'recipe card shows the coffee line at Rs 44 and the method');
@@ -230,6 +234,147 @@ const val = (await call('GET', '/central/valuation', null, owner.access_token)).
 ok(val.total > 0 && val.stations.length === 4, 'inventory valuation across central store and stations');
 const mx = (await call('GET', '/central/matrix', null, owner.access_token)).body;
 ok(mx.stations.length === 4 && mx.ingredients.length > 10, 'stock matrix: every ingredient at every station');
+
+
+{
+// ---------- v1.3: price tiers, standard recipes, owner settings and keys, pictures, enquiries ----------
+const setRes = await call('PUT', '/owner/settings', { price_hot: 110 }, owner.access_token);
+ok(setRes.status === 200 && (await call('GET', `/stations/${st.id}/menu`)).body.categories.flatMap((c) => c.products).find((p) => p.sku === 'AMR').price === 110, 'changing the hot price reprices every hot drink');
+await call('PUT', '/owner/settings', { price_hot: 100 }, owner.access_token);
+const ovr = await call('PUT', `/admin/stations/${st.id}/products/${americano.id}`, { price_override: 90 }, owner.access_token);
+ok(ovr.status === 400, 'a tiered drink cannot have a per-station price');
+const cards = (await call('GET', '/station/recipes', null, staff.access_token)).body;
+const amrCard = cards.find((c) => c.sku === 'AMR');
+ok(amrCard && amrCard.lines.some((l) => l.name.startsWith('Coffee') && l.qty === 16) && amrCard.recipe_method && !JSON.stringify(cards).includes('unit_cost'), 'recipe cards show the standard recipe and no costs');
+
+const ints = (await call('GET', '/owner/integrations', null, owner.access_token)).body;
+const esk = ints.find((i) => i.key === 'esewa_secret');
+ok(esk.secret && esk.value === null && esk.masked, 'secrets are masked, never sent to the browser');
+ok((await call('GET', '/owner/integrations', null, mgr.access_token)).status === 403, 'only the owner can see integrations');
+ok((await call('PUT', '/owner/integrations', { values: { payment_mode: 'maybe' } }, owner.access_token)).status === 400, 'invalid setting values are refused');
+const put = await call('PUT', '/owner/integrations', { values: { khalti_secret: 'live_secret_key_abcd1234', support_email: 'help@sadhai.test' } }, owner.access_token);
+const kh = put.body.settings.find((i) => i.key === 'khalti_secret');
+ok(put.status === 200 && kh.is_set && kh.masked.endsWith('1234') && !JSON.stringify(put.body).includes('abcd1234') && kh.source === 'dashboard', 'owner saves a key from the dashboard; it comes back masked');
+ok((await call('GET', '/config')).body.site.support_email === 'help@sadhai.test', 'company details are live in the public config');
+ok((await call('POST', '/owner/integrations/test/esewa', {}, owner.access_token)).body.ok === true, 'eSewa check runs');
+ok((await call('POST', '/owner/integrations/vapid', {}, owner.access_token)).status === 400, 'existing browser push keys are not replaced without confirmation');
+await call('PUT', '/owner/integrations', { values: { khalti_secret: null, support_email: null } }, owner.access_token);
+ok(!(await call('GET', '/owner/integrations', null, owner.access_token)).body.find((i) => i.key === 'khalti_secret').is_set, 'clearing a key removes it');
+
+const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+const up = await call('POST', '/owner/media', { filename: 'sun.png', mime: 'image/png', data: png }, owner.access_token);
+ok(up.status === 201 && up.body.url.includes('/media/'), 'owner uploads a picture');
+const evil = await call('POST', '/owner/media', { filename: 'x.svg', mime: 'image/svg+xml', data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>').toString('base64') }, owner.access_token);
+ok(evil.status === 400, 'an SVG with a script is refused');
+ok((await call('POST', '/owner/media', { filename: 'x.png', mime: 'image/png', data: Buffer.from('not a picture at all, just text').toString('base64') }, owner.access_token)).status === 400, 'a fake picture is refused');
+const img = await fetch(up.body.url.replace(/^https?:\/\/[^/]+/, API));
+ok(img.status === 200 && img.headers.get('content-type') === 'image/png' && img.headers.get('cross-origin-resource-policy') === 'cross-origin', 'uploaded pictures are served publicly');
+const site0 = (await call('GET', '/owner/site', null, owner.access_token)).body;
+const heroNew = { ...site0.content.hero, headline_en: 'Coffee, the Sadhai way', layers: { sun: up.body.id, far: null, mid: null, near: null }, timer_cup: null };
+ok((await call('PUT', '/owner/site/hero', heroNew, owner.access_token)).status === 200, 'owner edits the hero text and a layer');
+const site1 = (await call('GET', '/site')).body;
+ok(site1.hero.headline_en === 'Coffee, the Sadhai way' && site1.hero.layers.sun?.url && site1.hero.layers.far === null, 'the public site shows the new hero and falls back to built-in art for the rest');
+ok((await call('PUT', '/owner/site/hero', heroNew, mgr.access_token)).status === 403, 'managers cannot edit the site');
+await call('DELETE', '/owner/site/hero', null, owner.access_token);
+ok((await call('GET', '/site')).body.hero.headline_en === 'Good coffee, every day.', 'resetting restores the default hero');
+
+const enq = await call('POST', '/enquiries', { kind: 'partner', name: 'Tara Cafe', email: 'tara@example.com', org: 'Tara Cafe', city: 'Pokhara', message: 'Interested', consent: true }, null);
+ok(enq.status === 201, 'partner enquiry accepted');
+ok((await call('POST', '/enquiries', { kind: 'investor', name: 'X Y', email: 'x@y.com', consent: false }, null)).status === 400, 'enquiry needs consent');
+ok((await call('POST', '/enquiries', { kind: 'investor', name: 'Bot', email: 'b@b.com', consent: true, website: 'http://spam' }, null)).status === 400, 'bots that fill the hidden field are refused');
+const enqs = (await call('GET', '/owner/enquiries', null, owner.access_token)).body;
+ok(enqs.some((e) => e.name === 'Tara Cafe' && e.status === 'new'), 'owner sees the enquiry');
+await call('PATCH', `/owner/enquiries/${enqs.find((e) => e.name === 'Tara Cafe').id}`, { status: 'contacted' }, owner.access_token);
+ok((await call('GET', '/site/economics')).body.enabled === false, 'unit economics are hidden from investors until the owner switches them on');
+const inv = { ...site0.content.investors, show_unit_economics: true };
+await call('PUT', '/owner/site/investors', inv, owner.access_token);
+const eco = (await call('GET', '/site/economics')).body;
+ok(eco.enabled && eco.tiers.length === 3 && eco.tiers.find((t) => t.tier === 'hot').price === 100, 'unit economics show the three tiers when enabled');
+await call('DELETE', '/owner/site/investors', null, owner.access_token);
+ok(/^\d+$/.test(String((await call('GET', '/config')).body.partner_share_pct)) && (await call('GET', '/config')).body.pricing.iced === 150, 'public config carries tier prices and the partner share');
+
+// ---------- staff, rosters, duties, attendance, time off, payroll ----------
+const people = (await call('GET', '/hr/staff', null, owner.access_token)).body;
+ok(people.length === 16 && people.every((p) => p.hourly_rate !== undefined), 'owner sees all 16 staff with pay rates');
+const mgrPeople = (await call('GET', '/hr/staff', null, mgr.access_token)).body;
+ok(mgrPeople.length >= 8 && mgrPeople.every((p) => p.hourly_rate === undefined), 'managers see their staff but not pay rates');
+ok((await call('PATCH', `/hr/staff/${mgrPeople[0].id}`, { hourly_rate: 500 }, mgr.access_token)).status === 403, 'managers cannot change pay rates');
+const monday = (() => { const d = new Date(Date.now() + 345 * 60000); const dow = (d.getUTCDay() + 6) % 7; const m = new Date(d.getTime() - dow * 864e5 + 14 * 864e5); return m.toISOString().slice(0, 10); })();
+const sunday = new Date(Date.parse(monday) + 6 * 864e5).toISOString().slice(0, 10);
+const rosterRun = await call('POST', '/hr/roster/auto-assign', { from: monday, to: sunday }, mgr.access_token);
+ok(rosterRun.status === 200 && rosterRun.body.created > 30, `auto-assign filled the roster (${rosterRun.body.created} shifts, ${rosterRun.body.unfilled?.length} open)`);
+const roster = (await call('GET', `/hr/roster?from=${monday}&to=${sunday}`, null, mgr.access_token)).body;
+const worked = roster.shifts.filter((x) => x.user_id);
+ok(worked.every((x) => (new Date(x.end_at) - new Date(x.start_at)) / 3600e3 === 6), 'every shift is 6 hours');
+const byUser = {};
+for (const x of worked) (byUser[x.user_id] ||= []).push(x);
+ok(Object.values(byUser).every((l) => new Set(l.map((x) => x.date)).size === l.length), 'nobody has two shifts on one day');
+ok(Object.values(byUser).every((l) => l.length <= 6), 'nobody works more than 6 shifts a week');
+ok(Object.values(byUser).every((l) => { const s2 = [...l].sort((a, b) => new Date(a.start_at) - new Date(b.start_at)); return s2.every((x, i) => i === 0 || (new Date(x.start_at) - new Date(s2[i - 1].end_at)) / 3600e3 >= 11); }), 'at least 11 hours of rest between shifts');
+ok(worked.every((x) => x.duty && x.tasks > 0), 'every shift has a duty and a checklist');
+const dayDuty = (d, st2) => worked.filter((x) => x.date === d && x.station_id === st2).map((x) => x.duty).join('|');
+const someDay = worked[0].date, someSt = worked[0].station_id;
+ok(/Opening/.test(dayDuty(someDay, someSt)) && /Closing/.test(dayDuty(someDay, someSt)), 'the first shift opens and the last closes');
+ok(worked.every((x) => !x.user_id || roster.shifts.filter((y) => y.user_id === x.user_id && y.date === x.date).length === 1), 'one shift per person per day, checked again');
+const unpub = worked.filter((x) => !x.published).length;
+const pub = await call('POST', '/hr/roster/publish', { from: monday, to: sunday }, mgr.access_token);
+ok(unpub > 0 && pub.body.published === unpub, 'publishing tells staff their shifts are ready');
+
+// new staff member: create, rostered shift now, check in, tick a task, check out, get paid by the hour
+const nm = `98${String(Date.now()).slice(-8)}`;
+const newStaff = await call('POST', '/hr/staff', { name: 'Test Barista', phone: nm, password: 'Sadhai@123', station_id: st.id, position: 'barista', hourly_rate: 120 }, owner.access_token);
+ok(newStaff.status === 201, 'owner adds a staff member with an hourly rate');
+const ts = await login(nm);
+const startInstant = new Date(Date.now() - 5 * 60000);
+const nptStart = new Date(startInstant.getTime() + 345 * 60000);
+const sDate = nptStart.toISOString().slice(0, 10), sTime = nptStart.toISOString().slice(11, 16);
+const add = await call('POST', '/hr/roster/shifts', { station_id: st.id, user_id: newStaff.body.id, date: sDate, start: sTime, hours: 6 }, mgr.access_token);
+ok(add.status === 201, 'manager adds a shift by hand');
+ok((await call('POST', '/hr/roster/shifts', { station_id: st.id, user_id: newStaff.body.id, date: sDate, start: '16:00', hours: 6 }, mgr.access_token)).status === 409, 'a second shift on the same day is refused');
+ok((await call('POST', '/hr/me/check-in', {}, ts.access_token)).status === 409, 'staff cannot start an unpublished shift');
+await call('POST', '/hr/roster/publish', { station_id: st.id, from: sDate, to: sDate }, mgr.access_token);
+const me1 = (await call('GET', '/hr/me', null, ts.access_token)).body;
+ok(me1.next && me1.can_check_in && me1.next.tasks.length > 0, 'staff see their shift, duty and checklist');
+ok((await call('POST', '/hr/me/check-in', {}, ts.access_token)).status === 200, 'check in');
+const task = (await call('GET', '/hr/me', null, ts.access_token)).body.current.tasks[0];
+ok((await call('POST', `/hr/me/tasks/${task.id}/toggle`, {}, ts.access_token)).body.done === true, 'tick a checklist task');
+const out = await call('POST', '/hr/me/check-out', {}, ts.access_token);
+ok(out.status === 200 && out.body.minutes >= 0 && out.body.minutes <= 15, `check out records the paid minutes (${out.body.minutes})`);
+const adj = await call('POST', `/hr/shifts/${add.body.id}/adjust`, { minutes: 360, reason: 'Covered a busy morning' }, mgr.access_token);
+ok(adj.status === 200, 'manager adjusts the hours with a reason');
+const pv = (await call('GET', `/hr/payroll/preview?from=${sDate}&to=${sDate}`, null, owner.access_token)).body;
+const line = pv.find((l) => l.name === 'Test Barista');
+ok(line && line.regular_minutes === 360 && line.overtime_minutes === 0 && line.gross === 720, 'pay = 6 hours at Rs 120 an hour = Rs 720');
+ok((await call('GET', `/hr/payroll/preview?from=${sDate}&to=${sDate}`, null, mgr.access_token)).status === 403, 'managers cannot see payroll');
+const lastMonth = pv.length ? null : null;
+const runFrom = new Date(Date.now() + 345 * 60000 - 20 * 864e5).toISOString().slice(0, 10);
+const prev2 = (await call('GET', `/hr/payroll/preview?from=${runFrom}&to=${sDate}`, null, owner.access_token)).body;
+ok(prev2.length >= 10 && prev2.every((l) => Math.abs(l.gross - ((l.regular_minutes / 60) * l.hourly_rate + (l.overtime_minutes / 60) * l.hourly_rate * 1.5)) < 0.01), 'payroll lines add up: regular hours + overtime at 1.5 times');
+
+// time off respected by the roster, and decided by the manager
+const tReq = await call('POST', '/hr/me/time-off', { from_date: sDate, to_date: sDate, reason: 'Test' }, ts.access_token);
+ok(tReq.status === 201, 'staff ask for time off');
+const decided = await call('POST', `/hr/time-off/${tReq.body.id}/decide`, { approve: true }, mgr.access_token);
+ok(decided.status === 200, 'manager approves it');
+ok((await call('GET', `/hr/time-off?status=approved`, null, mgr.access_token)).body.some((t) => t.id === tReq.body.id), 'approved leave is on record');
+
+// payroll run lifecycle
+const run = await call('POST', '/hr/payroll/runs', { from: sDate, to: sDate }, owner.access_token);
+ok(run.status === 201, 'owner creates a payroll run');
+ok((await call('POST', `/hr/payroll/runs/${run.body.id}/approve`, {}, owner.access_token)).status === 200, 'approve payroll');
+ok((await call('POST', '/hr/payroll/runs', { from: sDate, to: sDate }, owner.access_token)).status === 409, 'an approved period cannot be run twice');
+ok((await call('POST', `/hr/shifts/${add.body.id}/adjust`, { minutes: 300, reason: 'Late change' }, mgr.access_token)).status === 409, 'approved hours are locked');
+ok((await call('POST', `/hr/payroll/runs/${run.body.id}/pay`, { reference: 'BANK-123' }, owner.access_token)).status === 200, 'mark paid with a reference');
+const detail = (await call('GET', `/hr/payroll/runs/${run.body.id}`, null, owner.access_token)).body;
+ok(detail.status === 'paid' && detail.lines.some((l) => l.name === 'Test Barista' && Number(l.gross) === 720) && detail.totals.gross >= 720, 'paid run keeps its payslip lines');
+
+const ovw = (await call('GET', '/admin/overview', null, owner.access_token)).body;
+ok(ovw.labour.hours > 100 && ovw.labour.cost > 0 && ovw.labour.sales_per_hour > 0, 'overview shows labour hours, cost and sales per labour hour');
+ok((await call('GET', '/admin/overview', null, mgr.access_token)).body.labour.cost === null, 'managers see hours but not labour cost');
+const setup = (await call('GET', '/owner/setup', null, owner.access_token)).body;
+ok(setup.total >= 10 && setup.steps.every((x) => x.title && typeof x.done === 'boolean'), 'setup checklist reports each step');
+
+}
 
 // store compliance: version endpoint, data export, account deletion
 const ver = (await call('GET', '/version')).body;
