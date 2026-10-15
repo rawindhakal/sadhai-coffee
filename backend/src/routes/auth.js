@@ -14,7 +14,7 @@ const limiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: true, 
 
 const publicUser = (u) => ({
   id: u.id, name: u.name, phone: u.phone, email: u.email, role: u.role, station_id: u.station_id, lang: u.lang,
-  referral_code: u.referral_code, beans: u.beans,
+  referral_code: u.referral_code, beans: u.beans, notif_offers: u.notif_offers, warehouse: !!u.warehouse,
 });
 
 const genCode = (name) => `${name.replace(/[^A-Za-z]/g, '').slice(0, 4).toUpperCase().padEnd(4, 'S')}${crypto.randomInt(100, 999)}`;
@@ -57,7 +57,7 @@ auth.post('/register', limiter, wrap(async (req, res) => {
     await issueSignupLadder(rows[0].id, db);
     return rows[0];
   });
-  await notify(user.id, { kind: 'promo', title: 'Your first Americano is free', body: 'Order ahead in the app. One per customer. Valid 14 days.' });
+  await notify(user.id, { kind: 'info', title: 'Your first Americano is free', body: 'Order ahead in the app. One per customer. Valid 14 days.' });
   res.status(201).json(await session(user));
 }));
 
@@ -99,7 +99,7 @@ me.get('/', wrap(async (req, res) => {
 me.patch('/', wrap(async (req, res) => {
   const b = z.object({
     name: z.string().trim().min(2).max(60).optional(), email: z.string().email().optional(), lang: z.enum(['en', 'ne']).optional(),
-    push_token: z.string().max(400).optional(), current_password: z.string().optional(), new_password: z.string().min(6).max(72).optional(),
+    push_token: z.string().max(400).optional(), notif_offers: z.boolean().optional(), current_password: z.string().optional(), new_password: z.string().min(6).max(72).optional(),
   }).parse(req.body);
   if (b.new_password) {
     const u = (await query('SELECT password_hash FROM users WHERE id=$1', [req.user.id])).rows[0];
@@ -108,8 +108,8 @@ me.patch('/', wrap(async (req, res) => {
     await query('UPDATE refresh_tokens SET revoked=true WHERE user_id=$1', [req.user.id]);
   }
   await query(
-    `UPDATE users SET name=COALESCE($2,name), email=COALESCE($3,email), lang=COALESCE($4,lang), push_token=COALESCE($5,push_token) WHERE id=$1`,
-    [req.user.id, b.name, b.email, b.lang, b.push_token],
+    `UPDATE users SET name=COALESCE($2,name), email=COALESCE($3,email), lang=COALESCE($4,lang), push_token=COALESCE($5,push_token), notif_offers=COALESCE($6,notif_offers) WHERE id=$1`,
+    [req.user.id, b.name, b.email, b.lang, b.push_token, b.notif_offers],
   );
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
   res.json(publicUser(rows[0]));
@@ -131,6 +131,7 @@ me.delete('/', wrap(async (req, res) => {
     );
     await db.query('DELETE FROM refresh_tokens WHERE user_id=$1', [u.id]);
     await db.query('DELETE FROM notifications WHERE user_id=$1', [u.id]);
+    await db.query('DELETE FROM push_tokens WHERE user_id=$1', [u.id]);
     await db.query(`UPDATE coupons SET status='expired' WHERE user_id=$1 AND status='active'`, [u.id]);
     await db.query(`UPDATE passes SET status='expired' WHERE user_id=$1 AND status='active'`, [u.id]);
     await db.query(`UPDATE orders SET customer_name=NULL, note=NULL, rating_note=NULL WHERE user_id=$1`, [u.id]);
@@ -152,4 +153,20 @@ me.get('/export', wrap(async (req, res) => {
   ]);
   res.setHeader('Content-Disposition', 'attachment; filename="sadhai-my-data.json"');
   res.json({ exported_at: new Date().toISOString(), profile: user.rows[0], orders: orders.rows, coupons: coupons.rows, passes: passes.rows, referrals: referrals.rows });
+}));
+
+// Device registration for push notifications. A token belongs to one user: signing in on a shared phone moves it.
+me.post('/push-token', wrap(async (req, res) => {
+  const b = z.object({ token: z.string().min(10).max(4000), platform: z.enum(['android', 'ios', 'web']), device_label: z.string().max(80).optional(), app_version: z.string().max(20).optional() }).parse(req.body);
+  await query(
+    `INSERT INTO push_tokens(user_id, platform, token, device_label, app_version) VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (token) DO UPDATE SET user_id=$1, platform=$2, device_label=$4, app_version=$5, active=true, last_seen_at=now()`,
+    [req.user.id, b.platform, b.token, b.device_label || null, b.app_version || null],
+  );
+  res.status(201).json({ ok: true });
+}));
+me.delete('/push-token', wrap(async (req, res) => {
+  const { token } = z.object({ token: z.string() }).parse(req.body);
+  await query('DELETE FROM push_tokens WHERE token=$1 AND user_id=$2', [token, req.user.id]);
+  res.json({ ok: true });
 }));

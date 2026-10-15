@@ -5,6 +5,8 @@ import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
 import { initiate } from './payments.js';
 import { config } from './config.js';
+import crypto from 'node:crypto';
+import { stockNeeds, recipeBreakdown } from './costing.js';
 
 const KTM_NOW = `(now() AT TIME ZONE 'Asia/Kathmandu')::time`;
 
@@ -194,15 +196,24 @@ async function discountFor(db, user, input, lines, subtotal, stationId) {
   if (input.payment_method === 'pass') {
     if (!user) throw bad('Sign in to use your pass');
     if (lines.some((l) => !l.product.pass_eligible)) throw bad('Your pass covers drinks only');
+    // Passes are used one after another: already-started passes first (soonest to end), then the oldest unstarted one.
     const { rows } = await db.query(
       `SELECT * FROM passes WHERE user_id=$1 AND status='active' AND expires_at > now() AND used_cups < total_cups
-        ORDER BY expires_at LIMIT 1 FOR UPDATE`,
+        ORDER BY (activated_at IS NULL), expires_at, purchased_at FOR UPDATE`,
       [user.id],
     );
-    const pass = rows[0];
-    if (!pass) throw conflict('You have no active pass. Buy a 10-cup pass first.', 'no_pass');
-    if (pass.total_cups - pass.used_cups < cups) throw conflict(`Your pass has ${pass.total_cups - pass.used_cups} cups left`, 'pass_short');
-    return { ...out, discount: subtotal, label: '10-cup pass', pass_id: pass.id };
+    if (!rows.length) throw conflict('You have no active pass. Buy a 10-cup pass first.', 'no_pass');
+    const left = rows.reduce((a, p) => a + (p.total_cups - p.used_cups), 0);
+    if (left < cups) throw conflict(`Your passes have ${left} cup${left === 1 ? '' : 's'} left in total`, 'pass_short');
+    const plan = [];
+    let need = cups;
+    for (const p of rows) {
+      if (need <= 0) break;
+      const take = Math.min(need, p.total_cups - p.used_cups);
+      plan.push({ pass_id: p.id, code: p.code, cups: take });
+      need -= take;
+    }
+    return { ...out, discount: subtotal, label: plan.length > 1 ? '10-cup passes' : '10-cup pass', pass_id: plan[0].pass_id, pass_plan: plan };
   }
   if (input.coupon_id) {
     if (!user) throw bad('Sign in to use a coupon');
@@ -242,18 +253,16 @@ export async function quote(db, user, input) {
   const subtotal = lines.reduce((a, l) => a + l.line_total, 0);
   const d = await discountFor(db, user, input, lines, subtotal, station.id);
   const discount = Math.min(d.discount, subtotal);
-  return { station, lines, drops, offerUse, subtotal, discount, total: subtotal - discount, discount_label: d.label, coupon_id: d.coupon_id, promo_code_id: d.promo_code_id, pass_id: d.pass_id, cups: lines.reduce((a, l) => a + l.qty, 0) };
+  return { station, lines, drops, offerUse, subtotal, discount, total: subtotal - discount, discount_label: d.label, coupon_id: d.coupon_id, promo_code_id: d.promo_code_id, pass_id: d.pass_id, pass_plan: d.pass_plan || [], cups: lines.reduce((a, l) => a + l.qty, 0) };
 }
 
 /* ------------------------------------------------------------- inventory */
 
+const optionIds = (x) => x.option_ids || (Array.isArray(x.options) ? x.options.map((o) => o.id) : []);
+
+// What an order uses from stock: the recipe plus chosen options, including the allowed wastage.
 async function needsFor(db, lines) {
-  const needs = new Map();
-  for (const l of lines) {
-    const { rows } = await db.query('SELECT ingredient_id, qty FROM recipes WHERE product_id=$1', [l.product_id]);
-    for (const r of rows) needs.set(r.ingredient_id, (needs.get(r.ingredient_id) || 0) + r.qty * l.qty);
-  }
-  return needs;
+  return stockNeeds(db, lines.map((l) => ({ product_id: l.product_id, qty: l.qty, option_ids: optionIds(l) })));
 }
 
 async function deductStock(db, stationId, needs, ref, userId) {
@@ -319,7 +328,7 @@ function emitOrder(order, event = 'order') {
 
 /** Moves an order into the live queue: reserves stock, tells station and customer. */
 async function placeOrder(db, order, items, actorId) {
-  const needs = await needsFor(db, items.map((i) => ({ product_id: i.product_id, qty: i.qty })));
+  const needs = await needsFor(db, items);
   const low = await deductStock(db, order.station_id, needs, order.id, actorId);
   await db.query(`UPDATE orders SET status='placed' WHERE id=$1`, [order.id]);
   return low;
@@ -338,27 +347,34 @@ export async function createOrder(user, input) {
     const paidNow = q.total === 0 || (channel === 'counter' && input.paid_now !== false);
     const { rows } = await db.query(
       `INSERT INTO orders(station_id, user_id, customer_name, pickup_code, channel, status, subtotal, discount, total, discount_label,
-         payment_method, payment_status, coupon_id, promo_code_id, pass_id, drop_id, note, scheduled_for)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+         payment_method, payment_status, coupon_id, promo_code_id, pass_id, drop_id, note, scheduled_for, customer_phone)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
       [q.station.id, user?.id || null, input.customer_name || null, code, channel, digital ? 'awaiting_payment' : 'placed',
         q.subtotal, q.discount, q.total, q.discount_label, method, paidNow ? 'paid' : 'unpaid', q.coupon_id, q.promo_code_id, q.pass_id,
-        [...q.drops.keys()][0] || null, input.note?.slice(0, 200) || null, input.scheduled_for || null],
+        [...q.drops.keys()][0] || null, input.note?.slice(0, 200) || null, input.scheduled_for || null, input.customer_phone || null],
     );
     const order = rows[0];
     for (const l of q.lines) {
+      const unitCost = Math.round((await recipeBreakdown(l.product_id, l.options.map((o) => o.id), db)).cost) || l.product.cost || 0;
       await db.query(
-        `INSERT INTO order_items(order_id, product_id, name, unit_price, qty, options, line_total, offer_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [order.id, l.product_id, l.name, l.unit_price, l.qty, JSON.stringify(l.options), l.line_total, l.offer_id],
+        `INSERT INTO order_items(order_id, product_id, name, unit_price, qty, options, line_total, offer_id, cost) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [order.id, l.product_id, l.name, l.unit_price, l.qty, JSON.stringify(l.options), l.line_total, l.offer_id, unitCost],
       );
     }
     // consume offers
     if (q.coupon_id) await db.query(`UPDATE coupons SET status='used', used_order_id=$2 WHERE id=$1`, [q.coupon_id, order.id]);
     if (q.promo_code_id) await db.query('UPDATE promo_codes SET used=used+1 WHERE id=$1', [q.promo_code_id]);
-    if (q.pass_id) {
-      await db.query(
-        `UPDATE passes SET used_cups = used_cups + $2, status = CASE WHEN used_cups + $2 >= total_cups THEN 'used' ELSE status END WHERE id=$1`,
-        [q.pass_id, q.cups],
-      );
+    if (q.pass_plan.length) {
+      const validDays = (await getSettings(db)).pass_valid_days;
+      for (const u of q.pass_plan) {
+        await db.query(
+          `UPDATE passes SET used_cups = used_cups + $2,
+             status = CASE WHEN used_cups + $2 >= total_cups THEN 'used' ELSE status END,
+             expires_at = CASE WHEN activated_at IS NULL THEN now() + ($3 || ' days')::interval ELSE expires_at END,
+             activated_at = COALESCE(activated_at, now())
+           WHERE id=$1`, [u.pass_id, u.cups, String(validDays)]);
+        await db.query('INSERT INTO order_pass_uses(order_id, pass_id, cups) VALUES ($1,$2,$3)', [order.id, u.pass_id, u.cups]);
+      }
     }
     for (const [dropId, n] of q.drops) await db.query('UPDATE drops SET sold=sold+$2 WHERE id=$1', [dropId, n]);
     for (const [offerId, n] of q.offerUse) await db.query('UPDATE daily_offers SET used=used+$2 WHERE id=$1', [offerId, n]);
@@ -412,7 +428,7 @@ export async function confirmPayment(paymentId, { ref, raw, outcome = 'paid' } =
     if (p.purpose === 'order') {
       const o = (await db.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [p.order_id])).rows[0];
       if (o.status === 'awaiting_payment') {
-        const items = (await db.query('SELECT product_id, qty FROM order_items WHERE order_id=$1', [o.id])).rows;
+        const items = (await db.query('SELECT product_id, qty, options FROM order_items WHERE order_id=$1', [o.id])).rows;
         try {
           await db.query('SAVEPOINT stock');
           await db.query(`UPDATE orders SET payment_status='paid' WHERE id=$1`, [o.id]);
@@ -426,7 +442,7 @@ export async function confirmPayment(paymentId, { ref, raw, outcome = 'paid' } =
         }
       }
     } else if (p.purpose === 'pass') {
-      const days = (await getSettings(db)).pass_valid_days;
+      const days = (await getSettings(db)).pass_use_by_days;
       await db.query(`UPDATE passes SET status='active', purchased_at=now(), expires_at=now() + ($2 || ' days')::interval WHERE id=$1`, [p.pass_id, String(days)]);
     }
     return { payment: p, orderId: p.order_id, passId: p.pass_id, low };
@@ -443,7 +459,8 @@ export async function confirmPayment(paymentId, { ref, raw, outcome = 'paid' } =
     }
   }
   if (res.passId && !res.failed) {
-    await notify(res.payment.user_id, { kind: 'pass', title: 'Your 10-cup pass is ready', body: '10 cups. One pass. Use it at any Sadhai station.' });
+    const code = (await query('SELECT code FROM passes WHERE id=$1', [res.passId])).rows[0]?.code;
+    await notify(res.payment.user_id, { kind: 'pass', title: 'Your 10-cup pass is ready', body: `Pass ${code}. It starts when you use your first cup, then lasts 30 days.`, data: { pass_id: res.passId } });
   }
   return res;
 }
@@ -452,7 +469,7 @@ async function cancelInTx(db, orderId, actorId, reason, { refund = true } = {}) 
   const o = (await db.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [orderId])).rows[0];
   if (!o) throw notFound('Order not found');
   if (['picked_up', 'cancelled'].includes(o.status)) throw conflict('This order can no longer be cancelled');
-  const items = (await db.query('SELECT product_id, qty FROM order_items WHERE order_id=$1', [orderId])).rows;
+  const items = (await db.query('SELECT product_id, qty, options FROM order_items WHERE order_id=$1', [orderId])).rows;
   const cups = items.reduce((a, i) => a + i.qty, 0);
 
   if (['placed'].includes(o.status)) {
@@ -460,7 +477,9 @@ async function cancelInTx(db, orderId, actorId, reason, { refund = true } = {}) 
   }
   if (o.coupon_id) await db.query(`UPDATE coupons SET status = CASE WHEN expires_at > now() THEN 'active' ELSE 'expired' END, used_order_id=NULL WHERE id=$1`, [o.coupon_id]);
   if (o.promo_code_id) await db.query('UPDATE promo_codes SET used = GREATEST(used-1,0) WHERE id=$1', [o.promo_code_id]);
-  if (o.pass_id) await db.query(`UPDATE passes SET used_cups = GREATEST(used_cups-$2,0), status = CASE WHEN status='used' THEN 'active' ELSE status END WHERE id=$1`, [o.pass_id, cups]);
+  const uses = (await db.query('SELECT pass_id, cups FROM order_pass_uses WHERE order_id=$1', [orderId])).rows;
+  for (const u of uses) await db.query(`UPDATE passes SET used_cups = GREATEST(used_cups-$2,0), status = CASE WHEN status='used' THEN 'active' ELSE status END WHERE id=$1`, [u.pass_id, u.cups]);
+  if (!uses.length && o.pass_id) await db.query(`UPDATE passes SET used_cups = GREATEST(used_cups-$2,0), status = CASE WHEN status='used' THEN 'active' ELSE status END WHERE id=$1`, [o.pass_id, cups]);
   const offerItems = (await db.query('SELECT offer_id, sum(qty)::int AS n FROM order_items WHERE order_id=$1 AND offer_id IS NOT NULL GROUP BY 1', [orderId])).rows;
   for (const oi of offerItems) await db.query('UPDATE daily_offers SET used = GREATEST(used-$2,0) WHERE id=$1', [oi.offer_id, oi.n]);
   if (o.drop_id) {
@@ -529,7 +548,7 @@ export async function advanceOrder(orderId, next, actor) {
     }[next];
     if (msg) await notify(order.user_id, { kind: 'order', ...msg, data: { order_id: order.id } });
     if (res.referral) {
-      for (const r of res.referral) await notify(r.user_id, { kind: 'promo', title: 'A free cup is waiting', body: r.body });
+      for (const r of res.referral) await notify(r.user_id, { kind: 'info', title: 'A free cup is waiting', body: r.body });
     }
   }
   return order;
@@ -569,26 +588,44 @@ export async function rateOrder(orderId, user, rating, note) {
 
 /* ---------------------------------------------------------------- passes */
 
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I, so a code read out loud is not mistaken
+const newPassCode = () => {
+  const pick = (n) => Array.from({ length: n }, () => CODE_CHARS[crypto.randomInt(CODE_CHARS.length)]).join('');
+  return `SP-${pick(4)}-${pick(4)}`;
+};
+
+/** Buying another pass is always allowed. Each pass gets its own unique code and passes are used one after another. */
 export async function buyPass(user, method, { stationId = null, soldBy = null } = {}) {
   const s = await getSettings();
   const price = s.pass_price;
   const { pass, pay } = await tx(async (db) => {
     const cashNow = method === 'cash' && soldBy;
-    const { rows } = await db.query(
-      `INSERT INTO passes(user_id, total_cups, price_paid, status, purchased_at, expires_at)
-       VALUES ($1,$2,$3,$4, now(), CASE WHEN $4='active' THEN now() + ($5 || ' days')::interval END) RETURNING *`,
-      [user.id, s.pass_cups, price, cashNow ? 'active' : 'pending', String(s.pass_valid_days)],
-    );
+    let rows;
+    for (let i = 0; ; i++) {
+      try {
+        await db.query('SAVEPOINT code');
+        ({ rows } = await db.query(
+          `INSERT INTO passes(user_id, total_cups, price_paid, status, purchased_at, expires_at, code)
+           VALUES ($1,$2,$3,$4, now(), CASE WHEN $4='active' THEN now() + ($5 || ' days')::interval END, $6) RETURNING *`,
+          [user.id, s.pass_cups, price, cashNow ? 'active' : 'pending', String(s.pass_use_by_days), newPassCode()],
+        ));
+        await db.query('RELEASE SAVEPOINT code');
+        break;
+      } catch (e) {
+        await db.query('ROLLBACK TO SAVEPOINT code');
+        if (e.code !== '23505' || i > 5) throw e;
+      }
+    }
     const { rows: p } = await db.query(
       `INSERT INTO payments(user_id, pass_id, station_id, purpose, provider, amount, status, settled_at)
        VALUES ($1,$2,$3,'pass',$4,$5,$6,$7) RETURNING *`,
       [user.id, rows[0].id, stationId, method, price, cashNow ? 'paid' : 'pending', cashNow ? new Date() : null],
     );
-    await audit(soldBy || user.id, 'pass.sell', 'pass', rows[0].id, { method }, db);
+    await audit(soldBy || user.id, 'pass.sell', 'pass', rows[0].id, { method, code: rows[0].code }, db);
     return { pass: rows[0], pay: p[0] };
   });
   if (method === 'cash' && soldBy) {
-    await notify(user.id, { kind: 'pass', title: 'Your 10-cup pass is ready', body: '10 cups. One pass. Use it at any Sadhai station.' });
+    await notify(user.id, { kind: 'pass', title: 'Your 10-cup pass is ready', body: `Pass ${pass.code}. It starts when you use your first cup, then lasts 30 days.`, data: { pass_id: pass.id } });
     return { pass, payment: null };
   }
   if (method === 'cash') throw bad('Pay for a pass in the app with eSewa, Khalti or Fonepay, or buy it at the counter');

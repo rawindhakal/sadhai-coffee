@@ -100,12 +100,17 @@ station.post('/orders/:id/pay', wrap(async (req, res) => {
 
 station.get('/customers/lookup', wrap(async (req, res) => {
   await sid(req);
-  const phone = normalizePhone(req.query.phone);
-  const u = (await query(`SELECT id, name, phone, beans FROM users WHERE phone=$1 AND role='customer' AND active`, [phone])).rows[0];
-  if (!u) throw notFound('No Sadhai account with that number');
-  const pass = (await query(`SELECT id, total_cups - used_cups AS remaining, expires_at FROM passes WHERE user_id=$1 AND status='active' AND expires_at > now() AND used_cups < total_cups ORDER BY expires_at LIMIT 1`, [u.id])).rows[0] || null;
+  let u;
+  if (req.query.pass_code) {
+    u = (await query(`SELECT u.id, u.name, u.phone, u.beans FROM passes p JOIN users u ON u.id=p.user_id WHERE upper(p.code)=upper($1) AND u.role='customer' AND u.active`, [String(req.query.pass_code).trim()])).rows[0];
+    if (!u) throw notFound('No pass with that code');
+  } else {
+    u = (await query(`SELECT id, name, phone, beans FROM users WHERE phone=$1 AND role='customer' AND active`, [normalizePhone(req.query.phone)])).rows[0];
+    if (!u) throw notFound('No Sadhai account with that number');
+  }
+  const passes = (await query(`SELECT code, total_cups - used_cups AS remaining, expires_at, activated_at FROM passes WHERE user_id=$1 AND status='active' AND expires_at > now() AND used_cups < total_cups ORDER BY (activated_at IS NULL), expires_at, purchased_at`, [u.id])).rows;
   const coupons = (await query(`SELECT id, kind, title, pct, free_max, expires_at FROM coupons WHERE user_id=$1 AND status='active' AND expires_at > now() ORDER BY expires_at`, [u.id])).rows;
-  res.json({ ...u, pass, coupons });
+  res.json({ ...u, pass: passes[0] ? { ...passes[0], remaining: passes.reduce((a, p) => a + p.remaining, 0), count: passes.length } : null, passes, coupons });
 }));
 
 station.post('/passes', wrap(async (req, res) => {

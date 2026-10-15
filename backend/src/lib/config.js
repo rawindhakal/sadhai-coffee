@@ -32,3 +32,11 @@ export const config = {
   },
   fonepaySecret: process.env.FONEPAY_WEBHOOK_SECRET || '',
 };
+
+export const push = {
+  mode: process.env.PUSH_MODE || 'auto', // auto | off
+  fcmJson: process.env.FCM_SERVICE_ACCOUNT_JSON || '',
+  vapidPublic: process.env.VAPID_PUBLIC_KEY || '',
+  vapidPrivate: process.env.VAPID_PRIVATE_KEY || '',
+  vapidSubject: process.env.VAPID_SUBJECT || 'mailto:support@sadhai.example',
+};

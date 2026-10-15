@@ -34,7 +34,7 @@ export async function authenticate(req, _res, next) {
     if (!token) throw new HttpError(401, 'Sign in required', 'no_token');
     const claims = verifyAccess(token);
     const { rows } = await query(
-      'SELECT id, phone, name, role, station_id, lang, active FROM users WHERE id=$1',
+      'SELECT id, phone, name, role, station_id, lang, active, warehouse FROM users WHERE id=$1',
       [claims.sub],
     );
     const u = rows[0];

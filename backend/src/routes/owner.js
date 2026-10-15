@@ -8,6 +8,7 @@ import { audit, notify } from '../lib/notify.js';
 import { DEFAULT_SETTINGS, getSettings } from '../lib/settings.js';
 import { reconciliation, range } from '../lib/reports.js';
 import { statement } from '../lib/partners.js';
+import { recomputeProductCosts } from '../lib/costing.js';
 
 export const owner = Router();
 owner.use(authenticate, requireRole('owner'));
@@ -269,4 +270,26 @@ owner.post('/partners/:stationId/settle', wrap(async (req, res) => {
   if (!rows[0]) throw bad('This period is already settled');
   await audit(req.user.id, 'partner.settle', 'station', req.params.stationId, { ...b, net_due: s.net_due });
   res.status(201).json(rows[0]);
+}));
+
+/* ---- recipe editor: base recipe, option adjustments and method; recosts the item ---- */
+owner.put('/recipes/:productId', wrap(async (req, res) => {
+  const b = z.object({
+    method: z.string().max(2000).optional(),
+    lines: z.array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() })),
+    options: z.array(z.object({ option_id: z.string().uuid(), lines: z.array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().finite().refine((n) => n !== 0, 'Use a non-zero amount') })) })).default([]),
+  }).parse(req.body);
+  if (new Set(b.lines.map((l) => l.ingredient_id)).size !== b.lines.length) throw bad('Each ingredient can appear once in a recipe');
+  const moved = await tx(async (db) => {
+    await db.query('DELETE FROM recipes WHERE product_id=$1', [req.params.productId]);
+    for (const l of b.lines) await db.query('INSERT INTO recipes(product_id, ingredient_id, qty) VALUES ($1,$2,$3)', [req.params.productId, l.ingredient_id, l.qty]);
+    for (const o of b.options) {
+      await db.query('DELETE FROM option_recipes WHERE option_id=$1', [o.option_id]);
+      for (const l of o.lines) await db.query('INSERT INTO option_recipes(option_id, ingredient_id, qty) VALUES ($1,$2,$3)', [o.option_id, l.ingredient_id, l.qty]);
+    }
+    if (b.method !== undefined) await db.query('UPDATE products SET recipe_method=$2 WHERE id=$1', [req.params.productId, b.method || null]);
+    await audit(req.user.id, 'recipe.update', 'product', req.params.productId, { lines: b.lines.length }, db);
+    return recomputeProductCosts(db, { productId: req.params.productId });
+  });
+  res.json({ ok: true, recosted: moved });
 }));

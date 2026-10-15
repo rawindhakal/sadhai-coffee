@@ -17,6 +17,25 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.2.0 (2026-10-15)
+
+### Added
+- **Unique passes used one after another**: every pass has its own code (`SP-XXXX-XXXX`). A customer can buy as many as they like; an order spills across passes automatically (started passes first, then the oldest unstarted one). Each pass starts its 30 days with its first cup, and an unstarted pass can wait 180 days. Pass wallet in the web and Flutter apps, redeem by code at the counter, cancellations return cups to the right pass.
+- **Self-order kiosk** (`/kiosk`): attract screen, name and phone collected on a big keypad with consent, large-touch menu with offers, payment at the counter, with a pass code (code and phone must both match), or online (QR in live mode), a big pickup number, auto-reset and inactivity timeout, staff-only exit. Orders show on the station queue with the guest's name.
+- **Push notifications**: device registration (Android, iOS, web), FCM HTTP v1 and Web Push senders with a test (dry-run) mode, delivery log, per-user opt-out of offers, daily marketing cap, quiet hours. Owner and manager console to send or schedule campaigns to audiences; automatic messages for pass ending, pass nearly used, win-back, new offer of the day and new drop. Service worker and profile toggles on the web; firebase_messaging in Flutter with a permission prompt only after the customer agrees.
+- **Recipe management and costing**: ingredients bought in packs (Rs 2,500/kg coffee, Rs 110/L milk, Rs 50/kg ice, Rs 5/L water, Rs 1,500/L syrups, Rs 5 per sugar sachet), 10% coffee wastage, a 16 g double shot, option recipes (large, oat, extra shot, sugar), barista method text, calculated item cost, margin and food-cost % against a target, suggested prices, price what-if, and the real cost stored on every order line.
+- **Central inventory**: central store, suppliers, purchase orders with receiving and price variance, suggested purchases, station requests, dispatch, station receiving with shortage tracking, shelf counts with loss at cost, network stock matrix, valuation, price history, full ledgers. Manager "warehouse" role.
+- Docs: `docs/INVENTORY-AND-COSTING.md`, `store/PUSH.md`.
+
+### Changed
+- A sale now uses the recipe and chosen options from stock, including the wastage allowance, instead of the base recipe only.
+- Welcome and referral messages no longer count against the daily offers cap.
+- Privacy policy, terms and data-safety answers cover kiosks, push and the new pass rules.
+
+### Security
+- Kiosk pass payment needs both the pass code and the account's phone number.
+- Push tokens are removed on sign-out and account deletion.
+
 ## v1.1.0 (2026-10-15)
 
 ### Added

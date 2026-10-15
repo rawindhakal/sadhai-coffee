@@ -6,6 +6,7 @@ import { useAuth, useEvents, useRequireRole } from '@/lib/auth';
 import { Empty, ErrorNote, Field, Loading, Modal, Status, Tabs, useData, useToast } from './ui';
 import { CustomerShell, PAY_LABEL, startRedirect } from './customer';
 import { useI18n } from '@/lib/i18n';
+import { disableWebPush, enableWebPush, pushState } from '@/lib/push';
 
 export function AccountView() {
   const user = useRequireRole('customer');
@@ -31,47 +32,53 @@ export function AccountView() {
   );
 }
 
+const STATE_LABEL: Record<string, [string, string]> = { using: ['Using now', 'hill'], next: ['Up next', 'marigold'], used: ['Used up', ''], expired: ['Expired', ''] };
+
+/** Pass wallet: every pass has its own code, and passes are used one after another. */
 export function PassTab() {
   const passes = useData<any[]>('/passes');
   const cfg = useData<any>('/config');
   const toast = useToast();
   const [buy, setBuy] = useState(false);
   const [busy, setBusy] = useState(false);
-  const live = passes.data?.find((p) => p.status === 'active');
+  const list = passes.data || [];
+  const live = list.filter((p) => p.status === 'active' && p.remaining > 0).sort((a, b) => a.queue_position - b.queue_position);
+  const past = list.filter((p) => !live.includes(p));
   async function purchase(method: string) {
     setBusy(true);
     try {
       const out = await api('/passes', { method: 'POST', body: { payment_method: method } });
       if (out.payment?.mode === 'redirect') { startRedirect(out.payment); return; }
       await api(`/payments/${out.payment.payment_id}/confirm`, { method: 'POST', body: {} });
-      toast('Your pass is ready'); setBuy(false); passes.reload();
+      toast(`Pass ${out.pass.code} is ready`); setBuy(false); passes.reload();
     } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
   }
+  const total = live.reduce((a, p) => a + p.remaining, 0);
   return (
     <>
-      {live ? (
-        <div className="pass">
-          <p className="label" style={{ color: 'inherit', opacity: 0.85 }}>10-cup pass</p>
-          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 56, lineHeight: 1 }}>{live.remaining}<span style={{ fontSize: 22 }}> of {live.total_cups} cups left</span></div>
-          <div className="row" style={{ gap: 6, margin: '16px 0' }}>{Array.from({ length: live.total_cups }).map((_, i) => <span key={i} style={{ width: 18, height: 18, borderRadius: 99, background: i < live.used_cups ? 'transparent' : 'var(--on-cherry)', border: '2px solid var(--on-cherry)' }} />)}</div>
-          <p className="small">Valid until {fmtDate(live.expires_at)}. Choose “10-cup pass” at checkout.</p>
-        </div>
-      ) : (
-        <div className="card">
-          <h3>10 cups. One pass. {rs(cfg.data?.pass.price)}.</h3>
-          <p className="muted" style={{ margin: '8px 0 16px' }}>Valid {cfg.data?.pass.valid_days} days at any Sadhai station. Drinks only.</p>
-          <button className="btn primary" onClick={() => setBuy(true)}>Buy a pass</button>
-        </div>
-      )}
-      {live && <button className="btn ghost" style={{ marginTop: 12 }} onClick={() => setBuy(true)}>Buy another pass</button>}
-      {passes.data && passes.data.filter((p) => p !== live).length > 0 && (
-        <><h3 style={{ margin: '24px 0 8px' }}>Past passes</h3><div className="col">{passes.data.filter((p) => p !== live).map((p) => <div key={p.id} className="card flat row between"><span>{rs(p.price_paid)} · {fmtDate(p.purchased_at)}</span><Status s={p.status} /></div>)}</div></>
-      )}
+      <div className="card">
+        <div className="row between wrap"><div><h3>10 cups. One pass. {rs(cfg.data?.pass.price)}.</h3><p className="muted small">Buy as many as you like. They are used one after another, and each starts its {cfg.data?.pass.valid_days} days with your first cup.</p></div>
+          <button className="btn primary" onClick={() => setBuy(true)}>{live.length ? 'Buy another pass' : 'Buy a pass'}</button></div>
+        {live.length > 0 && <p style={{ marginTop: 12 }}><strong>{total} cups</strong> across {live.length} pass{live.length > 1 ? 'es' : ''}</p>}
+      </div>
+      <div className="col" style={{ marginTop: 16 }}>
+        {live.map((p) => (
+          <div key={p.id} className="pass" style={{ opacity: p.state === 'using' ? 1 : 0.92 }}>
+            <div className="row between wrap"><span className="chip" style={{ background: 'var(--surface)', color: 'var(--ink)' }}>{STATE_LABEL[p.state]?.[0] || p.state}{p.queue_position > 1 ? ` · #${p.queue_position}` : ''}</span>
+              <button className="btn sm" style={{ background: 'transparent', color: 'inherit', borderColor: 'currentColor', border: '2px solid' }} onClick={() => { navigator.clipboard?.writeText(p.code); toast('Pass code copied'); }} aria-label={`Copy pass code ${p.code}`}>{p.code}</button></div>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 44, lineHeight: 1.05, marginTop: 8 }}>{p.remaining}<span style={{ fontSize: 18 }}> of {p.total_cups} cups left</span></div>
+            <div className="row" style={{ gap: 6, margin: '12px 0', flexWrap: 'wrap' }}>{Array.from({ length: p.total_cups }).map((_, i) => <span key={i} style={{ width: 16, height: 16, borderRadius: 99, background: i < p.used_cups ? 'transparent' : 'var(--on-cherry)', border: '2px solid var(--on-cherry)' }} />)}</div>
+            <p className="small">{p.starts_on_first_use ? `Starts with your first cup. Use it by ${fmtDate(p.expires_at)}.` : `Valid until ${fmtDate(p.expires_at)}.`} Show the code at any counter, or choose “10-cup pass” at checkout.</p>
+          </div>
+        ))}
+        {!live.length && <Empty>No active pass yet.</Empty>}
+      </div>
+      {past.length > 0 && <><h3 style={{ margin: '24px 0 8px' }}>Past passes</h3><div className="col">{past.map((p) => <div key={p.id} className="card flat row between"><span><strong>{p.code}</strong> <span className="muted small">{rs(p.price_paid)} · {fmtDate(p.purchased_at)}</span></span><Status s={p.status} /></div>)}</div></>}
       {buy && (
         <Modal title="Buy a 10-cup pass" onClose={() => setBuy(false)}>
           <p className="muted">Pay {rs(cfg.data?.pass.price)} with:</p>
           <div className="col" style={{ marginTop: 12 }}>{['esewa', 'khalti', 'fonepay'].map((m) => <button key={m} className="btn block" disabled={busy} onClick={() => purchase(m)}>{PAY_LABEL[m]}</button>)}</div>
-          <p className="small muted" style={{ marginTop: 12 }}>Prefer cash? Buy it at any station counter.</p>
+          <p className="small muted" style={{ marginTop: 12 }}>Prefer cash? Buy it at any station counter. A new pass never starts until you use its first cup.</p>
         </Modal>
       )}
     </>
@@ -164,8 +171,33 @@ export function Profile() {
       <ErrorNote error={err} />
       <div className="row"><button className="btn primary">Save</button><button type="button" className="btn ghost" onClick={() => logout().then(() => (location.href = '/'))}>Sign out</button></div>
       <hr style={{ border: 0, borderTop: '1px solid var(--hairline)', width: '100%' }} />
+      <Notifications />
+      <hr style={{ border: 0, borderTop: '1px solid var(--hairline)', width: '100%' }} />
       <h4>Your data</h4>
       <div className="row wrap"><button type="button" className="btn sm" onClick={async () => { const d = await api('/me/export'); const u = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = u; a.download = 'sadhai-my-data.json'; a.click(); URL.revokeObjectURL(u); }}>Download my data</button><a className="btn sm ghost" href="/privacy">Privacy policy</a><a className="btn sm ghost" href="/terms">Terms</a><a className="btn sm danger" href="/delete-account">Delete my account</a></div>
     </form>
+  );
+}
+
+/** Push on this browser, and the choice to hear about offers. Order updates always come through. */
+function Notifications() {
+  const { user, setUser } = useAuth();
+  const toast = useToast();
+  const [state, setState] = useState<string>('off');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { pushState().then(setState); }, []);
+  async function toggle() {
+    setBusy(true);
+    try { if (state === 'on') await disableWebPush(); else await enableWebPush(); setState(await pushState()); toast(state === 'on' ? 'Notifications are off on this browser' : 'Notifications are on'); } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
+  }
+  async function offers(v: boolean) { try { const u = await api('/me', { method: 'PATCH', body: { notif_offers: v } }); setUser({ ...user!, ...u }); } catch (e: any) { toast(e.message, true); } }
+  return (
+    <div className="col" style={{ gap: 10 }}>
+      <h4>Notifications</h4>
+      <div className="row between wrap"><span className="small">Tell me when my coffee is ready{state === 'unsupported' ? ' (not supported in this browser)' : state === 'blocked' ? ' (blocked in your browser settings)' : ''}</span>
+        <button type="button" className={`btn sm ${state === 'on' ? 'ghost' : 'primary'}`} disabled={busy || state === 'unsupported' || state === 'blocked'} onClick={toggle}>{state === 'on' ? 'Turn off on this browser' : 'Turn on'}</button></div>
+      <label className="row small"><input type="checkbox" style={{ width: 20, minHeight: 20 }} checked={(user as any)?.notif_offers !== false} onChange={(e) => offers(e.target.checked)} />Send me offers and news (one a day at most)</label>
+      <p className="small muted">Order and pass messages are always sent, because you need them.</p>
+    </div>
   );
 }

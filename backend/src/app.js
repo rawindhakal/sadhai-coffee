@@ -12,6 +12,8 @@ import { customer } from './routes/customer.js';
 import { station } from './routes/station.js';
 import { admin } from './routes/admin.js';
 import { owner } from './routes/owner.js';
+import { kiosk } from './routes/kiosk.js';
+import { central, transfers } from './routes/central.js';
 
 export function createApp() {
   const app = express();
@@ -37,6 +39,9 @@ export function createApp() {
   app.use('/me', me);
   app.use('/', pub);
   app.use('/station', station);
+  app.use('/kiosk', kiosk);
+  app.use('/central', central);
+  app.use('/transfers', transfers);
   app.use('/admin', admin);
   app.use('/owner', owner);
   app.use('/', customer); // orders, payments, passes, coupons, referrals, notifications, events

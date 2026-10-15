@@ -12,7 +12,7 @@ export default function Terms() {
       <h2>Refunds</h2>
       <p>If something is wrong with your order, tell the station or contact support. We refund orders we cannot fulfil or that are not as described. Digital refunds go back through the payment provider and can take a few working days.</p>
       <h2>10-cup pass</h2>
-      <p>A pass gives ten drinks (food and merch are not included) at any Sadhai station for 30 days from purchase. Unused cups expire with the pass. A pass is personal to your account and is not transferable or redeemable for cash.</p>
+      <p>Each pass gives ten drinks (food and merch are not included) at any Sadhai station and has its own code. You can buy as many passes as you like and they are used one after another. A pass starts its 30 days when you use its first cup, and a pass you have not started can wait up to 180 days from purchase. Unused cups expire with the pass. A pass belongs to your account and is not transferable or redeemable for cash.</p>
       <h2>Coupons, offers and referrals</h2>
       <p>Offers have the limits shown with them: one per customer, an end date, a monthly cap on referral cups. Offers of the day are set by stations and can change or end. We may withdraw offers used in a way that is not fair, such as fake accounts.</p>
       <h2>Your account</h2>

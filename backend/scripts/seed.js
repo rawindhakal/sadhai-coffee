@@ -2,6 +2,7 @@
 // Safe to re-run: it wipes and recreates everything. Refuses to run in production unless SEED_FORCE=1.
 import bcrypt from 'bcryptjs';
 import { pool } from '../src/lib/db.js';
+import { recomputeProductCosts } from '../src/lib/costing.js';
 
 if (process.env.NODE_ENV === 'production' && !process.env.SEED_FORCE) {
   console.error('Refusing to seed in production (set SEED_FORCE=1 to override).');
@@ -24,7 +25,7 @@ const c = await pool.connect();
 const q = (t, p) => c.query(t, p);
 
 await q('BEGIN');
-await q(`TRUNCATE partner_settlements, daily_offers, audit_log, settlements, cash_closes, notifications, referrals, payments, order_items, orders, drops, promo_codes, coupons, passes,
+await q(`TRUNCATE stock_count_lines, stock_counts, transfer_lines, stock_transfers, purchase_lines, purchase_orders, central_moves, central_inventory, ingredient_cost_history, option_recipes, suppliers, partner_settlements, daily_offers, audit_log, settlements, cash_closes, notifications, referrals, payments, order_items, orders, drops, promo_codes, coupons, passes,
   station_counters, inventory_moves, station_inventory, recipes, ingredients, station_products, options, option_groups, products, categories,
   refresh_tokens, station_managers, users, stations, settings RESTART IDENTITY CASCADE`);
 
@@ -69,65 +70,150 @@ const cat = {};
 for (const [i, [n, ne]] of [['Hot coffee', 'तातो कफी'], ['Cold coffee', 'चिसो कफी'], ['Signature', 'विशेष'], ['Bites', 'खाजा'], ['Merch', 'सामान']].entries()) {
   cat[n] = (await q('INSERT INTO categories(name,name_ne,sort) VALUES ($1,$2,$3) RETURNING id', [n, ne, i])).rows[0].id;
 }
+/* ---------- suppliers and ingredients (all bought centrally) ---------- */
+const sup = {};
+for (const [n, ph] of [['Sevya Coffee Processing', '+9779801000001'], ['Himal Dairy', '+9779801000002'], ['Valley Ice and Water', '+9779801000003'], ['Kathmandu Packaging Supplies', '+9779801000004'], ['TERAI Bakery', '+9779801000005'], ['Mero Syrups', '+9779801000006'], ['Sadhai Merch Studio', '+9779801000007']]) {
+  sup[n] = (await q('INSERT INTO suppliers(name, phone) VALUES ($1,$2) RETURNING id', [n, ph])).rows[0].id;
+}
+// name, base unit, category, pack unit, units per pack, Rs per pack, wastage %, supplier, central reorder, central par
+// Prices are the owner's: coffee Rs 2,500/kg with 10% wastage, water Rs 5/L, milk Rs 110/L, ice Rs 50/kg, sugar Rs 5 a sachet, syrups Rs 1,500/L.
+const INGREDIENTS = [
+  ['Coffee beans (Sevya roast)', 'g', 'ingredient', 'kg', 1000, 2500, 10, 'Sevya Coffee Processing', 20000, 60000],
+  ['Water', 'ml', 'ingredient', 'L', 1000, 5, 0, 'Valley Ice and Water', 0, 0],
+  ['Milk', 'ml', 'ingredient', 'L', 1000, 110, 0, 'Himal Dairy', 40000, 160000],
+  ['Oat milk', 'ml', 'ingredient', 'L', 1000, 260, 0, 'Himal Dairy', 6000, 24000],
+  ['Ice', 'g', 'ingredient', 'kg', 1000, 50, 0, 'Valley Ice and Water', 40000, 160000],
+  ['Sugar sachet', 'pcs', 'ingredient', 'box of 100', 100, 500, 0, 'Kathmandu Packaging Supplies', 800, 3000],
+  ['Chiya masala syrup', 'ml', 'ingredient', 'L', 1000, 1500, 0, 'Mero Syrups', 3000, 8000],
+  ['Suntala syrup', 'ml', 'ingredient', 'L', 1000, 1500, 0, 'Mero Syrups', 3000, 8000],
+  ['Gur cardamom syrup', 'ml', 'ingredient', 'L', 1000, 1500, 0, 'Mero Syrups', 3000, 8000],
+  ['Chocolate syrup', 'ml', 'ingredient', 'L', 1000, 1500, 0, 'Mero Syrups', 3000, 8000],
+  ['Hot cups', 'pcs', 'packaging', 'sleeve of 50', 50, 450, 0, 'Kathmandu Packaging Supplies', 600, 2000],
+  ['Cold cups', 'pcs', 'packaging', 'sleeve of 50', 50, 550, 0, 'Kathmandu Packaging Supplies', 400, 1400],
+  ['Butter croissant', 'pcs', 'ingredient', 'tray of 12', 12, 660, 0, 'TERAI Bakery', 24, 72],
+  ['Cardamom bun', 'pcs', 'ingredient', 'tray of 12', 12, 456, 0, 'TERAI Bakery', 24, 72],
+  ['Sadhai mug', 'pcs', 'retail', 'carton of 6', 6, 1140, 0, 'Sadhai Merch Studio', 24, 72],
+  ['Canvas tote', 'pcs', 'retail', 'bundle of 10', 10, 2600, 0, 'Sadhai Merch Studio', 20, 60],
+  ['Gulmi beans 250g', 'pcs', 'retail', 'bag', 1, 330, 0, 'Sevya Coffee Processing', 30, 100],
+  ['Sadhai cap', 'pcs', 'retail', 'bundle of 10', 10, 2300, 0, 'Sadhai Merch Studio', 12, 40],
+];
 const ing = {};
-for (const [n, unit, cost] of [
-  ['Coffee beans (Sevya roast)', 'g', 1.6], ['Milk', 'ml', 0.11], ['Oat milk', 'ml', 0.26], ['Hot cups', 'pcs', 9], ['Cold cups', 'pcs', 11], ['Sugar', 'g', 0.1],
-  ['Chiya masala syrup', 'ml', 0.5], ['Ice', 'g', 0.02], ['Suntala syrup', 'ml', 0.6], ['Gur cardamom syrup', 'ml', 0.55], ['Chocolate syrup', 'ml', 0.45], ['Butter croissant', 'pcs', 55], ['Cardamom bun', 'pcs', 38], ['Sadhai mug', 'pcs', 190], ['Canvas tote', 'pcs', 260], ['Gulmi beans 250g', 'pcs', 330], ['Sadhai cap', 'pcs', 230],
-]) ing[n] = (await q('INSERT INTO ingredients(name,unit,unit_cost) VALUES ($1,$2,$3) RETURNING id', [n, unit, cost])).rows[0].id;
+const ingRow = {};
+for (const [n, unit, category, packUnit, packSize, packPrice, waste, supplier, cReorder, cPar] of INGREDIENTS) {
+  const unitCost = packPrice / packSize;
+  const r = (await q(
+    `INSERT INTO ingredients(name,unit,category,pack_unit,pack_size,pack_price,unit_cost,waste_pct,supplier_id,central_reorder,central_par,last_purchase_cost) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$7) RETURNING id`,
+    [n, unit, category, packUnit, packSize, packPrice, unitCost, waste, sup[supplier], cReorder, cPar])).rows[0];
+  ing[n] = r.id; ingRow[n] = { unitCost, waste };
+  await q('INSERT INTO ingredient_cost_history(ingredient_id, pack_size, pack_price, unit_cost, waste_pct, source) VALUES ($1,$2,$3,$4,$5,$6)', [r.id, packSize, packPrice, unitCost, waste, 'create']);
+}
 
 const B = 'Coffee beans (Sevya roast)';
+const DS = 16; // a double shot of espresso is 16 g of coffee
 const products = [
-  // sku, cat, name, name_ne, price, cost, flags, origin, desc, recipe
-  ['ESP', 'Hot coffee', 'Espresso', 'एस्प्रेसो', 100, 28, {}, null, 'Double shot, short and strong.', { [B]: 18, 'Hot cups': 1 }, false],
-  ['AMR', 'Hot coffee', 'Americano', 'अमेरिकानो', 130, 34, {}, null, 'Two shots, hot water. 200 ml, all taxes included.', { [B]: 18, 'Hot cups': 1 }, true],
-  ['CAP', 'Hot coffee', 'Cappuccino', 'क्यापुचिनो', 160, 46, {}, null, 'Equal parts espresso, milk and foam.', { [B]: 18, Milk: 120, 'Hot cups': 1 }, true],
-  ['LAT', 'Hot coffee', 'Latte', 'ल्याते', 170, 48, {}, null, 'Smooth and milky.', { [B]: 18, Milk: 180, 'Hot cups': 1 }, true],
-  ['MOC', 'Hot coffee', 'Mocha', 'मोका', 190, 56, {}, null, 'Latte with chocolate.', { [B]: 18, Milk: 150, 'Chocolate syrup': 20, 'Hot cups': 1 }, true],
-  ['ICL', 'Cold coffee', 'Iced latte', 'आइस्ड ल्याते', 180, 52, {}, null, 'Over ice, ready in 90 seconds.', { [B]: 18, Milk: 150, Ice: 120, 'Cold cups': 1 }, true],
-  ['CLB', 'Cold coffee', 'Cold brew', 'कोल्ड ब्रु', 190, 50, {}, null, 'Steeped 16 hours, poured in seconds.', { [B]: 22, Ice: 100, 'Cold cups': 1 }, true],
-  ['CHL', 'Signature', 'Chiya latte', 'चिया ल्याते', 180, 50, { sig: true }, null, 'Espresso with milk tea spices. Our answer to the roadside chiya.', { [B]: 18, Milk: 170, 'Chiya masala syrup': 18, 'Hot cups': 1 }, true],
-  ['SCB', 'Signature', 'Suntala cold brew', 'सुन्तला कोल्ड ब्रु', 210, 60, { sig: true, season: true }, null, 'Cold brew with Nepali mandarin. Seasonal.', { [B]: 22, 'Suntala syrup': 25, Ice: 100, 'Cold cups': 1 }, true],
-  ['GPO', 'Signature', 'Gulmi pour-over', 'गुल्मी पोर-ओभर', 220, 62, { sig: true }, 'Gulmi, 1,400 m', 'Single origin from the hills of Gulmi. Brown sugar and cherry.', { [B]: 20, 'Hot cups': 1 }, true],
-  ['GUR', 'Signature', 'Gur cardamom latte', 'गुर अलैंची ल्याते', 190, 54, { sig: true, season: true }, null, 'Jaggery and cardamom. Monthly drop with TERAI bakery.', { [B]: 18, Milk: 170, 'Gur cardamom syrup': 18, 'Hot cups': 1 }, true],
-  ['CRO', 'Bites', 'Butter croissant', 'बटर क्रोइसाँ', 120, 62, {}, null, 'Baked this morning by TERAI bakery.', { 'Butter croissant': 1 }, false],
-  ['BUN', 'Bites', 'Cardamom bun', 'अलैंची बन', 90, 40, {}, null, 'Soft, sticky and warm.', { 'Cardamom bun': 1 }, false],
+  // sku, category, name, Nepali name, price, (cost is calculated from the recipe), flags, origin, description, recipe, pass-eligible, method
+  ['ESP', 'Hot coffee', 'Espresso', 'एस्प्रेसो', 100, 0, {}, null, 'Double shot, short and strong.', { [B]: DS, 'Hot cups': 1 }, false, 'Dose 16 g, tamp level, pull 36 g in 28 seconds into a hot cup.'],
+  ['AMR', 'Hot coffee', 'Americano', 'अमेरिकानो', 130, 0, {}, null, 'Two shots, hot water. 200 ml, all taxes included.', { [B]: DS, Water: 120, 'Hot cups': 1 }, true, 'Pull a double shot, add 120 ml hot water to the cup.'],
+  ['CAP', 'Hot coffee', 'Cappuccino', 'क्यापुचिनो', 160, 0, {}, null, 'Equal parts espresso, milk and foam.', { [B]: DS, Milk: 120, 'Hot cups': 1 }, true, 'Double shot, steam 120 ml milk to 60 C with thick foam.'],
+  ['LAT', 'Hot coffee', 'Latte', 'ल्याते', 170, 0, {}, null, 'Smooth and milky.', { [B]: DS, Milk: 180, 'Hot cups': 1 }, true, 'Double shot, steam 180 ml milk to 60 C with light foam.'],
+  ['MOC', 'Hot coffee', 'Mocha', 'मोका', 190, 0, {}, null, 'Latte with chocolate.', { [B]: DS, Milk: 150, 'Chocolate syrup': 20, 'Hot cups': 1 }, true, '20 ml chocolate syrup in the cup, double shot, then 150 ml steamed milk.'],
+  ['ICL', 'Cold coffee', 'Iced latte', 'आइस्ड ल्याते', 180, 0, {}, null, 'Over ice, ready in 90 seconds.', { [B]: DS, Milk: 150, Ice: 120, 'Cold cups': 1 }, true, 'Fill cup with 120 g ice, pour 150 ml cold milk, top with a double shot.'],
+  ['CLB', 'Cold coffee', 'Cold brew', 'कोल्ड ब्रु', 190, 0, {}, null, 'Steeped 16 hours, poured in seconds.', { [B]: 20, Water: 200, Ice: 100, 'Cold cups': 1 }, true, 'Pour 200 ml of the 16-hour cold brew over 100 g ice.'],
+  ['CHL', 'Signature', 'Chiya latte', 'चिया ल्याते', 180, 0, { sig: true }, null, 'Espresso with milk tea spices. Our answer to the roadside chiya.', { [B]: DS, Milk: 170, 'Chiya masala syrup': 18, 'Hot cups': 1 }, true, '18 ml chiya masala syrup in the cup, double shot, 170 ml steamed milk.'],
+  ['SCB', 'Signature', 'Suntala cold brew', 'सुन्तला कोल्ड ब्रु', 210, 0, { sig: true, season: true }, null, 'Cold brew with Nepali mandarin. Seasonal.', { [B]: 20, Water: 150, 'Suntala syrup': 25, Ice: 100, 'Cold cups': 1 }, true, '25 ml suntala syrup, 100 g ice, 150 ml cold brew, stir.'],
+  ['GPO', 'Signature', 'Gulmi pour-over', 'गुल्मी पोर-ओभर', 220, 0, { sig: true }, 'Gulmi, 1,400 m', 'Single origin from the hills of Gulmi. Brown sugar and cherry.', { [B]: 20, Water: 300, 'Hot cups': 1 }, true, '20 g medium-fine, 300 ml water at 93 C in four pours over 2:45.'],
+  ['GUR', 'Signature', 'Gur cardamom latte', 'गुर अलैंची ल्याते', 190, 0, { sig: true, season: true }, null, 'Jaggery and cardamom. Monthly drop with TERAI bakery.', { [B]: DS, Milk: 170, 'Gur cardamom syrup': 18, 'Hot cups': 1 }, true, '18 ml gur cardamom syrup, double shot, 170 ml steamed milk.'],
+  ['CRO', 'Bites', 'Butter croissant', 'बटर क्रोइसाँ', 120, 0, {}, null, 'Baked this morning by TERAI bakery.', { 'Butter croissant': 1 }, false, 'Warm 3 minutes at 160 C.'],
+  ['BUN', 'Bites', 'Cardamom bun', 'अलैंची बन', 90, 0, {}, null, 'Soft, sticky and warm.', { 'Cardamom bun': 1 }, false, 'Warm 2 minutes at 160 C.'],
+  ['MUG', 'Merch', 'Sadhai mug', 'सधैं मग', 450, 0, {}, null, 'Ceramic mug, 300 ml. Cherry glaze.', { 'Sadhai mug': 1 }, false, null],
+  ['TOT', 'Merch', 'Canvas tote', 'क्यानभास झोला', 650, 0, {}, null, 'Heavy canvas tote with the sadhai mark.', { 'Canvas tote': 1 }, false, null],
+  ['BAG', 'Merch', 'Gulmi beans 250g', 'गुल्मी बिन्स २५०ग्राम', 790, 0, {}, 'Gulmi, 1,400 m', 'Roasted by Sevya Coffee Processing. Roast date on the label.', { 'Gulmi beans 250g': 1 }, false, null],
+  ['HAT', 'Merch', 'Sadhai cap', 'सधैं टोपी', 550, 0, {}, null, 'Cherry cap, adjustable.', { 'Sadhai cap': 1 }, false, null],
 ];
-products.push(
-  ['MUG', 'Merch', 'Sadhai mug', 'सधैं मग', 450, 190, {}, null, 'Ceramic mug, 300 ml. Cherry glaze.', { 'Sadhai mug': 1 }, false],
-  ['TOT', 'Merch', 'Canvas tote', 'क्यानभास झोला', 650, 260, {}, null, 'Heavy canvas tote with the sadhai mark.', { 'Canvas tote': 1 }, false],
-  ['BAG', 'Merch', 'Gulmi beans 250g', 'गुल्मी बिन्स २५०ग्राम', 790, 330, {}, 'Gulmi, 1,400 m', 'Roasted by Sevya Coffee Processing. Roast date on the label.', { 'Gulmi beans 250g': 1 }, false],
-  ['HAT', 'Merch', 'Sadhai cap', 'सधैं टोपी', 550, 230, {}, null, 'Cherry cap, adjustable.', { 'Sadhai cap': 1 }, false],
-);
 const prod = {};
-for (const [i, [sku, cn, name, name_ne, price, cost, f, origin, desc, recipe, passOk]] of products.entries()) {
+for (const [i, [sku, cn, name, name_ne, price, cost, f, origin, desc, recipe, passOk, method]] of products.entries()) {
   const p = (await q(
-    `INSERT INTO products(category_id, sku, name, name_ne, description, price, cost, is_signature, is_seasonal, pass_eligible, origin, sort, kind)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-    [cat[cn], sku, name, name_ne, desc, price, cost, !!f.sig, !!f.season, passOk, origin, i, cn === 'Merch' ? 'merch' : cn === 'Bites' ? 'food' : 'drink'],
+    `INSERT INTO products(category_id, sku, name, name_ne, description, price, cost, is_signature, is_seasonal, pass_eligible, origin, sort, kind, recipe_method)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+    [cat[cn], sku, name, name_ne, desc, price, cost, !!f.sig, !!f.season, passOk, origin, i, cn === 'Merch' ? 'merch' : cn === 'Bites' ? 'food' : 'drink', method],
   )).rows[0];
   prod[sku] = p;
   for (const [n, qty] of Object.entries(recipe)) await q('INSERT INTO recipes VALUES ($1,$2,$3)', [p.id, ing[n], qty]);
   if (cn !== 'Bites' && cn !== 'Merch') {
+    // returns { optionName: id } so each option can carry its own stock and cost effect
     const g = async (name, name_ne, required, multi, opts, sort) => {
       const gid = (await q('INSERT INTO option_groups(product_id,name,name_ne,required,multi,sort) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [p.id, name, name_ne, required, multi, sort])).rows[0].id;
-      for (const [oi, [on, one, d, def]] of opts.entries()) await q('INSERT INTO options(group_id,name,name_ne,price_delta,is_default,sort) VALUES ($1,$2,$3,$4,$5,$6)', [gid, on, one, d, def, oi]);
+      const ids = {};
+      for (const [oi, [on, one, d, def]] of opts.entries()) ids[on] = (await q('INSERT INTO options(group_id,name,name_ne,price_delta,is_default,sort) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [gid, on, one, d, def, oi])).rows[0].id;
+      return ids;
     };
-    await g('Size', 'आकार', true, false, [['Regular', 'सामान्य', 0, true], ['Large', 'ठूलो', 40, false]], 0);
-    if (recipe.Milk) await g('Milk', 'दूध', false, false, [['Dairy', 'दूध', 0, true], ['Oat', 'ओट', 40, false]], 1);
-    await g('Extras', 'थप', false, true, [['Extra shot', 'थप सट', 40, false], ['Less sugar', 'कम चिनी', 0, false]], 2);
+    const delta = async (optionId, name, qty) => q('INSERT INTO option_recipes(option_id, ingredient_id, qty) VALUES ($1,$2,$3)', [optionId, ing[name], qty]);
+    const size = await g('Size', 'आकार', true, false, [['Regular', 'सामान्य', 0, true], ['Large', 'ठूलो', 40, false]], 0);
+    if (recipe.Milk) await delta(size.Large, 'Milk', 50);
+    if (recipe.Ice) await delta(size.Large, 'Ice', 40);
+    if (recipe.Water) await delta(size.Large, 'Water', 40);
+    if (recipe.Milk) {
+      const milk = await g('Milk', 'दूध', false, false, [['Dairy', 'दूध', 0, true], ['Oat', 'ओट', 40, false]], 1);
+      await delta(milk.Oat, 'Milk', -recipe.Milk); await delta(milk.Oat, 'Oat milk', recipe.Milk);
+    }
+    const extras = await g('Extras', 'थप', false, true, [['Extra shot', 'थप सट', 60, false]], 2);
+    await delta(extras['Extra shot'], B, DS);
+    const sugar = await g('Sugar', 'चिनी', false, false, [['No sugar', 'चिनी नहाल्ने', 0, true], ['1 sachet', '१ सेट', 0, false], ['2 sachets', '२ सेट', 0, false]], 3);
+    await delta(sugar['1 sachet'], 'Sugar sachet', 1); await delta(sugar['2 sachets'], 'Sugar sachet', 2);
   }
 }
 
-/* inventory per station */
+/* ---------- central store, station stock, and the movements between them ---------- */
+const CENTRAL = { [B]: 38000, Milk: 90000, 'Oat milk': 14000, Ice: 120000, 'Sugar sachet': 1800, 'Chiya masala syrup': 2400, 'Suntala syrup': 5200, 'Gur cardamom syrup': 4100, 'Chocolate syrup': 6200, 'Hot cups': 1300, 'Cold cups': 900, 'Butter croissant': 18, 'Cardamom bun': 60, 'Sadhai mug': 40, 'Canvas tote': 31, 'Gulmi beans 250g': 54, 'Sadhai cap': 22 };
+for (const [n, id] of Object.entries(ing)) if (n !== 'Water') await q('INSERT INTO central_inventory(ingredient_id, qty) VALUES ($1,$2)', [id, CENTRAL[n] ?? 0]);
+const STOCK = { [B]: 4000, Milk: 20000, 'Oat milk': 3000, 'Hot cups': 400, 'Cold cups': 250, 'Sugar sachet': 300, 'Chiya masala syrup': 1500, Ice: 20000, 'Suntala syrup': 1500, 'Gur cardamom syrup': 1500, 'Chocolate syrup': 1200, 'Butter croissant': 40, 'Cardamom bun': 40, 'Sadhai mug': 24, 'Canvas tote': 20, 'Gulmi beans 250g': 30, 'Sadhai cap': 16 };
+const REORDER = { [B]: 800, Milk: 4000, 'Oat milk': 600, 'Hot cups': 80, 'Cold cups': 60, Ice: 4000, 'Sugar sachet': 60, 'Butter croissant': 8, 'Cardamom bun': 8, 'Sadhai mug': 5, 'Canvas tote': 4, 'Gulmi beans 250g': 6, 'Sadhai cap': 3 };
 for (const s of stations) {
   for (const [n, id] of Object.entries(ing)) {
-    const stock = { 'Coffee beans (Sevya roast)': 4000, Milk: 20000, 'Oat milk': 3000, 'Hot cups': 400, 'Cold cups': 250, Sugar: 3000, 'Chiya masala syrup': 1500, Ice: 20000, 'Suntala syrup': 1500, 'Gur cardamom syrup': 1500, 'Chocolate syrup': 1200, 'Butter croissant': 40, 'Cardamom bun': 40, 'Sadhai mug': 24, 'Canvas tote': 20, 'Gulmi beans 250g': 30, 'Sadhai cap': 16 }[n];
-    const reorder = { 'Coffee beans (Sevya roast)': 800, Milk: 4000, 'Oat milk': 600, 'Hot cups': 80, 'Cold cups': 60, Ice: 4000, 'Butter croissant': 8, 'Cardamom bun': 8, 'Sadhai mug': 5, 'Canvas tote': 4, 'Gulmi beans 250g': 6, 'Sadhai cap': 3 }[n] ?? Math.round(stock * 0.2);
-    await q('INSERT INTO station_inventory(station_id,ingredient_id,qty,reorder_level) VALUES ($1,$2,$3,$4)', [s.id, id, stock, reorder]);
+    if (n === 'Water') continue; // tap water is costed but not counted
+    const stock = STOCK[n];
+    await q('INSERT INTO station_inventory(station_id,ingredient_id,qty,reorder_level,par_level) VALUES ($1,$2,$3,$4,$5)', [s.id, id, stock, REORDER[n] ?? Math.round(stock * 0.2), stock]);
   }
 }
 await q(`UPDATE station_inventory SET qty = 480 WHERE station_id=$1 AND ingredient_id=$2`, [stations[2].id, ing['Oat milk']]); // low-stock demo
 await q(`UPDATE station_inventory SET qty = 5 WHERE station_id=$1 AND ingredient_id=$2`, [stations[3].id, ing['Butter croissant']]);
+await q(`UPDATE users SET warehouse=true WHERE id=$1`, [mgr1.id]); // Sunita runs the warehouse too
+
+await q(`UPDATE ingredients SET tracked=false WHERE name='Water'`);
+
+// two received purchases and one on order
+const mkPO = async (supplier, days, lines, status, invoice) => {
+  const po = (await q(`INSERT INTO purchase_orders(supplier_id,status,invoice_no,created_by,created_at,received_at,received_by) VALUES ($1,$2::text,$3,$4::uuid,now() - ($5 || ' days')::interval,CASE WHEN $2::text='received' THEN now() - ($5 || ' days')::interval + interval '1 day' END,CASE WHEN $2::text='received' THEN $4::uuid END) RETURNING id, number`, [sup[supplier], status, invoice, owner.id, String(days)])).rows[0];
+  for (const [n, qty, unit, got] of lines) await q('INSERT INTO purchase_lines(purchase_id,ingredient_id,qty_ordered,unit_cost,qty_received,received_unit_cost) VALUES ($1,$2,$3,$4,$5,$6)', [po.id, ing[n], qty, unit, got ?? 0, got ? unit : null]);
+  return po;
+};
+await mkPO('Sevya Coffee Processing', 9, [[B, 50000, 2.5, 50000]], 'received', 'SEV-2210');
+await mkPO('Kathmandu Packaging Supplies', 6, [['Hot cups', 1500, 9, 1500], ['Cold cups', 1000, 11, 1000]], 'received', 'KPS-0891');
+await mkPO('Himal Dairy', 0, [['Milk', 200000, 0.11, 0], ['Oat milk', 20000, 0.26, 0]], 'ordered', null);
+
+// transfers: history, one on the road, one waiting
+const mkTR = async (st, status, daysAgo, lines, short = {}) => {
+  const t = (await q(`INSERT INTO stock_transfers(station_id,status,requested_by,created_at,dispatched_at,dispatched_by,received_at,received_by) VALUES ($1,$2::text,$3::uuid,now() - ($4 || ' days')::interval,CASE WHEN $2::text IN ('dispatched','received') THEN now() - ($4 || ' days')::interval + interval '3 hours' END,CASE WHEN $2::text IN ('dispatched','received') THEN $5::uuid END,CASE WHEN $2::text='received' THEN now() - ($4 || ' days')::interval + interval '1 day' END,CASE WHEN $2::text='received' THEN $3::uuid END) RETURNING id`, [stations[st].id, status, staff[st].id, String(daysAgo), mgr1.id])).rows[0];
+  for (const [n, qty] of lines) await q('INSERT INTO transfer_lines(transfer_id,ingredient_id,qty_requested,qty_sent,qty_received,unit_cost) VALUES ($1,$2,$3,$4,$5,$6)', [t.id, ing[n], qty, status === 'requested' ? 0 : qty, status === 'received' ? qty - (short[n] || 0) : null, ingRow[n].unitCost]);
+};
+await mkTR(0, 'received', 7, [[B, 5000], ['Milk', 24000], ['Hot cups', 300]]);
+await mkTR(1, 'received', 5, [[B, 5000], ['Milk', 30000], ['Cold cups', 200]], { Milk: 2000 });
+await mkTR(3, 'received', 3, [['Butter croissant', 24], ['Cardamom bun', 24]]);
+await mkTR(2, 'dispatched', 0, [['Oat milk', 6000], ['Milk', 20000]]);
+await mkTR(3, 'requested', 0, [['Butter croissant', 36], ['Hot cups', 200]]);
+
+// shelf counts: one clean, one with a loss
+const mkCount = async (st, daysAgo, rows) => {
+  const c = (await q(`INSERT INTO stock_counts(station_id,counted_by,created_at) VALUES ($1,$2,now() - ($3 || ' days')::interval) RETURNING id`, [stations[st].id, staff[st].id, String(daysAgo)])).rows[0];
+  let total = 0;
+  for (const [n, expected, counted] of rows) { const v = counted - expected; const val = v * ingRow[n].unitCost * (1 + ingRow[n].waste / 100); total += val; await q('INSERT INTO stock_count_lines VALUES ($1,$2,$3,$4,$5,$6)', [c.id, ing[n], expected, counted, v, val]); }
+  await q('UPDATE stock_counts SET variance_value=$2 WHERE id=$1', [c.id, total]);
+};
+await mkCount(0, 6, [[B, 3200, 3185], ['Milk', 15000, 15000]]);
+await mkCount(1, 4, [[B, 3600, 2900], ['Milk', 18000, 17200], ['Butter croissant', 30, 26]]);
+
+// products.cost now comes from the recipes (same function the app uses when a price changes)
+await recomputeProductCosts({ query: (t, p) => c.query(t, p) });
 
 /* ---------- customers + history ---------- */
 const first = ['Asha', 'Bibek', 'Chandra', 'Deepa', 'Eshan', 'Gita', 'Hari', 'Isha', 'Janak', 'Kabita', 'Laxman', 'Mira', 'Nabin', 'Pooja', 'Rojina', 'Sagar', 'Tara', 'Umesh', 'Yuvraj', 'Sabina', 'Roshan', 'Sarita', 'Dinesh'];
@@ -227,8 +313,8 @@ for (const [i, cu] of customers.slice(0, 14).entries()) {
   const used = Math.min(10, Math.floor(rnd() * 11));
   const when = new Date(now - (3 + i * 3) * DAY);
   const pass = (await q(
-    `INSERT INTO passes(user_id,total_cups,used_cups,price_paid,status,purchased_at,expires_at,related_party) VALUES ($1,10,$2,1200,$3,$4,$5,$6) RETURNING id`,
-    [cu.u.id, used, used >= 10 ? 'used' : 'active', when, new Date(when.getTime() + 30 * DAY), i === 13],
+    `INSERT INTO passes(user_id,total_cups,used_cups,price_paid,status,purchased_at,expires_at,related_party,code,activated_at) VALUES ($1,10,$2,1200,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [cu.u.id, used, used >= 10 ? 'used' : 'active', when, new Date(when.getTime() + 30 * DAY), i === 13, `SP-DEMO-${1000 + i}`, used > 0 ? when : null],
   )).rows[0];
   await q(`INSERT INTO payments(user_id,pass_id,station_id,purpose,provider,amount,status,created_at,settled_at) VALUES ($1,$2,$3,'pass',$4,1200,'paid',$5,$5)`, [cu.u.id, pass.id, stations[cu.home].id, wpick([['esewa', 3], ['khalti', 2], ['fonepay', 2], ['cash', 3]]), when]);
   if (cu.u.id === demo.id) await q(`UPDATE passes SET used_cups=4, status='active', purchased_at=now() - interval '6 days', expires_at=now() + interval '24 days' WHERE id=$1`, [pass.id]);

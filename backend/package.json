@@ -1,6 +1,6 @@
 {
   "name": "sadhai-api",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,8 @@
     "migrate": "node scripts/migrate.js",
     "seed": "node scripts/seed.js",
     "setup": "npm run migrate && npm run seed",
-    "smoke": "node scripts/smoke.js"
+    "smoke": "node scripts/smoke.js",
+    "vapid": "node -e \"const k=require('web-push').generateVAPIDKeys();console.log('VAPID_PUBLIC_KEY='+k.publicKey+'\\nVAPID_PRIVATE_KEY='+k.privateKey)\""
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -21,6 +22,7 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "pg": "^8.12.0",
+    "web-push": "^3.6.7",
     "zod": "^3.23.8"
   }
 }

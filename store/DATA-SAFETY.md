@@ -17,7 +17,8 @@ Use these to fill in Google Play Console (App content, Data safety) and App Stor
 | Approximate location | Yes (sent only when the user taps Use my location, not stored) | No | Yes | App functionality |
 | Precise location | Yes (same request, not stored) | No | Yes | App functionality |
 | User IDs (account id) | Yes | No | No | App functionality |
-| Device or other IDs (push token) | Yes, only if notifications are allowed | No | Yes | App functionality |
+| Device or other IDs (push token, device type) | Yes, only if the customer turns notifications on | No | Yes | App functionality |
+| Name and phone number typed at a self-order kiosk (guests) | Collected at the kiosk, not in the app | No | Needed for kiosk ordering only | App functionality |
 | App interactions, crash logs, advertising ID, financial info (card numbers), contacts, photos, audio | No | | | |
 
 ## Apple: App Privacy

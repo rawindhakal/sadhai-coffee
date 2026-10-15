@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../push.dart';
 import '../version.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -38,7 +39,7 @@ class _LoaderState<T> extends State<_Loader<T>> {
   }
 }
 
-/// 10-cup pass card and purchase. Embedded in the Offers tab, so it manages its own loading.
+/// Pass wallet. Every pass has its own code, and passes are used one after another.
 class PassPanel extends StatefulWidget {
   const PassPanel({super.key});
   @override
@@ -57,30 +58,41 @@ class _PassPanelState extends State<PassPanel> {
   @override
   Widget build(BuildContext context) {
     if (!_loaded) return const SizedBox.shrink();
-    final live = _passes.cast<Map?>().firstWhere((p) => p!['status'] == 'active', orElse: () => null);
+    final live = _passes.where((p) => p['status'] == 'active' && (p['remaining'] as int) > 0).toList()..sort((a, b) => (a['queue_position'] as int).compareTo(b['queue_position'] as int));
+    final past = _passes.where((p) => !live.contains(p)).toList();
+    final total = live.fold<int>(0, (a, p) => a + (p['remaining'] as int));
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('10-cup pass', style: display(20)),
-      const SizedBox(height: 8),
-      if (live != null)
-        Container(
-          padding: const EdgeInsets.all(22), width: double.infinity,
-          decoration: BoxDecoration(color: Brand.cherry, borderRadius: BorderRadius.circular(Brand.radiusLg), boxShadow: const [BoxShadow(color: Color(0x24000000), blurRadius: 24, offset: Offset(0, 8))]),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${live['remaining']} of ${live['total_cups']} cups left', style: display(30, color: Brand.onCherry)),
-            const SizedBox(height: 12),
-            Wrap(spacing: 6, runSpacing: 6, children: [for (var i = 0; i < (live['total_cups'] as int); i++) Container(width: 20, height: 20, decoration: BoxDecoration(shape: BoxShape.circle, color: i < live['used_cups'] ? Colors.transparent : Brand.onCherry, border: Border.all(color: Brand.onCherry, width: 2)))]),
-            const SizedBox(height: 12),
-            Text('Valid until ${_d(live['expires_at'])}. Choose the pass at checkout.', style: const TextStyle(color: Brand.onCherry)),
-          ]),
-        )
-      else
-        Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('10 cups. One pass. Rs 1,200.', style: display(20)),
-          const SizedBox(height: 4),
-          const Text('Thirty days at any Sadhai station. Drinks only.', style: TextStyle(color: Brand.inkMuted)),
-        ]))),
+      Text('10-cup passes', style: display(20)),
+      const SizedBox(height: 4),
+      const Text('Buy as many as you like. They are used one after another, and each starts its 30 days with your first cup.', style: TextStyle(color: Brand.inkMuted, fontSize: 14)),
+      if (live.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text('$total cups across ${live.length} pass${live.length > 1 ? 'es' : ''}', style: const TextStyle(fontWeight: FontWeight.w700))),
       const SizedBox(height: 10),
-      FilledButton(onPressed: _buy, child: Text(live == null ? 'Buy a pass' : 'Buy another pass')),
+      for (final p in live) Padding(padding: const EdgeInsets.only(bottom: 10), child: Container(
+        padding: const EdgeInsets.all(20), width: double.infinity,
+        decoration: BoxDecoration(color: Brand.cherry, borderRadius: BorderRadius.circular(Brand.radiusLg), boxShadow: const [BoxShadow(color: Color(0x24000000), blurRadius: 24, offset: Offset(0, 8))]),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Chip2(p['state'] == 'using' ? 'Using now' : 'Up next · #${p['queue_position']}', bg: Brand.surface, fg: Brand.ink),
+            const Spacer(),
+            InkWell(onTap: () { Clipboard.setData(ClipboardData(text: p['code'])); toast(context, 'Pass code copied'); }, child: Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(border: Border.all(color: Brand.onCherry, width: 2), borderRadius: BorderRadius.circular(10)), child: Text(p['code'], style: const TextStyle(color: Brand.onCherry, fontWeight: FontWeight.w700, letterSpacing: 1)))),
+          ]),
+          const SizedBox(height: 8),
+          Text('${p['remaining']} of ${p['total_cups']} cups left', style: display(28, color: Brand.onCherry)),
+          const SizedBox(height: 10),
+          Wrap(spacing: 6, runSpacing: 6, children: [for (var i = 0; i < (p['total_cups'] as int); i++) Container(width: 18, height: 18, decoration: BoxDecoration(shape: BoxShape.circle, color: i < p['used_cups'] ? Colors.transparent : Brand.onCherry, border: Border.all(color: Brand.onCherry, width: 2)))]),
+          const SizedBox(height: 10),
+          Text(p['starts_on_first_use'] == true ? 'Starts with your first cup. Use it by ${_d(p['expires_at'])}.' : 'Valid until ${_d(p['expires_at'])}.', style: const TextStyle(color: Brand.onCherry)),
+          const Text('Show the code at any counter, or choose the pass at checkout.', style: TextStyle(color: Brand.onCherry, fontSize: 13)),
+        ]),
+      )),
+      if (live.isEmpty) Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('10 cups. One pass. Rs 1,200.', style: display(20)),
+        const SizedBox(height: 4),
+        const Text('Drinks only, at any Sadhai station.', style: TextStyle(color: Brand.inkMuted)),
+      ]))),
+      const SizedBox(height: 4),
+      FilledButton(onPressed: _buy, child: Text(live.isEmpty ? 'Buy a pass' : 'Buy another pass')),
+      for (final p in past) Padding(padding: const EdgeInsets.only(top: 8), child: Card(child: ListTile(title: Text('${p['code']} · ${rs(p['price_paid'])}'), subtitle: Text(_d(p['purchased_at'])), trailing: Chip2.status(p['status'] ?? '')))),
     ]);
   }
 
@@ -97,7 +109,7 @@ class _PassPanelState extends State<PassPanel> {
       final pay = out['payment'] as Map;
       if (pay['mode'] == 'sandbox') {
         await Api.instance.post('/payments/${pay['payment_id']}/confirm');
-        if (mounted) toast(context, 'Your pass is ready');
+        if (mounted) toast(context, 'Pass ${out['pass']['code']} is ready');
       } else {
         await launchUrl(Uri.parse((pay['start_url'] ?? pay['url']) as String), mode: LaunchMode.externalApplication);
       }
@@ -162,7 +174,7 @@ class AccountScreen extends StatelessWidget {
         ('Profile and password', Icons.manage_accounts_outlined, ProfileScreen(onSignOut: onSignOut)),
       ]) Padding(padding: const EdgeInsets.only(bottom: 10), child: Card(child: ListTile(leading: Icon(t.$2, color: Brand.cherry), title: Text(t.$1, style: const TextStyle(fontWeight: FontWeight.w600)), trailing: const Icon(Icons.chevron_right), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => t.$3))))),
       const SizedBox(height: 8),
-      OutlinedButton(onPressed: () async { await Api.instance.logout(); onSignOut(); }, child: const Text('Sign out')),
+      OutlinedButton(onPressed: () async { await PushService.disable(remember: false); await Api.instance.logout(); onSignOut(); }, child: const Text('Sign out')),
     ]);
   }
 }
@@ -254,6 +266,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ));
     if (ok != true || !mounted) return;
     try {
+      await PushService.disable(remember: false);
       await Api.instance.request('DELETE', '/me', body: {'password': pw.text});
       await Api.instance.logout();
       widget.onSignOut();
@@ -284,7 +297,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: Brand.cherry))),
           const SizedBox(height: 16),
           FilledButton(onPressed: _save, child: const Text('Save')),
-          const SizedBox(height: 28),
+          const SizedBox(height: 24),
+          const Divider(),
+          const NotificationSettings(),
+          const SizedBox(height: 8),
           const Divider(),
           Text('Your data', style: display(18)),
           const SizedBox(height: 8),
@@ -305,4 +321,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Center(child: Text('Sadhai Coffee $appVersion ($appBuild)', style: const TextStyle(color: Brand.inkMuted, fontSize: 13))),
         ]),
       );
+}
+
+
+/// Order updates on this phone (system permission) and the choice to hear about offers.
+class NotificationSettings extends StatefulWidget {
+  const NotificationSettings({super.key});
+  @override
+  State<NotificationSettings> createState() => _NotificationSettingsState();
+}
+
+class _NotificationSettingsState extends State<NotificationSettings> {
+  bool _on = false, _offers = true, _busy = false;
+  @override
+  void initState() {
+    super.initState();
+    PushService.wantsPush.then((v) { if (mounted) setState(() => _on = v); });
+    _offers = Api.instance.user?['notif_offers'] != false;
+  }
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const SizedBox(height: 12),
+        Text('Notifications', style: display(18)),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero, activeTrackColor: Brand.hill, title: const Text('Tell me when my coffee is ready'),
+          subtitle: Text(PushService.configured ? 'Order and pass messages on this phone' : 'Not set up in this build. Order updates still arrive while the app is open.', style: const TextStyle(fontSize: 13)),
+          value: _on, onChanged: _busy || !PushService.configured ? null : (v) async {
+            setState(() => _busy = true);
+            var ok = false;
+            if (v) { ok = await PushService.enable(); } else { await PushService.disable(); }
+            if (mounted) { setState(() { _on = v && ok; _busy = false; }); if (v && !ok) toast(context, 'Notifications are blocked. Allow them in your phone settings to turn this on.', bad: true); }
+          },
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero, activeTrackColor: Brand.hill, title: const Text('Offers and news'), subtitle: const Text('One a day at most. Order messages are always sent.', style: TextStyle(fontSize: 13)),
+          value: _offers, onChanged: (v) async {
+            setState(() => _offers = v);
+            try { final u = await Api.instance.patch('/me', {'notif_offers': v}); Api.instance.user = {...Api.instance.user!, ...Map<String, dynamic>.from(u)}; } on ApiException catch (e) { if (mounted) { setState(() => _offers = !v); toast(context, e.message, bad: true); } }
+          },
+        ),
+      ]);
 }

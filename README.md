@@ -18,6 +18,13 @@ The platform has one version number (`VERSION`, currently **1.1.0**) shared by t
 
 Google Play and App Store requirements are tracked in `store/COMPLIANCE.md`: in-app account deletion, privacy policy and terms, data export, permission purpose strings, Apple privacy manifest, HTTPS-only release builds, release signing, icons and splash from the brand mark. `store/DATA-SAFETY.md`, `store/STORE-LISTING.md` and `store/RELEASE.md` hold the console answers, listing copy and the step-by-step release checklist. Legal pages are drafts for a lawyer to confirm; set company details in `web/src/lib/site.ts`.
 
+## What's new in 1.2
+
+- **Passes**: each pass has a unique code; buy several and they are used one after another (a big order spills into the next pass). See the pass wallet in Offers.
+- **Kiosk**: open `/kiosk` on a counter tablet, sign in once with the station account, and customers order for themselves (name and phone collected with consent; pay at the counter, by pass code, or online). Tap the logo five times and enter the staff password to leave kiosk mode.
+- **Push notifications**: automatic order, pass, win-back, offer and drop messages, plus a campaign console under Marketing. Runs in test mode until Firebase and web keys are set; see `store/PUSH.md`.
+- **Recipes, costing and central inventory**: ingredient pack prices and wastage drive recipe cost and margin; everything is bought centrally and sent to stations with receiving, shortage tracking and shelf counts. See `docs/INVENTORY-AND-COSTING.md`.
+
 ## Who uses what
 
 | Role | Web | Mobile |

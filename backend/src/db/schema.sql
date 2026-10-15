@@ -379,3 +379,196 @@ CREATE TABLE IF NOT EXISTS partner_settlements (
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (station_id, period_from, period_to)
 );
+
+-- ---- v1.2: unique passes used in a queue, kiosk orders, push notifications ----
+ALTER TABLE passes ADD COLUMN IF NOT EXISTS code text;
+ALTER TABLE passes ADD COLUMN IF NOT EXISTS activated_at timestamptz;
+UPDATE passes SET code = 'SP-' || upper(substr(md5(id::text), 1, 4)) || '-' || upper(substr(md5(id::text), 5, 4)) WHERE code IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS passes_code_idx ON passes(code);
+
+CREATE TABLE IF NOT EXISTS order_pass_uses (
+  order_id uuid NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  pass_id uuid NOT NULL REFERENCES passes(id),
+  cups int NOT NULL CHECK (cups > 0),
+  PRIMARY KEY (order_id, pass_id)
+);
+INSERT INTO order_pass_uses(order_id, pass_id, cups)
+  SELECT o.id, o.pass_id, (SELECT COALESCE(sum(qty),1) FROM order_items WHERE order_id = o.id) FROM orders o WHERE o.pass_id IS NOT NULL
+  ON CONFLICT DO NOTHING;
+
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_channel_check;
+ALTER TABLE orders ADD CONSTRAINT orders_channel_check CHECK (channel IN ('app','qr','counter','web','kiosk'));
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_phone text;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notif_offers boolean NOT NULL DEFAULT true;
+
+CREATE TABLE IF NOT EXISTS push_tokens (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  platform text NOT NULL CHECK (platform IN ('android','ios','web')),
+  token text NOT NULL UNIQUE,
+  device_label text,
+  app_version text,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS push_tokens_user_idx ON push_tokens(user_id) WHERE active;
+
+CREATE TABLE IF NOT EXISTS push_campaigns (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  body text,
+  audience jsonb NOT NULL,
+  status text NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','sending','sent','cancelled','failed')),
+  scheduled_for timestamptz NOT NULL DEFAULT now(),
+  sent_at timestamptz,
+  recipients int NOT NULL DEFAULT 0,
+  created_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS push_deliveries (
+  id bigserial PRIMARY KEY,
+  campaign_id uuid REFERENCES push_campaigns(id) ON DELETE SET NULL,
+  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  token_id uuid,
+  platform text,
+  kind text,
+  title text,
+  status text NOT NULL CHECK (status IN ('sent','failed','dry_run','invalid_token','skipped')),
+  error text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS push_deliveries_campaign_idx ON push_deliveries(campaign_id);
+CREATE INDEX IF NOT EXISTS push_deliveries_created_idx ON push_deliveries(created_at);
+
+CREATE TABLE IF NOT EXISTS auto_push_log (
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key text NOT NULL,
+  sent_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, key)
+);
+
+-- ---- v1.2: recipe costing, central inventory, purchasing, transfers, stock counts ----
+CREATE TABLE IF NOT EXISTS suppliers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  phone text,
+  email text,
+  address text,
+  notes text,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE ingredients ALTER COLUMN unit_cost TYPE numeric(12,5);   -- Rs per base unit (g, ml, pcs), before wastage
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS category text NOT NULL DEFAULT 'ingredient';  -- ingredient | packaging | retail
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS pack_unit text NOT NULL DEFAULT 'pcs';        -- how it is bought: kg, L, pcs
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS pack_size numeric(12,3) NOT NULL DEFAULT 1;   -- base units in one pack (1000 g in a kg)
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS pack_price numeric(12,2) NOT NULL DEFAULT 0;  -- Rs per pack
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS waste_pct numeric(5,2) NOT NULL DEFAULT 0;    -- allowed wastage, added to cost and to stock use
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS supplier_id uuid REFERENCES suppliers(id);
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS central_reorder numeric(14,3) NOT NULL DEFAULT 0;
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS central_par numeric(14,3) NOT NULL DEFAULT 0;
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS last_purchase_cost numeric(12,5);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS recipe_method text;
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS cost int NOT NULL DEFAULT 0;                  -- recipe cost of this line at order time
+ALTER TABLE station_inventory ADD COLUMN IF NOT EXISTS par_level numeric(12,3) NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS warehouse boolean NOT NULL DEFAULT false;           -- manager who may run central stock
+
+CREATE TABLE IF NOT EXISTS option_recipes (                -- what a chosen option adds (or removes, if negative) per unit
+  option_id uuid REFERENCES options(id) ON DELETE CASCADE,
+  ingredient_id uuid REFERENCES ingredients(id) ON DELETE CASCADE,
+  qty numeric(12,3) NOT NULL,
+  PRIMARY KEY (option_id, ingredient_id)
+);
+
+CREATE TABLE IF NOT EXISTS ingredient_cost_history (
+  id bigserial PRIMARY KEY,
+  ingredient_id uuid NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,
+  pack_size numeric(12,3), pack_price numeric(12,2), unit_cost numeric(12,5), waste_pct numeric(5,2),
+  source text NOT NULL DEFAULT 'edit',
+  changed_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS central_inventory (
+  ingredient_id uuid PRIMARY KEY REFERENCES ingredients(id) ON DELETE CASCADE,
+  qty numeric(14,3) NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS central_moves (
+  id bigserial PRIMARY KEY,
+  ingredient_id uuid NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,
+  delta numeric(14,3) NOT NULL,
+  reason text NOT NULL,                                    -- purchase | transfer_out | transfer_cancel | waste | adjust
+  ref text,
+  unit_cost numeric(12,5),
+  created_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  number serial,
+  supplier_id uuid REFERENCES suppliers(id),
+  status text NOT NULL DEFAULT 'ordered' CHECK (status IN ('draft','ordered','received','cancelled')),
+  expected_on date,
+  invoice_no text,
+  note text,
+  created_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  received_at timestamptz,
+  received_by uuid REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS purchase_lines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_id uuid NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  ingredient_id uuid NOT NULL REFERENCES ingredients(id),
+  qty_ordered numeric(14,3) NOT NULL CHECK (qty_ordered > 0),
+  unit_cost numeric(12,5) NOT NULL,
+  qty_received numeric(14,3) NOT NULL DEFAULT 0,
+  received_unit_cost numeric(12,5)
+);
+
+CREATE TABLE IF NOT EXISTS stock_transfers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  number serial,
+  station_id uuid NOT NULL REFERENCES stations(id),
+  status text NOT NULL DEFAULT 'requested' CHECK (status IN ('requested','dispatched','received','cancelled')),
+  note text,
+  requested_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  dispatched_at timestamptz, dispatched_by uuid REFERENCES users(id),
+  received_at timestamptz, received_by uuid REFERENCES users(id),
+  receive_note text
+);
+CREATE INDEX IF NOT EXISTS stock_transfers_station_idx ON stock_transfers(station_id, status);
+CREATE TABLE IF NOT EXISTS transfer_lines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  transfer_id uuid NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+  ingredient_id uuid NOT NULL REFERENCES ingredients(id),
+  qty_requested numeric(14,3) NOT NULL DEFAULT 0,
+  qty_sent numeric(14,3) NOT NULL DEFAULT 0,
+  qty_received numeric(14,3),
+  unit_cost numeric(12,5) NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS stock_counts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  station_id uuid NOT NULL REFERENCES stations(id),
+  counted_by uuid REFERENCES users(id),
+  note text,
+  variance_value numeric(12,2) NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS stock_count_lines (
+  count_id uuid NOT NULL REFERENCES stock_counts(id) ON DELETE CASCADE,
+  ingredient_id uuid NOT NULL REFERENCES ingredients(id),
+  expected numeric(14,3) NOT NULL, counted numeric(14,3) NOT NULL, variance numeric(14,3) NOT NULL, variance_value numeric(12,2) NOT NULL,
+  PRIMARY KEY (count_id, ingredient_id)
+);
+
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS tracked boolean NOT NULL DEFAULT true;  -- false for tap water: costed in recipes, never counted

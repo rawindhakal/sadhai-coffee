@@ -3,6 +3,7 @@ import { query } from '../lib/db.js';
 import { wrap, notFound } from '../lib/http.js';
 import { stationMenu, bestSellers, liveOffers } from '../lib/orders.js';
 import { getSettings } from '../lib/settings.js';
+import { vapidPublicKey } from '../lib/push.js';
 
 export const pub = Router();
 
@@ -18,7 +19,8 @@ pub.get('/config', wrap(async (_req, res) => {
     brand: 'Sadhai Coffee', tagline: 'Good coffee, every day.', tagline_ne: 'सधैं राम्रो कफी।',
     pass: { price: s.pass_price, cups: s.pass_cups, valid_days: s.pass_valid_days },
     payment_methods: ['cash', 'esewa', 'khalti', 'fonepay'],
-    referral: { cap_month: s.referral_cap_month },
+    referral: { cap_month: s.referral_cap_month }, pass_use_by_days: s.pass_use_by_days, pass_valid_days: s.pass_valid_days,
+    vapid_public_key: vapidPublicKey(),
   });
 }));
 

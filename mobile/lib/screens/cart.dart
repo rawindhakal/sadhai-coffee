@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
+import '../push.dart';
 import 'customer.dart';
 import 'home.dart' show Stepper2;
 
@@ -36,7 +38,8 @@ class _CartScreenState extends State<CartScreen> {
       if (!mounted) return;
       setState(() {
         _coupons = c.where((x) => x['status'] == 'active').toList();
-        _pass = p.cast<Json?>().firstWhere((x) => x!['status'] == 'active' && (x['remaining'] as int) > 0, orElse: () => null);
+        final live = p.cast<Json>().where((x) => x['status'] == 'active' && (x['remaining'] as int) > 0).toList();
+        _pass = live.isEmpty ? null : {'remaining': live.first['total_remaining'], 'count': live.length};
       });
     } catch (_) {}
   }
@@ -74,11 +77,27 @@ class _CartScreenState extends State<CartScreen> {
         await launchUrl(Uri.parse((pay['start_url'] ?? pay['url']) as String), mode: LaunchMode.externalApplication);
       }
       if (!mounted) return;
+      _askPush();
       await Navigator.push(context, MaterialPageRoute(builder: (_) => TrackingScreen(orderId: order['id'])));
       widget.onPlaced();
     } on ApiException catch (e) {
       setState(() => _error = e.message);
     } finally { if (mounted) setState(() => _busy = false); }
+  }
+
+  // The first time someone orders, offer a ping when it is ready. The system permission prompt only appears if they say yes.
+  Future<void> _askPush() async {
+    if (!PushService.configured || await PushService.alreadyAsked || !mounted) return;
+    final yes = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
+      title: const Text('Get a ping when it is ready?'),
+      content: const Text('We will send one notification when your coffee is ready, and nothing you did not ask for. You can change this any time in Account.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Not now')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Yes, tell me'))],
+    ));
+    if (yes == true) {
+      await PushService.enable();
+    } else {
+      (await SharedPreferences.getInstance()).setBool('push.asked', true);
+    }
   }
 
   Widget _opt(bool on, String label, VoidCallback tap, {String? hint}) => InkWell(
@@ -127,7 +146,7 @@ class _CartScreenState extends State<CartScreen> {
       Card(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6), child: Column(children: [
         _opt(_offerType == 'none', 'No offer', () { setState(() { _offerType = 'none'; _offerId = null; }); _requote(cart); }),
         for (final c in _coupons) _opt(_offerType == 'coupon' && _offerId == c['id'], c['title'], () { setState(() { _offerType = 'coupon'; _offerId = c['id']; }); _requote(cart); }),
-        if (_pass != null) _opt(_offerType == 'pass', '10-cup pass', () { setState(() { _offerType = 'pass'; _offerId = null; }); _requote(cart); }, hint: '${_pass!['remaining']} cups left'),
+        if (_pass != null) _opt(_offerType == 'pass', '10-cup pass', () { setState(() { _offerType = 'pass'; _offerId = null; }); _requote(cart); }, hint: '${_pass!['remaining']} cups left${(_pass!['count'] as int) > 1 ? ' · ${_pass!['count']} passes' : ''}'),
         Row(children: [
           Expanded(child: TextField(controller: _promoCtl, decoration: const InputDecoration(hintText: 'Promo code', isDense: true), textCapitalization: TextCapitalization.characters)),
           const SizedBox(width: 8),

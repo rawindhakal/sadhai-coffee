@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, ago, fmtTime, rs } from '@/lib/api';
 import { useEvents } from '@/lib/auth';
 import { Empty, ErrorNote, Field, Loading, Modal, Stat, Status, Tabs, useData, useToast } from './ui';
+import { CountPanel, TransfersPanel } from './inventory';
 
 /** Station workspace. Staff are pinned to their station; managers/owners pass stationId. */
 export function StationWorkspace({ stationId, forcedTab }: { stationId?: string; forcedTab?: 'queue' | 'pos' | 'menu' | 'stock' | 'close' }) {
@@ -36,7 +37,7 @@ export function StationWorkspace({ stationId, forcedTab }: { stationId?: string;
       {tab === 'queue' && <Queue q={q} target={s.station.prep_target_seconds} onChange={summary.reload} />}
       {tab === 'pos' && <Pos q={q} stationId={stationId} onDone={() => { summary.reload(); setTab('queue'); }} />}
       {tab === 'menu' && <SoldOut q={q} />}
-      {tab === 'stock' && <Stock q={q} />}
+      {tab === 'stock' && <Stock q={q} stationId={stationId} />}
       {tab === 'close' && <CloseDay q={q} s={s} reload={summary.reload} />}
     </>
   );
@@ -134,7 +135,7 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
   const [picking, setPicking] = useState<any>(null);
   const total = cart.reduce((a, l) => a + l.unit * l.qty, 0);
 
-  async function find() { try { setCust(await api(`/station/customers/lookup${q ? q + '&' : '?'}phone=${encodeURIComponent(phone)}`)); } catch (e: any) { toast(e.message, true); setCust(null); } }
+  async function find() { const v = phone.trim(); const key = v.toUpperCase().startsWith('SP-') ? 'pass_code' : 'phone'; try { setCust(await api(`/station/customers/lookup${q ? q + '&' : '?'}${key}=${encodeURIComponent(v)}`)); } catch (e: any) { toast(e.message, true); setCust(null); } }
   async function place() {
     setBusy(true);
     try {
@@ -164,15 +165,15 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
         <h3>Counter order</h3>
         {!cart.length && <p className="muted small">Tap an item to add it.</p>}
         {cart.map((l, i) => <div key={i} className="row between"><span>{l.qty} × {l.p.name} <span className="small muted">{l.names.join(', ')}</span></span><span className="row"><span className="price">{rs(l.unit * l.qty)}</span><button className="btn ghost sm" aria-label="Remove" onClick={() => setCart(cart.filter((_, j) => j !== i))}>×</button></span></div>)}
-        <div className="row"><input placeholder="Customer phone (optional)" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" /><button className="btn sm" onClick={find}>Find</button></div>
+        <div className="row"><input placeholder="Customer phone or pass code (optional)" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" /><button className="btn sm" onClick={find}>Find</button></div>
         {cust && (
           <div className="card flat">
             <strong>{cust.name}</strong> <span className="small muted">{cust.beans} beans</span>
             <div className="col" style={{ gap: 4, marginTop: 6 }}>
               <label className="row small"><input type="radio" style={{ width: 18, minHeight: 18 }} checked={offer === ''} onChange={() => setOffer('')} />No offer</label>
-              {cust.pass && <label className="row small"><input type="radio" style={{ width: 18, minHeight: 18 }} checked={offer === 'pass'} onChange={() => setOffer('pass')} />10-cup pass ({cust.pass.remaining} left)</label>}
+              {cust.pass && <label className="row small"><input type="radio" style={{ width: 18, minHeight: 18 }} checked={offer === 'pass'} onChange={() => setOffer('pass')} />10-cup pass ({cust.pass.remaining} cups left{cust.pass.count > 1 ? ` across ${cust.pass.count} passes` : ''})</label>}
               {cust.coupons.map((c: any) => <label key={c.id} className="row small"><input type="radio" style={{ width: 18, minHeight: 18 }} checked={offer === c.id} onChange={() => setOffer(c.id)} />{c.title}</label>)}
-              {!cust.pass && <button className="btn sm" onClick={sellPass}>Sell 10-cup pass (cash)</button>}
+              <button className="btn sm" onClick={sellPass}>Sell a 10-cup pass (cash){cust.pass ? ' · another' : ''}</button>
             </div>
           </div>
         )}
@@ -224,7 +225,7 @@ function SoldOut({ q }: { q: string }) {
   );
 }
 
-function Stock({ q }: { q: string }) {
+function Stock({ q, stationId }: { q: string; stationId?: string }) {
   const inv = useData<any[]>(`/station/inventory${q}`);
   const toast = useToast();
   const [edit, setEdit] = useState<any>(null);
@@ -241,6 +242,8 @@ function Stock({ q }: { q: string }) {
         <tbody>{inv.data.map((i) => (
           <tr key={i.id}><td>{i.name} {i.low && <span className="chip cherry">Low</span>}</td><td className="num">{Math.round(i.qty).toLocaleString()} {i.unit}</td><td className="num">{Math.round(i.reorder_level).toLocaleString()}</td><td className="right"><button className="btn sm" onClick={() => setEdit(i)}>Update</button></td></tr>
         ))}</tbody></table></div>
+      <div style={{ marginTop: 16 }}><TransfersPanel mode="station" stationId={stationId} /></div>
+      <div style={{ marginTop: 16 }}><CountPanel role={stationId ? 'manager' : 'station'} stationId={stationId} /></div>
       {edit && (
         <Modal title={edit.name} onClose={() => setEdit(null)}>
           <div className="row wrap" style={{ marginBottom: 12 }}>{['restock', 'waste'].map((r) => <button key={r} className={`btn sm ${reason === r ? 'primary' : 'ghost'}`} onClick={() => setReason(r)}>{r === 'restock' ? 'Received stock' : 'Wasted'}</button>)}</div>

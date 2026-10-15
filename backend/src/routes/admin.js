@@ -9,6 +9,10 @@ import { audit } from '../lib/notify.js';
 import { adjustInventory, inventoryFor } from './station.js';
 import { fullOrder, cancelOrder } from '../lib/orders.js';
 import { statement, scorecard } from '../lib/partners.js';
+import { costingTable, recipeBreakdown, effectiveUnitCost } from '../lib/costing.js';
+import { getSettings } from '../lib/settings.js';
+import { audienceUsers, deviceCounts, processCampaign, runAutomations } from '../lib/campaigns.js';
+import { pushStatus } from '../lib/push.js';
 import { extras, liveBoard, alerts, customerInsights, customerDetail, search } from '../lib/insights.js';
 
 // Shared by managers (their stations) and owners (all stations).
@@ -314,3 +318,103 @@ admin.get('/partner-statement', wrap(async (req, res) => {
   res.json(out.filter((s) => s.station.operator_type === 'partner' || ids.length === 1));
 }));
 admin.get('/scorecard', wrap(async (req, res) => res.json(await scorecard(await scoped(req), req.query.from, req.query.to))));
+
+/* ---- push notifications console ---- */
+const audienceSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('all') }), z.object({ type: z.literal('inactive_14d') }), z.object({ type: z.literal('pass_expiring') }),
+  z.object({ type: z.literal('station_visitors'), station_id: z.string().uuid() }), z.object({ type: z.literal('phone'), phone: z.string() }),
+]);
+async function checkAudience(user, a) {
+  if (user.role === 'manager') {
+    if (a.type === 'station_visitors') await assertStationAccess(user, a.station_id);
+    else if (a.type !== 'phone') throw forbidden('Managers can message customers of their own stations, or one customer by phone.');
+  }
+}
+admin.get('/push/status', wrap(async (_req, res) => {
+  const [dev, week] = await Promise.all([
+    query(`SELECT platform, count(*)::int AS n FROM push_tokens WHERE active GROUP BY 1`),
+    query(`SELECT status, count(*)::int AS n FROM push_deliveries WHERE created_at > now() - interval '7 days' GROUP BY 1`),
+  ]);
+  res.json({ provider: pushStatus(), devices: dev.rows, deliveries_7d: week.rows });
+}));
+admin.post('/push/preview', wrap(async (req, res) => {
+  const a = audienceSchema.parse(req.body);
+  await checkAudience(req.user, a);
+  const ids = await audienceUsers(a);
+  res.json({ customers: ids.length, ...(await deviceCounts(ids)) });
+}));
+admin.get('/push/campaigns', wrap(async (req, res) => {
+  const { rows } = await query(
+    `SELECT c.*, u.name AS created_by_name,
+            count(d.id) FILTER (WHERE d.status IN ('sent','dry_run'))::int AS delivered, count(d.id) FILTER (WHERE d.status IN ('failed','invalid_token'))::int AS failed,
+            count(d.id) FILTER (WHERE d.status='dry_run')::int AS dry_run
+       FROM push_campaigns c LEFT JOIN users u ON u.id=c.created_by LEFT JOIN push_deliveries d ON d.campaign_id=c.id
+      ${req.user.role === 'manager' ? 'WHERE c.created_by=$1' : 'WHERE $1::uuid IS NOT NULL'} GROUP BY c.id, u.name ORDER BY c.created_at DESC LIMIT 40`, [req.user.id]);
+  res.json(rows);
+}));
+admin.post('/push/campaigns', wrap(async (req, res) => {
+  const b = z.object({ title: z.string().trim().min(3).max(60), body: z.string().trim().max(140).optional(), audience: audienceSchema, send_at: z.string().datetime().optional() }).parse(req.body);
+  await checkAudience(req.user, b.audience);
+  const { rows } = await query(
+    `INSERT INTO push_campaigns(title, body, audience, scheduled_for, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [b.title, b.body || null, JSON.stringify(b.audience), b.send_at || new Date().toISOString(), req.user.id],
+  );
+  await audit(req.user.id, 'push.campaign', 'push_campaign', rows[0].id, { title: b.title, audience: b.audience, send_at: b.send_at });
+  let result = null;
+  if (!b.send_at || new Date(b.send_at) <= new Date()) result = await processCampaign(rows[0].id);
+  res.status(201).json({ ...(await query('SELECT * FROM push_campaigns WHERE id=$1', [rows[0].id])).rows[0], result });
+}));
+admin.delete('/push/campaigns/:id', wrap(async (req, res) => {
+  const c = (await query('SELECT * FROM push_campaigns WHERE id=$1', [req.params.id])).rows[0];
+  if (!c) throw notFound('Campaign not found');
+  if (req.user.role === 'manager' && c.created_by !== req.user.id) throw forbidden();
+  const r = await query(`UPDATE push_campaigns SET status='cancelled' WHERE id=$1 AND status='scheduled' RETURNING id`, [c.id]);
+  if (!r.rowCount) throw conflict('Only scheduled messages can be cancelled');
+  res.json({ ok: true });
+}));
+admin.post('/push/automations/run', wrap(async (req, res) => {
+  if (req.user.role !== 'owner') throw forbidden('Owner only');
+  res.json(await runAutomations({ ignoreQuietHours: true }));
+}));
+
+/* ---- recipes and costing (read: managers and owner; edit: owner) ---- */
+admin.get('/costing', wrap(async (_req, res) => {
+  const target = (await getSettings()).target_food_cost_pct;
+  const rows = await costingTable(target);
+  const sales = (await query(
+    `SELECT COALESCE(sum(i.line_total),0)::int AS revenue, COALESCE(sum(i.qty * COALESCE(NULLIF(i.cost,0), p.cost)),0)::int AS cost
+       FROM order_items i JOIN orders o ON o.id=i.order_id JOIN products p ON p.id=i.product_id WHERE o.status NOT IN ('cancelled','awaiting_payment') AND o.created_at > now() - interval '30 days'`)).rows[0];
+  const movers = (await query(
+    `SELECT i.name, h.unit_cost, h.pack_price, h.created_at, lag(h.unit_cost) OVER (PARTITION BY h.ingredient_id ORDER BY h.id) AS before
+       FROM ingredient_cost_history h JOIN ingredients i ON i.id=h.ingredient_id ORDER BY h.id DESC LIMIT 8`)).rows.filter((m) => m.before != null && Number(m.before) !== Number(m.unit_cost));
+  res.json({
+    target_pct: target, rows,
+    summary: {
+      actual_food_cost_pct: sales.revenue ? Math.round((sales.cost / sales.revenue) * 1000) / 10 : 0, gross_margin_pct: sales.revenue ? Math.round(((sales.revenue - sales.cost) / sales.revenue) * 1000) / 10 : 0,
+      over_target: rows.filter((r) => r.over_target).length, with_recipe: rows.filter((r) => r.has_recipe).length, without_recipe: rows.filter((r) => !r.has_recipe && r.active).length,
+    },
+    movers,
+  });
+}));
+admin.get('/recipes/:productId', wrap(async (req, res) => {
+  const p = (await query('SELECT p.*, c.name AS category FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.id=$1', [req.params.productId])).rows[0];
+  if (!p) throw notFound('Item not found');
+  const groups = (await query(
+    `SELECT g.id, g.name, g.required, g.multi, COALESCE(json_agg(json_build_object('id', o.id, 'name', o.name, 'price_delta', o.price_delta, 'is_default', o.is_default) ORDER BY o.sort) FILTER (WHERE o.id IS NOT NULL), '[]') AS options
+       FROM option_groups g LEFT JOIN options o ON o.group_id=g.id WHERE g.product_id=$1 GROUP BY g.id ORDER BY g.sort`, [p.id])).rows;
+  const defaults = groups.flatMap((g) => g.options.filter((o) => o.is_default).map((o) => o.id));
+  const base = (await query(`SELECT r.ingredient_id, r.qty FROM recipes r WHERE r.product_id=$1`, [p.id])).rows;
+  const full = await recipeBreakdown(p.id, defaults);
+  const optionCost = {};
+  for (const g of groups) for (const o of g.options) {
+    const rr = (await query(`SELECT orr.ingredient_id, orr.qty, i.name, i.unit, i.unit_cost, i.waste_pct FROM option_recipes orr JOIN ingredients i ON i.id=orr.ingredient_id WHERE orr.option_id=$1`, [o.id])).rows;
+    optionCost[o.id] = { lines: rr.map((r) => ({ ingredient_id: r.ingredient_id, name: r.name, unit: r.unit, qty: Number(r.qty) })), cost: Math.round(rr.reduce((a, r) => a + Number(r.qty) * effectiveUnitCost(r), 0) * 100) / 100 };
+  }
+  const target = (await getSettings()).target_food_cost_pct;
+  res.json({
+    product: { id: p.id, name: p.name, sku: p.sku, price: p.price, cost: p.cost, category: p.category, recipe_method: p.recipe_method, kind: p.kind },
+    base_lines: base.map((b) => ({ ingredient_id: b.ingredient_id, qty: Number(b.qty) })), breakdown: full.lines, cost: Math.round(full.cost * 100) / 100,
+    margin: Math.round((p.price - full.cost) * 100) / 100, food_cost_pct: p.price ? Math.round((full.cost / p.price) * 1000) / 10 : 0, target_pct: target,
+    suggested_price: full.cost ? Math.ceil(full.cost / (target / 100) / 5) * 5 : null, option_groups: groups, option_recipes: optionCost,
+  });
+}));

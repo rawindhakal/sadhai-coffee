@@ -164,7 +164,7 @@ function PassPlay({ price }: { price: number }) {
         <Reveal>
           <p className="label" style={{ color: 'inherit', opacity: 0.8 }}>10-cup pass</p>
           <h2 className="lh2" style={{ color: 'inherit' }}>10 cups. One pass. {rs(price)}.</h2>
-          <p style={{ maxWidth: 440, opacity: 0.92, marginTop: 8 }}>Thirty days at any Sadhai counter. That is {rs(per)} a cup, against {rs(130)} for an Americano. Tap the cups to try it.</p>
+          <p style={{ maxWidth: 440, opacity: 0.92, marginTop: 8 }}>Thirty days from your first cup, at any Sadhai counter. Buy several and use them one after another. That is {rs(per)} a cup, against {rs(130)} for an Americano. Tap the cups to try it.</p>
           <div className="row wrap" style={{ marginTop: 16 }}><span className="chip marigold">You save {rs(130 * 10 - price)}</span><span className="chip" style={{ background: 'transparent', color: 'inherit', borderColor: 'currentColor' }}>{10 - used} cups left</span></div>
           <Link className="btn" style={{ background: 'var(--surface)', color: 'var(--ink)', marginTop: 18 }} href="/offers">Get a pass</Link>
         </Reveal>

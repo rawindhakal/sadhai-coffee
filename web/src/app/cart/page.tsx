@@ -39,7 +39,7 @@ export default function Cart() {
     return () => { live = false; };
   }, [JSON.stringify(payload), user?.id]);
 
-  const activePass = passes.data?.find((p) => p.status === 'active' && p.remaining > 0);
+  const activePass = passes.data?.some((p) => p.status === 'active' && p.remaining > 0) ? { remaining: passes.data![0].total_remaining } : null;
   const active = (coupons.data || []).filter((c) => c.status === 'active');
 
   async function place() {

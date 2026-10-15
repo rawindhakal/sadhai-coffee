@@ -26,7 +26,7 @@ export async function overview(stationIds, from, to) {
               COALESCE(avg(NULLIF(o.total,0)),0)::int AS avg_ticket,
               count(*) FILTER (WHERE o.channel IN ('app','qr','web'))::int AS digital_orders,
               count(DISTINCT o.user_id)::int AS customers,
-              COALESCE(sum((SELECT sum(i.qty * pr.cost) FROM order_items i JOIN products pr ON pr.id=i.product_id WHERE i.order_id=o.id)),0)::int AS food_cost
+              COALESCE(sum((SELECT sum(i.qty * COALESCE(NULLIF(i.cost,0), pr.cost)) FROM order_items i JOIN products pr ON pr.id=i.product_id WHERE i.order_id=o.id)),0)::int AS food_cost
          FROM orders o WHERE o.station_id = ANY($1) AND o.created_at >= $2 AND o.created_at < $3 AND ${SALE}`, p),
     query(
       `SELECT ${DAY} AS day, count(*)::int AS orders, COALESCE(sum(o.total),0)::int AS revenue,
@@ -39,7 +39,7 @@ export async function overview(stationIds, from, to) {
          FROM stations st LEFT JOIN orders o ON o.station_id=st.id AND o.created_at >= $2 AND o.created_at < $3 AND ${SALE}
         WHERE st.id = ANY($1) GROUP BY st.id ORDER BY revenue DESC`, p),
     query(
-      `SELECT i.name, sum(i.qty)::int AS qty, sum(i.line_total)::int AS revenue, sum(i.qty * pr.cost)::int AS cost
+      `SELECT i.name, sum(i.qty)::int AS qty, sum(i.line_total)::int AS revenue, sum(i.qty * COALESCE(NULLIF(i.cost,0), pr.cost))::int AS cost
          FROM order_items i JOIN orders o ON o.id=i.order_id JOIN products pr ON pr.id=i.product_id
         WHERE o.station_id = ANY($1) AND o.created_at >= $2 AND o.created_at < $3 AND ${SALE}
         GROUP BY i.name ORDER BY qty DESC LIMIT 10`, p),
@@ -60,8 +60,8 @@ export async function overview(stationIds, from, to) {
         GROUP BY 1 ORDER BY revenue DESC`, p),
     query(
       `SELECT (SELECT count(*)::int FROM passes WHERE status IN ('active','used','expired') AND purchased_at >= $1 AND purchased_at < $2) AS sold,
-              (SELECT COALESCE(sum(i.qty),0)::int FROM order_items i JOIN orders o ON o.id=i.order_id
-                WHERE o.pass_id IS NOT NULL AND o.station_id = ANY($3) AND o.status <> 'cancelled' AND o.created_at >= $1 AND o.created_at < $2) AS redeemed_cups,
+              (SELECT COALESCE(sum(u.cups),0)::int FROM order_pass_uses u JOIN orders o ON o.id=u.order_id
+                WHERE o.station_id = ANY($3) AND o.status <> 'cancelled' AND o.created_at >= $1 AND o.created_at < $2) AS redeemed_cups,
               (SELECT COALESCE(sum(total_cups - used_cups),0)::int FROM passes WHERE status='active' AND expires_at > now()) AS outstanding_cups,
               (SELECT COALESCE(sum(price_paid),0)::int FROM passes WHERE status IN ('active','used','expired') AND purchased_at >= $1 AND purchased_at < $2) AS sold_value,
               (SELECT count(*)::int FROM passes WHERE related_party AND purchased_at >= $1 AND purchased_at < $2) AS related_party`,
@@ -81,7 +81,7 @@ export async function overview(stationIds, from, to) {
     query(
       `SELECT CASE WHEN o.coupon_id IS NOT NULL THEN c.kind WHEN o.promo_code_id IS NOT NULL THEN 'promo' WHEN o.pass_id IS NOT NULL THEN 'pass' END AS kind,
               count(*)::int AS uses, COALESCE(sum(o.discount),0)::int AS spend,
-              COALESCE(sum(o.total - COALESCE((SELECT sum(i.qty * pr.cost) FROM order_items i JOIN products pr ON pr.id=i.product_id WHERE i.order_id=o.id),0)),0)::int AS margin_on_orders
+              COALESCE(sum(o.total - COALESCE((SELECT sum(i.qty * COALESCE(NULLIF(i.cost,0), pr.cost)) FROM order_items i JOIN products pr ON pr.id=i.product_id WHERE i.order_id=o.id),0)),0)::int AS margin_on_orders
          FROM orders o LEFT JOIN coupons c ON c.id=o.coupon_id
         WHERE o.station_id = ANY($1) AND o.created_at >= $2 AND o.created_at < $3 AND ${SALE}
           AND (o.coupon_id IS NOT NULL OR o.promo_code_id IS NOT NULL OR o.pass_id IS NOT NULL)

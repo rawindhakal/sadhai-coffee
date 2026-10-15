@@ -127,13 +127,19 @@ customer.post('/orders/:id/rate', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Every pass has its own code. Passes are used one after another: started ones first, then the oldest waiting one.
 customer.get('/passes', wrap(async (req, res) => {
   const { rows } = await query(
-    `SELECT id, total_cups, used_cups, total_cups - used_cups AS remaining, price_paid, status, purchased_at, expires_at
+    `SELECT id, code, total_cups, used_cups, total_cups - used_cups AS remaining, price_paid, status, purchased_at, expires_at, activated_at
        FROM passes WHERE user_id=$1 AND status <> 'pending' ORDER BY purchased_at DESC`, [req.user.id],
   );
   const now = new Date();
-  res.json(rows.map((p) => ({ ...p, status: p.status === 'active' && new Date(p.expires_at) < now ? 'expired' : p.status })));
+  const list = rows.map((p) => ({ ...p, status: p.status === 'active' && new Date(p.expires_at) < now ? 'expired' : p.status }));
+  const queue = list.filter((p) => p.status === 'active' && p.remaining > 0)
+    .sort((a, b) => (!a.activated_at - !b.activated_at) || (new Date(a.expires_at) - new Date(b.expires_at)) || (new Date(a.purchased_at) - new Date(b.purchased_at)));
+  queue.forEach((p, i) => { p.queue_position = i + 1; p.state = i === 0 ? 'using' : 'next'; });
+  for (const p of list) { if (!p.state) p.state = p.status === 'used' ? 'used' : p.status; p.starts_on_first_use = !p.activated_at && p.status === 'active'; }
+  res.json(list.map((p, i) => ({ ...p, total_remaining: queue.reduce((a, q) => a + q.remaining, 0) })));
 }));
 
 customer.post('/passes', requireRole('customer'), wrap(async (req, res) => {
