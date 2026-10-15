@@ -57,7 +57,7 @@ npm install && npm run dev      # http://localhost:3000
 cd ../mobile
 flutter pub get
 flutter run                     # iOS simulator -> localhost:4747, Android emulator -> 10.0.2.2:4747
-# real device or deployed API: flutter run --dart-define=API_URL=https://api.yourdomain.com
+# real device or deployed API: flutter run --dart-define=API_URL=https://api.sadhaicoffee.com
 ```
 
 Or with Docker: `docker compose up --build`, then `docker compose exec api npm run setup`.

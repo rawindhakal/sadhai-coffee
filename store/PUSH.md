@@ -27,14 +27,14 @@ Dashboard, Marketing, **Push notifications**: pick an audience (all customers, l
 4. App: build with the Firebase values (no config files to commit):
    ```
    flutter build appbundle --release \
-     --dart-define=API_URL=https://api.yourdomain.com --dart-define=WEB_URL=https://yourdomain.com \
+     --dart-define=API_URL=https://api.sadhaicoffee.com --dart-define=WEB_URL=https://sadhaicoffee.com \
      --dart-define=FIREBASE_API_KEY=... --dart-define=FIREBASE_PROJECT_ID=... --dart-define=FIREBASE_SENDER_ID=... \
      --dart-define=FIREBASE_APP_ID_ANDROID=... --dart-define=FIREBASE_APP_ID_IOS=...
    ```
    (the values are in Project settings, Your apps. They identify the app and are not secrets.)
 
 **Browsers (Web Push)**
-1. `cd backend && npm run vapid` prints a key pair. Put them in `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and set `VAPID_SUBJECT=mailto:you@yourdomain`.
+1. `cd backend && npm run vapid` prints a key pair. Put them in `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and set `VAPID_SUBJECT=mailto:support@sadhaicoffee.com`.
 2. Customers turn it on in Account, Profile, Notifications (the browser asks permission only then). Browsers need HTTPS in production.
 
 ## How a message travels
