@@ -1,0 +1,1 @@
+{ "name": "sadhai-icon-tools", "private": true, "type": "module", "scripts": { "build": "node make.mjs" }, "devDependencies": { "sharp": "^0.33.5" } }

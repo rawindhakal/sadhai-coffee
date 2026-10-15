@@ -1,0 +1,33 @@
+name: Release build
+# Runs when you push a tag made by scripts/release.mjs (v1.2.0). Produces store-ready artifacts; uploading to the stores stays a manual, reviewed step.
+on:
+  push: { tags: ['v*'] }
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: mobile } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - name: Restore upload key
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/upload.jks
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$PWD/android/upload.jks" "${{ secrets.ANDROID_STORE_PASSWORD }}" "${{ secrets.ANDROID_KEY_ALIAS }}" "${{ secrets.ANDROID_KEY_PASSWORD }}" > android/key.properties
+      - run: flutter pub get
+      - run: flutter build appbundle --release --dart-define=API_URL=${{ vars.API_URL }} --dart-define=WEB_URL=${{ vars.WEB_URL }}
+      - uses: actions/upload-artifact@v4
+        with: { name: sadhai-android-aab, path: mobile/build/app/outputs/bundle/release/app-release.aab }
+  ios:
+    runs-on: macos-latest
+    defaults: { run: { working-directory: mobile } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter pub get
+      - name: Build (unsigned)
+        run: flutter build ios --release --no-codesign --dart-define=API_URL=${{ vars.API_URL }} --dart-define=WEB_URL=${{ vars.WEB_URL }}
+      - run: echo "Archive and sign with your Apple team in Xcode or fastlane; see store/RELEASE.md"

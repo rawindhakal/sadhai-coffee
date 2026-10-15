@@ -1,0 +1,308 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../version.dart';
+import 'package:intl/intl.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:provider/provider.dart';
+import '../api.dart';
+import '../state.dart';
+import '../theme.dart';
+import 'customer.dart';
+
+String _d(String iso) => DateFormat('d MMM').format(DateTime.parse(iso).toLocal());
+String _dt(String iso) => DateFormat('d MMM, HH:mm').format(DateTime.parse(iso).toLocal());
+
+class _Loader<T> extends StatefulWidget {
+  const _Loader({required this.path, required this.builder});
+  final String path;
+  final Widget Function(BuildContext, dynamic data, Future<void> Function() reload) builder;
+  @override
+  State<_Loader<T>> createState() => _LoaderState<T>();
+}
+
+class _LoaderState<T> extends State<_Loader<T>> {
+  dynamic _data;
+  String? _error;
+  @override
+  void initState() { super.initState(); _load(); }
+  Future<void> _load() async {
+    try { final d = await Api.instance.get(widget.path); if (mounted) setState(() { _data = d; _error = null; }); }
+    on ApiException catch (e) { if (mounted) setState(() => _error = e.message); }
+  }
+  @override
+  Widget build(BuildContext context) {
+    if (_data == null) return Center(child: _error != null ? Padding(padding: const EdgeInsets.all(24), child: Text(_error!, style: const TextStyle(color: Brand.cherry))) : const CircularProgressIndicator());
+    return RefreshIndicator(onRefresh: _load, child: widget.builder(context, _data, _load));
+  }
+}
+
+/// 10-cup pass card and purchase. Embedded in the Offers tab, so it manages its own loading.
+class PassPanel extends StatefulWidget {
+  const PassPanel({super.key});
+  @override
+  State<PassPanel> createState() => _PassPanelState();
+}
+
+class _PassPanelState extends State<PassPanel> {
+  List<Map> _passes = [];
+  bool _loaded = false;
+  @override
+  void initState() { super.initState(); _load(); }
+  Future<void> _load() async {
+    try { final p = await Api.instance.get('/passes') as List; if (mounted) setState(() { _passes = p.cast<Map>(); _loaded = true; }); } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded) return const SizedBox.shrink();
+    final live = _passes.cast<Map?>().firstWhere((p) => p!['status'] == 'active', orElse: () => null);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('10-cup pass', style: display(20)),
+      const SizedBox(height: 8),
+      if (live != null)
+        Container(
+          padding: const EdgeInsets.all(22), width: double.infinity,
+          decoration: BoxDecoration(color: Brand.cherry, borderRadius: BorderRadius.circular(Brand.radiusLg), boxShadow: const [BoxShadow(color: Color(0x24000000), blurRadius: 24, offset: Offset(0, 8))]),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${live['remaining']} of ${live['total_cups']} cups left', style: display(30, color: Brand.onCherry)),
+            const SizedBox(height: 12),
+            Wrap(spacing: 6, runSpacing: 6, children: [for (var i = 0; i < (live['total_cups'] as int); i++) Container(width: 20, height: 20, decoration: BoxDecoration(shape: BoxShape.circle, color: i < live['used_cups'] ? Colors.transparent : Brand.onCherry, border: Border.all(color: Brand.onCherry, width: 2)))]),
+            const SizedBox(height: 12),
+            Text('Valid until ${_d(live['expires_at'])}. Choose the pass at checkout.', style: const TextStyle(color: Brand.onCherry)),
+          ]),
+        )
+      else
+        Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('10 cups. One pass. Rs 1,200.', style: display(20)),
+          const SizedBox(height: 4),
+          const Text('Thirty days at any Sadhai station. Drinks only.', style: TextStyle(color: Brand.inkMuted)),
+        ]))),
+      const SizedBox(height: 10),
+      FilledButton(onPressed: _buy, child: Text(live == null ? 'Buy a pass' : 'Buy another pass')),
+    ]);
+  }
+
+  Future<void> _buy() async {
+    final m = await showModalBottomSheet<String>(context: context, backgroundColor: Brand.surfaceRaised, builder: (c) => SafeArea(child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('Pay Rs 1,200 with', style: display(22)),
+      const SizedBox(height: 12),
+      for (final m in ['esewa', 'khalti', 'fonepay']) Padding(padding: const EdgeInsets.only(bottom: 8), child: OutlinedButton(onPressed: () => Navigator.pop(c, m), child: Center(child: Text(payLabel[m]!)))),
+      const Text('Prefer cash? Buy it at any station counter.', style: TextStyle(color: Brand.inkMuted)),
+    ]))));
+    if (m == null || !mounted) return;
+    try {
+      final out = await Api.instance.post('/passes', {'payment_method': m});
+      final pay = out['payment'] as Map;
+      if (pay['mode'] == 'sandbox') {
+        await Api.instance.post('/payments/${pay['payment_id']}/confirm');
+        if (mounted) toast(context, 'Your pass is ready');
+      } else {
+        await launchUrl(Uri.parse((pay['start_url'] ?? pay['url']) as String), mode: LaunchMode.externalApplication);
+      }
+      await _load();
+    } on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); }
+  }
+}
+
+Future<void> _again(BuildContext context, String id) async {
+  final cart = context.read<CartState>();
+  try {
+    final o = await Api.instance.get('/orders/$id') as Map;
+    cart.setStation({'id': o['station_id'], 'name': o['station_name'], 'address': o['station_address']});
+    for (final i in (o['items'] as List)) {
+      final opts = (i['options'] as List);
+      cart.add(CartLine(product: {'id': i['product_id'], 'name': i['name']}, qty: i['qty'], optionIds: [for (final x in opts) x['id'] as String], optionNames: [for (final x in opts) x['name'] as String], unit: i['unit_price']));
+    }
+    if (context.mounted) toast(context, 'Added to your cart. Open the Cart tab to check out.');
+  } on ApiException catch (e) { if (context.mounted) toast(context, e.message, bad: true); }
+}
+
+class OrdersScreen extends StatelessWidget {
+  const OrdersScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return _Loader(path: '/orders', builder: (context, data, reload) {
+      final list = (data as List).cast<Map>();
+      return ListView(padding: const EdgeInsets.all(20), children: [
+        Text('Orders', style: display(30)),
+        const SizedBox(height: 12),
+        if (list.isEmpty) const Text('No orders yet.', style: TextStyle(color: Brand.inkMuted)),
+        for (final o in list) Padding(padding: const EdgeInsets.only(bottom: 10), child: Card(child: InkWell(
+          borderRadius: BorderRadius.circular(Brand.radiusLg),
+          onTap: () async { await Navigator.push(context, MaterialPageRoute(builder: (_) => TrackingScreen(orderId: o['id']))); reload(); },
+          child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [Expanded(child: Text('${o['pickup_code']} · ${o['station_name']}', style: const TextStyle(fontWeight: FontWeight.w700))), Chip2.status(o['status'])]),
+            Text(o['summary'] ?? '', style: const TextStyle(color: Brand.inkMuted)),
+            const SizedBox(height: 4),
+            Row(children: [Text(_dt(o['created_at']), style: const TextStyle(color: Brand.inkMuted, fontSize: 13)), const Spacer(), Text(rs(o['total']), style: const TextStyle(fontWeight: FontWeight.w700))]),
+            if (o['status'] == 'picked_up') Padding(padding: const EdgeInsets.only(top: 8), child: OutlinedButton(onPressed: () => _again(context, o['id']), child: const Text('Order again'))),
+          ])),
+        ))),
+      ]);
+    });
+  }
+}
+
+class AccountScreen extends StatelessWidget {
+  const AccountScreen({super.key, required this.onSignOut});
+  final VoidCallback onSignOut;
+  @override
+  Widget build(BuildContext context) {
+    final u = Api.instance.user!;
+    return ListView(padding: const EdgeInsets.all(20), children: [
+      Text('Hello, ${(u['name'] as String).split(' ').first}', style: display(30)),
+      Text(u['phone'], style: const TextStyle(color: Brand.inkMuted)),
+      const SizedBox(height: 16),
+      for (final t in [
+        ('Coupons', Icons.sell_outlined, const CouponsScreen()),
+        ('Give a cup. Get a cup.', Icons.card_giftcard, const ReferralScreen()),
+        ('Inbox', Icons.notifications_none, const InboxScreen()),
+        ('Profile and password', Icons.manage_accounts_outlined, ProfileScreen(onSignOut: onSignOut)),
+      ]) Padding(padding: const EdgeInsets.only(bottom: 10), child: Card(child: ListTile(leading: Icon(t.$2, color: Brand.cherry), title: Text(t.$1, style: const TextStyle(fontWeight: FontWeight.w600)), trailing: const Icon(Icons.chevron_right), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => t.$3))))),
+      const SizedBox(height: 8),
+      OutlinedButton(onPressed: () async { await Api.instance.logout(); onSignOut(); }, child: const Text('Sign out')),
+    ]);
+  }
+}
+
+class CouponsScreen extends StatelessWidget {
+  const CouponsScreen({super.key});
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Coupons')),
+        body: _Loader(path: '/coupons', builder: (context, data, _) {
+          final list = (data as List).cast<Map>();
+          if (list.isEmpty) return ListView(padding: const EdgeInsets.all(20), children: const [Text('No coupons yet.')]);
+          return ListView(padding: const EdgeInsets.all(20), children: [
+            for (final c in list) Opacity(opacity: c['status'] == 'active' ? 1 : 0.55, child: Padding(padding: const EdgeInsets.only(bottom: 10), child: Card(child: ListTile(
+              title: Text(c['title'], style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(c['status'] == 'active' ? 'Valid until ${_d(c['expires_at'])}' : c['status'] == 'used' ? 'Used' : 'Expired'),
+              trailing: Chip2(c['kind'] == 'pct' ? '${c['pct']}% off' : 'Free cup', bg: c['status'] == 'active' ? Brand.marigold : Brand.surfaceSunk),
+            )))),
+          ]);
+        }),
+      );
+}
+
+class ReferralScreen extends StatelessWidget {
+  const ReferralScreen({super.key});
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Give a cup')),
+        body: _Loader(path: '/referrals', builder: (context, d, _) {
+          final data = d as Map;
+          return ListView(padding: const EdgeInsets.all(20), children: [
+            Card(child: Padding(padding: const EdgeInsets.all(24), child: Column(children: [
+              Text('Give a cup. Get a cup.', style: display(24)),
+              const SizedBox(height: 6),
+              const Text('Share your code. When your friend finishes their first cup, you both get one.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted)),
+              const SizedBox(height: 12),
+              QrImageView(data: 'sadhai://invite/${data['code']}', size: 140, eyeStyle: const QrEyeStyle(color: Brand.ink, eyeShape: QrEyeShape.square), dataModuleStyle: const QrDataModuleStyle(color: Brand.ink, dataModuleShape: QrDataModuleShape.square)),
+              Text(data['code'], style: display(38, color: Brand.cherry)),
+              const SizedBox(height: 8),
+              FilledButton(onPressed: () { Clipboard.setData(ClipboardData(text: 'Your first Americano is free at Sadhai Coffee. Use my code ${data['code']}.')); toast(context, 'Invite copied'); }, child: const Text('Copy invite')),
+              const SizedBox(height: 8),
+              Text('One free cup per friend, up to ${data['cap']} a month. ${data['rewarded_this_month']} used this month.', textAlign: TextAlign.center, style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
+            ]))),
+            for (final f in (data['friends'] as List)) Padding(padding: const EdgeInsets.only(top: 10), child: Card(child: ListTile(title: Text(f['name']), trailing: Chip2(f['status'] == 'rewarded' ? 'First cup done' : 'Waiting', bg: f['status'] == 'rewarded' ? Brand.hill : Brand.surfaceSunk, fg: f['status'] == 'rewarded' ? Brand.onCherry : Brand.ink)))),
+          ]);
+        }),
+      );
+}
+
+class InboxScreen extends StatelessWidget {
+  const InboxScreen({super.key});
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Inbox')),
+        body: _Loader(path: '/notifications', builder: (context, d, reload) {
+          final items = ((d as Map)['items'] as List).cast<Map>();
+          Api.instance.post('/notifications/read');
+          return ListView(padding: const EdgeInsets.all(20), children: [
+            if (items.isEmpty) const Text('Nothing yet.'),
+            for (final n in items) Padding(padding: const EdgeInsets.only(bottom: 10), child: Card(child: ListTile(title: Text(n['title'], style: const TextStyle(fontWeight: FontWeight.w700)), subtitle: Text('${n['body'] ?? ''}\n${_dt(n['created_at'])}'), isThreeLine: true))),
+          ]);
+        }),
+      );
+}
+
+class ProfileScreen extends StatefulWidget {
+  const ProfileScreen({super.key, required this.onSignOut});
+  final VoidCallback onSignOut;
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  late final _name = TextEditingController(text: Api.instance.user!['name']);
+  final _cur = TextEditingController(), _new = TextEditingController();
+  late String _lang = Api.instance.user!['lang'] ?? 'en';
+  String? _error;
+
+  Future<void> _delete() async {
+    final pw = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
+      title: const Text('Delete your account?'),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Your name, phone, email and messages are erased. Unused coupons and any pass with cups left expire and cannot be restored. Order and payment records stay with your identity removed, as tax law requires. This cannot be undone.'),
+        const SizedBox(height: 12),
+        TextField(controller: pw, obscureText: true, decoration: const InputDecoration(labelText: 'Confirm with your password')),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep my account')), FilledButton(style: FilledButton.styleFrom(backgroundColor: Brand.cherry), onPressed: () => Navigator.pop(c, true), child: const Text('Delete'))],
+    ));
+    if (ok != true || !mounted) return;
+    try {
+      await Api.instance.request('DELETE', '/me', body: {'password': pw.text});
+      await Api.instance.logout();
+      widget.onSignOut();
+    } on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); }
+  }
+
+  Future<void> _save() async {
+    try {
+      final u = await Api.instance.patch('/me', {'name': _name.text.trim(), 'lang': _lang, if (_new.text.isNotEmpty) ...{'current_password': _cur.text, 'new_password': _new.text}});
+      Api.instance.user = {...Api.instance.user!, ...Map<String, dynamic>.from(u)};
+      if (mounted) { setState(() => _error = null); toast(context, 'Saved'); }
+    } on ApiException catch (e) { setState(() => _error = e.message); }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Profile')),
+        body: ListView(padding: const EdgeInsets.all(20), children: [
+          TextField(controller: _name, decoration: const InputDecoration(labelText: 'Name')),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(initialValue: _lang, decoration: const InputDecoration(labelText: 'Language'), items: const [DropdownMenuItem(value: 'en', child: Text('English')), DropdownMenuItem(value: 'ne', child: Text('नेपाली'))], onChanged: (v) => setState(() => _lang = v!)),
+          const SizedBox(height: 20),
+          Text('Change password', style: display(18)),
+          const SizedBox(height: 8),
+          TextField(controller: _cur, obscureText: true, decoration: const InputDecoration(labelText: 'Current password')),
+          const SizedBox(height: 12),
+          TextField(controller: _new, obscureText: true, decoration: const InputDecoration(labelText: 'New password')),
+          if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: Brand.cherry))),
+          const SizedBox(height: 16),
+          FilledButton(onPressed: _save, child: const Text('Save')),
+          const SizedBox(height: 28),
+          const Divider(),
+          Text('Your data', style: display(18)),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(icon: const Icon(Icons.download_outlined), label: const Text('Copy my data'), onPressed: () async {
+            try { final d = await Api.instance.get('/me/export'); await Clipboard.setData(ClipboardData(text: const JsonEncoder.withIndent('  ').convert(d))); if (context.mounted) toast(context, 'Your data is on the clipboard as JSON'); }
+            on ApiException catch (e) { if (context.mounted) toast(context, e.message, bad: true); }
+          }),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(icon: const Icon(Icons.privacy_tip_outlined), label: const Text('Privacy policy'), onPressed: () => launchUrl(Uri.parse('$webUrl/privacy'), mode: LaunchMode.externalApplication)),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(icon: const Icon(Icons.description_outlined), label: const Text('Terms of use'), onPressed: () => launchUrl(Uri.parse('$webUrl/terms'), mode: LaunchMode.externalApplication)),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(foregroundColor: Brand.cherry, side: const BorderSide(color: Brand.cherry, width: 1.5)),
+            icon: const Icon(Icons.delete_outline), label: const Text('Delete my account'), onPressed: _delete,
+          ),
+          const SizedBox(height: 16),
+          Center(child: Text('Sadhai Coffee $appVersion ($appBuild)', style: const TextStyle(color: Brand.inkMuted, fontSize: 13))),
+        ]),
+      );
+}

@@ -1,0 +1,62 @@
+'use client';
+import Link from 'next/link';
+import { fmtDate, fmtTime, rs } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { useCart, quickLine } from '@/lib/cart';
+import { Empty, Loading, useData, useToast } from '@/components/ui';
+import { CustomerShell } from '@/components/customer';
+import { PassTab } from '@/components/account';
+import { Icon } from '@/components/icons';
+
+export default function Offers() {
+  const { user } = useAuth();
+  const cart = useCart();
+  const toast = useToast();
+  const home = useData<any>(cart.station ? `/stations/${cart.station.id}/home` : null, [cart.station?.id]);
+  const coupons = useData<any[]>(user ? '/coupons' : null, [user?.id]);
+  const d = home.data;
+  const products = d?.categories.flatMap((c: any) => c.products) || [];
+  const active = (coupons.data || []).filter((c) => c.status === 'active');
+
+  return (
+    <CustomerShell>
+      <h2>Offers</h2>
+      <div className="sectionhead"><h3>Offer of the day</h3>{cart.station && <span className="small muted">{cart.station.name}</span>}</div>
+      {!cart.station ? <Empty><Link href="/order">Choose a station</Link> to see today’s offers.</Empty> : !d ? <Loading /> : !d.offers.length ? <Empty>No special offer at this station today.</Empty> : (
+        <div className="col">{d.offers.map((o: any) => {
+          const p = products.find((x: any) => x.id === o.product_id);
+          return (
+            <div key={o.id} className="dealcard">
+              <div className="pct">{o.offer_price != null ? <span style={{ fontSize: 18 }}>{rs(o.offer_price)}</span> : <>{o.pct}%<span style={{ fontSize: 11 }}>OFF</span></>}</div>
+              <div className="grow"><strong>{o.title}</strong><p className="small muted">{o.blurb}</p><p className="small">Until {fmtTime(o.ends_at)}{o.remaining != null ? ` · ${o.remaining} left` : ''}</p></div>
+              {p?.available ? <button className="btn primary sm" onClick={() => { const l = quickLine(p); if (l) { cart.add(l); toast(`${p.name} added`); } }}>Add</button> : <Link className="btn sm" href="/order">Shop</Link>}
+            </div>
+          );
+        })}</div>
+      )}
+
+      {d?.drops?.length > 0 && (
+        <>
+          <div className="sectionhead"><h3>This month’s drop</h3></div>
+          {d.drops.map((x: any) => (
+            <div key={x.id} className="card"><div className="row between"><div><h3>{x.name}</h3><p className="small muted">{x.partner} · {rs(x.price)}</p></div><span className="chip marigold">{x.remaining.toLocaleString()} left</span></div>
+              <div className="bar" style={{ margin: '12px 0 4px' }}><i style={{ width: `${Math.min(100, (x.sold / x.cap) * 100)}%` }} /></div><p className="small muted">{x.sold.toLocaleString()} of {x.cap.toLocaleString()} cups sold. Then gone.</p></div>
+          ))}
+        </>
+      )}
+
+      <div className="sectionhead"><h3>My coupons</h3></div>
+      {!user ? <Empty><Link href="/register">Create an account</Link> to get your free first cup.</Empty> : !active.length ? <Empty>No active coupons.</Empty> : (
+        <div className="col">{active.map((c) => (
+          <div key={c.id} className="card flat row between"><div><strong>{c.title}</strong><div className="small muted">Valid until {fmtDate(c.expires_at)}</div></div><span className="chip marigold">{c.kind === 'pct' ? `${c.pct}% off` : 'Free cup'}</span></div>
+        ))}</div>
+      )}
+
+      <div className="sectionhead"><h3>10-cup pass</h3></div>
+      {user ? <PassTab /> : <Empty><Link href="/login">Sign in</Link> to buy a pass.</Empty>}
+
+      <div className="sectionhead"><h3>Give a cup. Get a cup.</h3></div>
+      <Link href="/account?tab=friends" className="card flat row between" style={{ color: 'inherit', textDecoration: 'none' }}><span className="row"><Icon name="gift" color="var(--cherry)" />Share your code with a friend</span><Icon name="nav" size={18} /></Link>
+    </CustomerShell>
+  );
+}

@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.env
+.env.local
+.dart_tool/
+build/
+*.log
+.DS_Store
+tools/icons/node_modules/
+mobile/android/key.properties
+mobile/android/*.jks
+mobile/.dart_tool/
+mobile/build/
+web/.next/
