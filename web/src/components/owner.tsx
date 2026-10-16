@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { api, fmtDate, fmtDateTime, rs, BASE, store } from '@/lib/api';
 import { Empty, Field, Loading, Modal, Stat, useData, useToast } from './ui';
 import { RangePicker, sinceDays } from './admin';
+import { Icon } from './icons';
+import { useAuth } from '@/lib/auth';
 
 export function StationsTab() {
   const { data, reload } = useData<any[]>('/admin/stations');
@@ -124,33 +126,764 @@ export function DropsTab() {
 }
 
 export function TeamTab() {
-  const { data, reload } = useData<any[]>('/owner/users');
+  const { user: currentOwner } = useAuth();
+  const [roleFilter, setRoleFilter] = useState<'all' | 'manager' | 'station' | 'partner' | 'owner' | 'customer'>('all');
+  const [stationFilter, setStationFilter] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [search, setSearch] = useState('');
+  
+  // Fetch users with full support for filtering and customer accounts
+  const { data, reload, loading } = useData<any[]>(
+    `/owner/users?include_customers=true${roleFilter !== 'all' ? `&role=${roleFilter}` : ''}${stationFilter ? `&station_id=${stationFilter}` : ''}`,
+    [roleFilter, stationFilter],
+  );
   const stations = useData<any[]>('/admin/stations');
   const toast = useToast();
-  const [f, setF] = useState<any>(null);
-  async function create() { try { await api('/owner/users', { method: 'POST', body: { ...f, station_id: f.role === 'station' ? f.station_id : undefined, managed_station_ids: f.managed } }); setF(null); reload(); toast('User added'); } catch (e: any) { toast(e.message, true); } }
-  async function patch(id: string, body: any) { try { await api(`/owner/users/${id}`, { method: 'PATCH', body }); reload(); } catch (e: any) { toast(e.message, true); } }
-  if (!data) return <Loading />;
+
+  // Modals state
+  const [createModal, setCreateModal] = useState<boolean>(false);
+  const [editUser, setEditUser] = useState<any | null>(null);
+  const [pwModal, setPwModal] = useState<any | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [delUser, setDelUser] = useState<any | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // New user form state
+  const [form, setForm] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    password: '',
+    role: 'manager',
+    station_id: '',
+    managed: [] as string[],
+    active: true,
+  });
+
+  function openCreate() {
+    setForm({
+      name: '',
+      phone: '',
+      email: '',
+      password: '',
+      role: 'manager',
+      station_id: stations.data?.[0]?.id || '',
+      managed: stations.data?.[0]?.id ? [stations.data[0].id] : [],
+      active: true,
+    });
+    setCreateModal(true);
+  }
+
+  function openEdit(u: any) {
+    setEditUser({
+      id: u.id,
+      name: u.name,
+      phone: u.phone,
+      email: u.email || '',
+      password: '',
+      role: u.role,
+      station_id: u.station_id || stations.data?.[0]?.id || '',
+      managed: Array.isArray(u.managed_stations) ? u.managed_stations : [],
+      active: u.active ?? true,
+    });
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.name.trim() || !form.phone.trim() || !form.password) {
+      toast('Please enter name, phone number, and password', true);
+      return;
+    }
+    if (form.password.length < 6) {
+      toast('Password must be at least 6 characters', true);
+      return;
+    }
+    if (form.role === 'station' && !form.station_id) {
+      toast('Please select an assigned station for staff', true);
+      return;
+    }
+    if (form.role === 'partner' && !form.managed.length) {
+      toast('Please select at least one cafe for partner', true);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await api('/owner/users', {
+        method: 'POST',
+        body: {
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+          email: form.email.trim() || null,
+          password: form.password,
+          role: form.role,
+          station_id: form.role === 'station' ? form.station_id : undefined,
+          managed_station_ids: (form.role === 'manager' || form.role === 'partner') ? form.managed : [],
+          active: form.active,
+        },
+      });
+      setCreateModal(false);
+      reload();
+      toast('User created successfully');
+    } catch (e: any) {
+      toast(e.message, true);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editUser) return;
+    if (!editUser.name.trim() || !editUser.phone.trim()) {
+      toast('Name and phone number are required', true);
+      return;
+    }
+    if (editUser.password && editUser.password.length < 6) {
+      toast('New password must be at least 6 characters', true);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await api(`/owner/users/${editUser.id}`, {
+        method: 'PATCH',
+        body: {
+          name: editUser.name.trim(),
+          phone: editUser.phone.trim(),
+          email: editUser.email.trim() || null,
+          role: editUser.role,
+          password: editUser.password ? editUser.password : undefined,
+          station_id: editUser.role === 'station' ? editUser.station_id : null,
+          managed_station_ids: (editUser.role === 'manager' || editUser.role === 'partner') ? editUser.managed : [],
+          active: editUser.active,
+        },
+      });
+      setEditUser(null);
+      reload();
+      toast('User updated successfully');
+    } catch (e: any) {
+      toast(e.message, true);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function toggleActive(u: any) {
+    if (u.id === currentOwner?.id && u.active) {
+      toast('You cannot deactivate your own account', true);
+      return;
+    }
+    try {
+      await api(`/owner/users/${u.id}`, {
+        method: 'PATCH',
+        body: { active: !u.active },
+      });
+      reload();
+      toast(u.active ? 'User deactivated' : 'User activated');
+    } catch (e: any) {
+      toast(e.message, true);
+    }
+  }
+
+  async function handleResetPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pwModal || !newPassword) return;
+    if (newPassword.length < 6) {
+      toast('Password must be at least 6 characters', true);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api(`/owner/users/${pwModal.id}`, {
+        method: 'PATCH',
+        body: { password: newPassword },
+      });
+      setPwModal(null);
+      setNewPassword('');
+      toast(`Password updated for ${pwModal.name}`);
+    } catch (e: any) {
+      toast(e.message, true);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!delUser) return;
+    if (delUser.id === currentOwner?.id) {
+      toast('You cannot delete your own account', true);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api(`/owner/users/${delUser.id}`, { method: 'DELETE' });
+      setDelUser(null);
+      reload();
+      toast(`User ${delUser.name} deleted successfully`);
+    } catch (e: any) {
+      toast(e.message, true);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Filter local users by search and status
+  const usersList = (data || []).filter((u) => {
+    if (statusFilter === 'active' && !u.active) return false;
+    if (statusFilter === 'inactive' && u.active) return false;
+    if (!search.trim()) return true;
+    const term = search.toLowerCase();
+    return (
+      u.name?.toLowerCase().includes(term) ||
+      u.phone?.toLowerCase().includes(term) ||
+      u.email?.toLowerCase().includes(term) ||
+      u.role?.toLowerCase().includes(term) ||
+      u.station_name?.toLowerCase().includes(term)
+    );
+  });
+
+  // Role stats
+  const totalCount = data?.length || 0;
+  const mgrCount = data?.filter((u) => u.role === 'manager').length || 0;
+  const staffCount = data?.filter((u) => u.role === 'station').length || 0;
+  const activeCount = data?.filter((u) => u.active).length || 0;
+
+  const roleBadge = (role: string) => {
+    switch (role) {
+      case 'owner': return <span className="chip hill" style={{ fontWeight: 700 }}>Owner</span>;
+      case 'manager': return <span className="chip marigold" style={{ fontWeight: 700 }}>Manager</span>;
+      case 'station': return <span className="chip roast">Station Barista</span>;
+      case 'partner': return <span className="chip" style={{ background: 'var(--foam)', borderColor: 'var(--marigold)' }}>Partner Cafe</span>;
+      case 'customer': return <span className="chip">Customer</span>;
+      default: return <span className="chip">{role}</span>;
+    }
+  };
+
   return (
-    <>
-      <div className="row between" style={{ marginBottom: 12 }}><h3>Team</h3><button className="btn primary sm" onClick={() => setF({ name: '', phone: '', password: '', role: 'manager', station_id: stations.data?.[0]?.id, managed: [] })}>Add person</button></div>
-      <div className="card tablewrap" style={{ padding: 0 }}><table><thead><tr><th>Name</th><th>Role</th><th>Phone</th><th>Station</th><th>Last sign in</th><th /></tr></thead>
-        <tbody>{data.map((u) => <tr key={u.id}><td>{u.name} {!u.active && <span className="chip">Off</span>}</td><td><span className="chip">{u.role}</span></td><td>{u.phone}</td><td>{u.station_name || (u.managed_stations.length ? `${u.managed_stations.length} stations` : '–')}</td><td>{u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never'}</td>
-          <td className="right"><button className="btn sm" onClick={() => patch(u.id, { active: !u.active })}>{u.active ? 'Deactivate' : 'Activate'}</button> <button className="btn sm ghost" onClick={() => { const p = prompt('New password (6+ characters)'); if (p) patch(u.id, { password: p }); }}>Reset password</button></td></tr>)}</tbody></table></div>
-      {f && (
-        <Modal title="Add person" onClose={() => setF(null)}>
-          <div className="col">
-            <Field label="Role"><select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="manager">Manager</option><option value="station">Station staff</option><option value="partner">Partner cafe owner</option><option value="owner">Owner</option></select></Field>
-            <Field label="Name"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-            <Field label="Mobile number"><input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
-            <Field label="Password"><input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
-            {f.role === 'station' && <Field label="Station"><select value={f.station_id} onChange={(e) => setF({ ...f, station_id: e.target.value })}>{stations.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>}
-            {(f.role === 'manager' || f.role === 'partner') && <Field label={f.role === 'partner' ? 'Their cafe' : 'Stations to manage'}>{stations.data?.map((s) => <label key={s.id} className="row"><input type="checkbox" style={{ width: 20, minHeight: 20 }} checked={f.managed.includes(s.id)} onChange={(e) => setF({ ...f, managed: e.target.checked ? [...f.managed, s.id] : f.managed.filter((x: string) => x !== s.id) })} />{s.name}</label>)}</Field>}
-            <button className="btn primary" onClick={create}>Add</button>
+    <div className="col" style={{ gap: 16 }}>
+      {/* Header and Quick Stats */}
+      <div className="row between wrap" style={{ gap: 12 }}>
+        <div>
+          <h3 style={{ margin: 0 }}>Users & Managers</h3>
+          <p className="small muted" style={{ margin: '4px 0 0' }}>
+            Full access control for managers, station baristas, partner owners, and user profiles.
+          </p>
+        </div>
+        <button className="btn primary" onClick={openCreate}>
+          <Icon name="plus" size={18} />
+          Add User / Manager
+        </button>
+      </div>
+
+      <div className="grid g4">
+        <Stat label="Total registered accounts" value={totalCount} />
+        <Stat label="Managers" value={mgrCount} tone="good" />
+        <Stat label="Station Baristas" value={staffCount} />
+        <Stat label="Active accounts" value={activeCount} delta={`${Math.round((activeCount / Math.max(1, totalCount)) * 100)}% active`} />
+      </div>
+
+      {/* Role Tabs and Filter Bar */}
+      <div className="card col" style={{ gap: 12, padding: 16 }}>
+        <div className="row between wrap" style={{ gap: 10 }}>
+          {/* Role Filter Tabs */}
+          <div className="tabs" role="tablist" style={{ margin: 0 }}>
+            {[
+              { id: 'all', label: 'All Accounts' },
+              { id: 'manager', label: 'Managers' },
+              { id: 'station', label: 'Station Staff' },
+              { id: 'partner', label: 'Partners' },
+              { id: 'owner', label: 'Owners' },
+              { id: 'customer', label: 'Customers' },
+            ].map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={roleFilter === t.id}
+                className={`tab ${roleFilter === t.id ? 'active' : ''}`}
+                onClick={() => setRoleFilter(t.id as any)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Quick Filters: Station & Status */}
+          <div className="row wrap" style={{ gap: 8 }}>
+            <select
+              value={stationFilter}
+              onChange={(e) => setStationFilter(e.target.value)}
+              style={{ minWidth: 160, padding: '6px 10px', fontSize: 13 }}
+            >
+              <option value="">All Stations</option>
+              {stations.data?.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              style={{ minWidth: 120, padding: '6px 10px', fontSize: 13 }}
+            >
+              <option value="all">All Status</option>
+              <option value="active">Active Only</option>
+              <option value="inactive">Inactive Only</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Search input */}
+        <div className="row" style={{ gap: 8 }}>
+          <div style={{ position: 'relative', width: '100%' }}>
+            <input
+              placeholder="Search by name, phone (+977), email, or assigned station…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ width: '100%', paddingLeft: 12 }}
+            />
+            {search && (
+              <button
+                className="btn ghost sm"
+                onClick={() => setSearch('')}
+                style={{ position: 'absolute', right: 6, top: 6, padding: '2px 8px' }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Users Table */}
+      {loading && !data ? (
+        <Loading what="Loading users and managers" />
+      ) : !usersList.length ? (
+        <Empty>No users match your filters.</Empty>
+      ) : (
+        <div className="card tablewrap" style={{ padding: 0 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>User / Name</th>
+                <th>Role</th>
+                <th>Mobile Number</th>
+                <th>Station Assignment</th>
+                <th>Status</th>
+                <th>Last Login</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usersList.map((u) => {
+                const isSelf = u.id === currentOwner?.id;
+                const managedCount = Array.isArray(u.managed_stations) ? u.managed_stations.length : 0;
+                return (
+                  <tr key={u.id}>
+                    <td>
+                      <div>
+                        <strong>{u.name}</strong>
+                        {isSelf && (
+                          <span className="chip sm" style={{ marginLeft: 6, background: 'var(--foam)', color: 'var(--cherry)' }}>
+                            You
+                          </span>
+                        )}
+                        {u.email && (
+                          <span className="small muted" style={{ display: 'block', fontSize: 12 }}>
+                            {u.email}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td>{roleBadge(u.role)}</td>
+                    <td>
+                      <code style={{ fontSize: 13, background: 'var(--foam)', padding: '2px 6px', borderRadius: 4 }}>
+                        {u.phone}
+                      </code>
+                    </td>
+                    <td>
+                      {u.role === 'owner' ? (
+                        <span className="small muted">Full access</span>
+                      ) : u.role === 'station' ? (
+                        <span className="chip sm roast">{u.station_name || 'Unassigned'}</span>
+                      ) : u.role === 'manager' || u.role === 'partner' ? (
+                        managedCount ? (
+                          <span className="chip sm marigold">
+                            {managedCount} station{managedCount > 1 ? 's' : ''}
+                          </span>
+                        ) : (
+                          <span className="small muted">–</span>
+                        )
+                      ) : (
+                        <span className="small muted">–</span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`chip sm ${u.active ? 'hill' : ''}`}>
+                        {u.active ? 'Active' : 'Disabled'}
+                      </span>
+                    </td>
+                    <td className="small muted">
+                      {u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never'}
+                    </td>
+                    <td className="right">
+                      <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
+                        <button
+                          className="btn sm"
+                          onClick={() => openEdit(u)}
+                          title="Edit profile & permissions"
+                        >
+                          Edit
+                        </button>
+
+                        <button
+                          className="btn sm ghost"
+                          onClick={() => {
+                            setPwModal(u);
+                            setNewPassword('');
+                          }}
+                          title="Set new password"
+                        >
+                          Password
+                        </button>
+
+                        <button
+                          className={`btn sm ${u.active ? 'ghost' : 'hill'}`}
+                          disabled={isSelf && u.active}
+                          onClick={() => toggleActive(u)}
+                          title={isSelf ? 'Cannot deactivate self' : u.active ? 'Deactivate account' : 'Activate account'}
+                        >
+                          {u.active ? 'Deactivate' : 'Activate'}
+                        </button>
+
+                        <button
+                          className="btn sm danger ghost"
+                          disabled={isSelf}
+                          onClick={() => setDelUser(u)}
+                          title={isSelf ? 'Cannot delete your own account' : 'Delete user'}
+                        >
+                          <Icon name="close" size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* CREATE MODAL */}
+      {createModal && (
+        <Modal title="Add User / Manager" onClose={() => setCreateModal(false)}>
+          <form onSubmit={handleCreate} className="col" style={{ gap: 14 }}>
+            <Field label="System Role">
+              <select
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
+              >
+                <option value="manager">Manager (Station oversight, shifts, inventory)</option>
+                <option value="station">Station Staff / Barista (POS counter operations)</option>
+                <option value="partner">Partner Cafe Owner (Partner dashboard & share)</option>
+                <option value="owner">Owner (Full administrative rights)</option>
+                <option value="customer">Customer (Mobile app profile)</option>
+              </select>
+            </Field>
+
+            <div className="grid g2">
+              <Field label="Full Name">
+                <input
+                  required
+                  placeholder="e.g. Aarav Sharma"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Mobile Number">
+                <input
+                  required
+                  placeholder="e.g. 98XXXXXXXX"
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                />
+              </Field>
+            </div>
+
+            <div className="grid g2">
+              <Field label="Email Address (optional)">
+                <input
+                  type="email"
+                  placeholder="aarav@example.com"
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Initial Password (min 6 chars)">
+                <input
+                  required
+                  type="password"
+                  placeholder="••••••••"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                />
+              </Field>
+            </div>
+
+            {form.role === 'station' && (
+              <Field label="Assigned Station">
+                <select
+                  value={form.station_id}
+                  onChange={(e) => setForm({ ...form, station_id: e.target.value })}
+                >
+                  {stations.data?.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.code})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+
+            {(form.role === 'manager' || form.role === 'partner') && (
+              <Field label={form.role === 'partner' ? 'Partner Station' : 'Managed Stations'}>
+                <div className="col" style={{ gap: 8, background: 'var(--surface-sunk)', padding: 12, borderRadius: 'var(--radius-md)' }}>
+                  {stations.data?.map((s) => (
+                    <label key={s.id} className="row" style={{ cursor: 'pointer', gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        style={{ width: 18, minHeight: 18 }}
+                        checked={form.managed.includes(s.id)}
+                        onChange={(e) => {
+                          setForm({
+                            ...form,
+                            managed: e.target.checked
+                              ? [...form.managed, s.id]
+                              : form.managed.filter((x) => x !== s.id),
+                          });
+                        }}
+                      />
+                      <span><strong>{s.name}</strong> <span className="small muted">({s.code})</span></span>
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            )}
+
+            <label className="row" style={{ cursor: 'pointer', gap: 8, marginTop: 4 }}>
+              <input
+                type="checkbox"
+                style={{ width: 18, minHeight: 18 }}
+                checked={form.active}
+                onChange={(e) => setForm({ ...form, active: e.target.checked })}
+              />
+              <span>Account is active (can sign in immediately)</span>
+            </label>
+
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+              <button type="button" className="btn ghost" onClick={() => setCreateModal(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn primary" disabled={submitting}>
+                {submitting ? 'Creating User…' : 'Create Account'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* EDIT MODAL */}
+      {editUser && (
+        <Modal title={`Edit ${editUser.name}`} onClose={() => setEditUser(null)}>
+          <form onSubmit={handleEdit} className="col" style={{ gap: 14 }}>
+            <Field label="System Role">
+              <select
+                value={editUser.role}
+                disabled={editUser.id === currentOwner?.id}
+                onChange={(e) => setEditUser({ ...editUser, role: e.target.value })}
+              >
+                <option value="manager">Manager (Station oversight, shifts, inventory)</option>
+                <option value="station">Station Staff / Barista (POS counter operations)</option>
+                <option value="partner">Partner Cafe Owner (Partner dashboard & share)</option>
+                <option value="owner">Owner (Full administrative rights)</option>
+                <option value="customer">Customer (Mobile app profile)</option>
+              </select>
+              {editUser.id === currentOwner?.id && (
+                <span className="small muted">You cannot demote your own owner account.</span>
+              )}
+            </Field>
+
+            <div className="grid g2">
+              <Field label="Full Name">
+                <input
+                  required
+                  value={editUser.name}
+                  onChange={(e) => setEditUser({ ...editUser, name: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Mobile Number">
+                <input
+                  required
+                  value={editUser.phone}
+                  onChange={(e) => setEditUser({ ...editUser, phone: e.target.value })}
+                />
+              </Field>
+            </div>
+
+            <div className="grid g2">
+              <Field label="Email Address">
+                <input
+                  type="email"
+                  placeholder="Optional"
+                  value={editUser.email}
+                  onChange={(e) => setEditUser({ ...editUser, email: e.target.value })}
+                />
+              </Field>
+
+              <Field label="New Password (leave blank to keep current)">
+                <input
+                  type="password"
+                  placeholder="Leave empty to keep"
+                  value={editUser.password}
+                  onChange={(e) => setEditUser({ ...editUser, password: e.target.value })}
+                />
+              </Field>
+            </div>
+
+            {editUser.role === 'station' && (
+              <Field label="Assigned Station">
+                <select
+                  value={editUser.station_id}
+                  onChange={(e) => setEditUser({ ...editUser, station_id: e.target.value })}
+                >
+                  {stations.data?.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.code})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+
+            {(editUser.role === 'manager' || editUser.role === 'partner') && (
+              <Field label={editUser.role === 'partner' ? 'Partner Station' : 'Managed Stations'}>
+                <div className="col" style={{ gap: 8, background: 'var(--surface-sunk)', padding: 12, borderRadius: 'var(--radius-md)' }}>
+                  {stations.data?.map((s) => (
+                    <label key={s.id} className="row" style={{ cursor: 'pointer', gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        style={{ width: 18, minHeight: 18 }}
+                        checked={editUser.managed.includes(s.id)}
+                        onChange={(e) => {
+                          setEditUser({
+                            ...editUser,
+                            managed: e.target.checked
+                              ? [...editUser.managed, s.id]
+                              : editUser.managed.filter((x: string) => x !== s.id),
+                          });
+                        }}
+                      />
+                      <span><strong>{s.name}</strong> <span className="small muted">({s.code})</span></span>
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            )}
+
+            <label className="row" style={{ cursor: 'pointer', gap: 8, marginTop: 4 }}>
+              <input
+                type="checkbox"
+                style={{ width: 18, minHeight: 18 }}
+                checked={editUser.active}
+                disabled={editUser.id === currentOwner?.id}
+                onChange={(e) => setEditUser({ ...editUser, active: e.target.checked })}
+              />
+              <span>Account is active</span>
+            </label>
+
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+              <button type="button" className="btn ghost" onClick={() => setEditUser(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn primary" disabled={submitting}>
+                {submitting ? 'Saving Changes…' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* PASSWORD RESET MODAL */}
+      {pwModal && (
+        <Modal title={`Reset Password for ${pwModal.name}`} onClose={() => setPwModal(null)}>
+          <form onSubmit={handleResetPassword} className="col" style={{ gap: 14 }}>
+            <p className="small muted">
+              Set a new secure password for <strong>{pwModal.name}</strong> ({pwModal.phone}).
+              Any active sessions for this user will be revoked and require re-login.
+            </p>
+            <Field label="New Password (min 6 characters)">
+              <input
+                required
+                type="password"
+                placeholder="Enter new password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+            </Field>
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+              <button type="button" className="btn ghost" onClick={() => setPwModal(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn primary" disabled={!newPassword || submitting}>
+                {submitting ? 'Updating…' : 'Update Password'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {delUser && (
+        <Modal title="Confirm Delete User" onClose={() => setDelUser(null)}>
+          <div className="col" style={{ gap: 16 }}>
+            <p>
+              Are you sure you want to permanently delete <strong>{delUser.name}</strong> ({delUser.phone})?
+            </p>
+
+            {delUser.orders_count > 0 ? (
+              <div className="card" style={{ borderColor: 'var(--cherry)', background: 'var(--foam)' }}>
+                <strong style={{ color: 'var(--cherry)' }}>Cannot Delete Account</strong>
+                <p className="small" style={{ margin: '6px 0 0' }}>
+                  This user has <strong>{delUser.orders_count}</strong> historical orders. Under accounting and audit rules, historical financial transaction links cannot be broken.
+                  Please <strong>Deactivate</strong> this account instead.
+                </p>
+              </div>
+            ) : (
+              <p className="small muted">
+                This will revoke their access tokens, delete station manager linkages, and remove their account profile.
+              </p>
+            )}
+
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 10 }}>
+              <button type="button" className="btn ghost" onClick={() => setDelUser(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn danger"
+                disabled={delUser.orders_count > 0 || submitting}
+                onClick={handleDelete}
+              >
+                {submitting ? 'Deleting…' : 'Delete Account'}
+              </button>
+            </div>
           </div>
         </Modal>
       )}
-    </>
+    </div>
   );
 }
 

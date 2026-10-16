@@ -111,11 +111,370 @@ export function IntegrationsPanel() {
 }
 
 export function SettingsHub() {
-  const [tab, setTab] = useState<'rules' | 'keys'>('rules');
+  const [tab, setTab] = useState<'rules' | 'keys' | 'data'>('rules');
   return (
     <div className="col" style={{ gap: 16 }}>
-      <Seg value={tab} onChange={setTab} options={[{ id: 'rules', label: 'Prices and rules' }, { id: 'keys', label: 'Integrations and keys' }]} />
-      {tab === 'rules' ? <RulesPanel /> : <IntegrationsPanel />}
+      <Seg
+        value={tab}
+        onChange={setTab}
+        options={[
+          { id: 'rules', label: 'Prices and rules' },
+          { id: 'keys', label: 'Integrations and keys' },
+          { id: 'data', label: 'Data & Backup' },
+        ]}
+      />
+      {tab === 'rules' ? <RulesPanel /> : tab === 'keys' ? <IntegrationsPanel /> : <DataManagementPanel />}
+    </div>
+  );
+}
+
+export function DataManagementPanel() {
+  const toast = useToast();
+  const [exporting, setExporting] = useState(false);
+
+  // Reset state
+  const [resetTargets, setResetTargets] = useState<string[]>([]);
+  const [resetPassword, setResetPassword] = useState('');
+  const [confirmText, setConfirmText] = useState('');
+  const [resetting, setResetting] = useState(false);
+
+  // Restore state
+  const [restoreFile, setRestoreFile] = useState<any | null>(null);
+  const [restoreFileName, setRestoreFileName] = useState('');
+  const [restorePassword, setRestorePassword] = useState('');
+  const [restoring, setRestoring] = useState(false);
+
+  // 1. Export handler
+  async function downloadBackup() {
+    setExporting(true);
+    try {
+      const data = await api('/owner/data/export');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sadhai-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast('Full database backup downloaded to your desktop');
+    } catch (e: any) {
+      toast(e.message || 'Export failed', true);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  // 2. Reset handler
+  function toggleTarget(key: string) {
+    if (key === 'clean_baseline') {
+      setResetTargets(resetTargets.includes('clean_baseline') ? [] : ['clean_baseline']);
+      return;
+    }
+    const filtered = resetTargets.filter((t) => t !== 'clean_baseline');
+    if (filtered.includes(key)) {
+      setResetTargets(filtered.filter((t) => t !== key));
+    } else {
+      setResetTargets([...filtered, key]);
+    }
+  }
+
+  async function handleReset() {
+    if (confirmText.trim().toUpperCase() !== 'RESET') {
+      return toast('Please type RESET in the confirmation box', true);
+    }
+    if (!resetPassword) {
+      return toast('Owner account password is required', true);
+    }
+    if (!resetTargets.length) {
+      return toast('Please select at least one dataset to reset', true);
+    }
+
+    setResetting(true);
+    try {
+      const res = await api('/owner/data/reset', {
+        method: 'POST',
+        body: {
+          password: resetPassword,
+          confirmation: confirmText.trim(),
+          targets: resetTargets,
+        },
+      });
+      toast(`Data reset completed: ${res.cleared.length} categories purged.`);
+      setResetPassword('');
+      setConfirmText('');
+      setResetTargets([]);
+    } catch (e: any) {
+      toast(e.message || 'Reset failed', true);
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  // 3. Restore handler
+  function onFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setRestoreFileName(f.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(String(event.target?.result));
+        if (parsed.app !== 'sadhai-coffee' || !parsed.tables) {
+          toast('Invalid backup file. Must be a valid Sadhai Coffee backup JSON.', true);
+          setRestoreFile(null);
+          return;
+        }
+        setRestoreFile(parsed);
+        toast(`Loaded backup: ${Object.keys(parsed.tables).length} tables found`);
+      } catch {
+        toast('Could not parse JSON file', true);
+        setRestoreFile(null);
+      }
+    };
+    reader.readAsText(f);
+  }
+
+  async function handleRestore() {
+    if (!restoreFile) {
+      return toast('Please select a backup file from your computer', true);
+    }
+    if (!restorePassword) {
+      return toast('Owner account password is required to restore', true);
+    }
+
+    setRestoring(true);
+    try {
+      const res = await api('/owner/data/restore', {
+        method: 'POST',
+        body: {
+          password: restorePassword,
+          backup: restoreFile,
+        },
+      });
+      toast(`Restore successful: ${res.restored.length} tables restored!`);
+      setRestoreFile(null);
+      setRestoreFileName('');
+      setRestorePassword('');
+    } catch (e: any) {
+      toast(e.message || 'Restore failed', true);
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  return (
+    <div className="col" style={{ gap: 24 }}>
+      {/* SECTION 1: DOWNLOAD BACKUP */}
+      <div className="card col" style={{ gap: 14 }}>
+        <div className="row between">
+          <div>
+            <h3>Download full data backup</h3>
+            <p className="small muted" style={{ marginTop: 4 }}>
+              Export all system records (stations, menu catalog, recipes, customers, orders, payments, shifts) into a single portable JSON file saved to your desktop.
+            </p>
+          </div>
+          <button className="btn primary" onClick={downloadBackup} disabled={exporting}>
+            <Icon name="down" size={18} />
+            {exporting ? 'Generating backup…' : 'Download JSON backup'}
+          </button>
+        </div>
+      </div>
+
+      {/* SECTION 2: RESTORE BACKUP */}
+      <div className="card col" style={{ gap: 14 }}>
+        <h3>Restore data from your desktop</h3>
+        <p className="small muted">
+          Upload a previously downloaded <code style={{ color: 'var(--cherry)' }}>.json</code> backup file to restore records. Requires your owner account password for authorization.
+        </p>
+
+        <div className="grid g2" style={{ alignItems: 'start', marginTop: 6 }}>
+          <div className="field">
+            <label>1. Select backup file</label>
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={onFileSelected}
+              style={{ paddingTop: 8 }}
+            />
+            {restoreFileName && (
+              <span className="small ok">
+                Selected: {restoreFileName} {restoreFile?.exported_at ? `(Exported ${fmtDateTime(restoreFile.exported_at)})` : ''}
+              </span>
+            )}
+          </div>
+
+          <div className="field">
+            <label>2. Owner password</label>
+            <input
+              type="password"
+              placeholder="Enter your owner password"
+              value={restorePassword}
+              onChange={(e) => setRestorePassword(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="row" style={{ marginTop: 8 }}>
+          <button
+            className="btn"
+            style={{ background: 'var(--hill)', color: 'var(--on-hill)' }}
+            disabled={!restoreFile || !restorePassword || restoring}
+            onClick={handleRestore}
+          >
+            <Icon name="up" size={18} />
+            {restoring ? 'Restoring database…' : 'Confirm & Restore to Database'}
+          </button>
+        </div>
+      </div>
+
+      {/* SECTION 3: SELECTIVE RESET */}
+      <div className="card col" style={{ gap: 16, borderColor: 'var(--cherry)' }}>
+        <div className="row" style={{ gap: 10 }}>
+          <span className="chip cherry" style={{ fontWeight: 800 }}>
+            Security Sensitive
+          </span>
+          <h3 style={{ margin: 0 }}>Selective data reset</h3>
+        </div>
+        <p className="small muted">
+          Purge specific test or legacy datasets. Your active owner account and login credentials are protected and will never be deleted.
+        </p>
+
+        <div className="col" style={{ gap: 10, background: 'var(--surface-sunk)', padding: 16, borderRadius: 'var(--radius-md)' }}>
+          <label className="row" style={{ cursor: 'pointer', gap: 10 }}>
+            <input
+              type="checkbox"
+              checked={resetTargets.includes('orders')}
+              onChange={() => toggleTarget('orders')}
+              style={{ width: 20, minHeight: 20 }}
+            />
+            <div>
+              <strong>Orders & Transactions</strong>
+              <span className="small muted" style={{ display: 'block' }}>
+                Wipes all order records, items, order ratings, and payment logs.
+              </span>
+            </div>
+          </label>
+
+          <label className="row" style={{ cursor: 'pointer', gap: 10 }}>
+            <input
+              type="checkbox"
+              checked={resetTargets.includes('customers')}
+              onChange={() => toggleTarget('customers')}
+              style={{ width: 20, minHeight: 20 }}
+            />
+            <div>
+              <strong>Customer Accounts & Loyalty</strong>
+              <span className="small muted" style={{ display: 'block' }}>
+                Wipes customer accounts, 10-cup passes, coupons, and referral chains (staff and owner accounts remain intact).
+              </span>
+            </div>
+          </label>
+
+          <label className="row" style={{ cursor: 'pointer', gap: 10 }}>
+            <input
+              type="checkbox"
+              checked={resetTargets.includes('shifts')}
+              onChange={() => toggleTarget('shifts')}
+              style={{ width: 20, minHeight: 20 }}
+            />
+            <div>
+              <strong>Staff Shifts & Payroll</strong>
+              <span className="small muted" style={{ display: 'block' }}>
+                Wipes roster schedules, attendance clock-ins, time-off requests, and payroll statements.
+              </span>
+            </div>
+          </label>
+
+          <label className="row" style={{ cursor: 'pointer', gap: 10 }}>
+            <input
+              type="checkbox"
+              checked={resetTargets.includes('inventory_history')}
+              onChange={() => toggleTarget('inventory_history')}
+              style={{ width: 20, minHeight: 20 }}
+            />
+            <div>
+              <strong>Inventory Movement History</strong>
+              <span className="small muted" style={{ display: 'block' }}>
+                Wipes stock count variance history, store transfers, and purchase orders (current stock levels are kept).
+              </span>
+            </div>
+          </label>
+
+          <label className="row" style={{ cursor: 'pointer', gap: 10 }}>
+            <input
+              type="checkbox"
+              checked={resetTargets.includes('marketing')}
+              onChange={() => toggleTarget('marketing')}
+              style={{ width: 20, minHeight: 20 }}
+            />
+            <div>
+              <strong>Marketing & Campaigns</strong>
+              <span className="small muted" style={{ display: 'block' }}>
+                Wipes promotional promo codes, monthly limited drops, and daily offers.
+              </span>
+            </div>
+          </label>
+
+          <label className="row" style={{ cursor: 'pointer', gap: 10, paddingTop: 6, borderTop: '1px solid var(--hairline)' }}>
+            <input
+              type="checkbox"
+              checked={resetTargets.includes('clean_baseline')}
+              onChange={() => toggleTarget('clean_baseline')}
+              style={{ width: 20, minHeight: 20 }}
+            />
+            <div>
+              <strong style={{ color: 'var(--cherry)' }}>Clean 0-Order Baseline</strong>
+              <span className="small muted" style={{ display: 'block' }}>
+                Wipes all orders, transactions, and fake customers completely, keeping only the clean menu catalog, stations, and your owner account.
+              </span>
+            </div>
+          </label>
+        </div>
+
+        {/* Security confirmation fields */}
+        <div className="grid g2" style={{ marginTop: 8 }}>
+          <div className="field">
+            <label>Enter owner password</label>
+            <input
+              type="password"
+              placeholder="Your owner password"
+              value={resetPassword}
+              onChange={(e) => setResetPassword(e.target.value)}
+            />
+          </div>
+
+          <div className="field">
+            <label>Type &quot;RESET&quot; to confirm</label>
+            <input
+              placeholder="Type RESET"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="row" style={{ marginTop: 8 }}>
+          <button
+            className="btn danger"
+            style={{
+              background: confirmText.trim().toUpperCase() === 'RESET' && resetPassword && resetTargets.length ? 'var(--cherry)' : undefined,
+              color: confirmText.trim().toUpperCase() === 'RESET' && resetPassword && resetTargets.length ? 'var(--on-cherry)' : undefined,
+            }}
+            disabled={
+              confirmText.trim().toUpperCase() !== 'RESET' ||
+              !resetPassword ||
+              !resetTargets.length ||
+              resetting
+            }
+            onClick={handleReset}
+          >
+            <Icon name="close" size={18} />
+            {resetting ? 'Purging selected data…' : 'Execute Secure Reset'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

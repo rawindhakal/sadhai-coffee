@@ -48,45 +48,201 @@ owner.patch('/stations/:id', wrap(async (req, res) => {
   res.json((await query('SELECT * FROM stations WHERE id=$1', [req.params.id])).rows[0]);
 }));
 
-/* ---- users ---- */
+/* ---- users & managers CRUD ---- */
 owner.get('/users', wrap(async (req, res) => {
   const role = req.query.role || null;
+  const stationId = req.query.station_id || null;
+  const includeCustomers = req.query.include_customers === 'true' || role === 'customer' || role === 'all';
+  const q = req.query.q ? `%${req.query.q.trim()}%` : null;
+
   const { rows } = await query(
-    `SELECT u.id, u.name, u.phone, u.role, u.active, u.station_id, u.last_login_at, u.created_at, s.name AS station_name,
-            COALESCE((SELECT json_agg(sm.station_id) FROM station_managers sm WHERE sm.user_id=u.id), '[]') AS managed_stations
-       FROM users u LEFT JOIN stations s ON s.id=u.station_id WHERE ($1::text IS NULL OR u.role=$1) AND u.role <> 'customer' ORDER BY u.role, u.name`, [role],
+    `SELECT u.id, u.name, u.phone, u.email, u.role, u.active, u.station_id, u.beans, u.last_login_at, u.created_at,
+            s.name AS station_name,
+            COALESCE((SELECT json_agg(sm.station_id) FROM station_managers sm WHERE sm.user_id=u.id), '[]') AS managed_stations,
+            (SELECT count(*)::int FROM orders o WHERE o.user_id=u.id) AS orders_count
+       FROM users u
+       LEFT JOIN stations s ON s.id=u.station_id
+      WHERE ($1::text IS NULL OR $1 = 'all' OR u.role = $1)
+        AND ($2::boolean IS TRUE OR u.role <> 'customer')
+        AND ($3::uuid IS NULL OR u.station_id = $3 OR EXISTS (SELECT 1 FROM station_managers sm WHERE sm.user_id=u.id AND sm.station_id=$3))
+        AND ($4::text IS NULL OR u.name ILIKE $4 OR u.phone ILIKE $4 OR COALESCE(u.email,'') ILIKE $4)
+      ORDER BY CASE u.role WHEN 'owner' THEN 1 WHEN 'manager' THEN 2 WHEN 'partner' THEN 3 WHEN 'station' THEN 4 ELSE 5 END, u.name`,
+    [role, includeCustomers, stationId, q],
   );
   res.json(rows);
 }));
+
 owner.post('/users', wrap(async (req, res) => {
   const b = z.object({
-    name: z.string().min(2), phone: z.string(), password: z.string().min(6), role: z.enum(['manager', 'owner', 'station', 'partner']),
-    station_id: z.string().uuid().optional(), managed_station_ids: z.array(z.string().uuid()).default([]),
+    name: z.string().min(2, 'Name must be at least 2 characters'),
+    phone: z.string().min(8, 'Valid phone number required'),
+    email: z.string().email('Invalid email').optional().nullable(),
+    password: z.string().min(6, 'Password must be at least 6 characters'),
+    role: z.enum(['manager', 'owner', 'station', 'partner', 'customer']),
+    station_id: z.string().uuid().optional().nullable(),
+    managed_station_ids: z.array(z.string().uuid()).default([]),
+    active: z.boolean().default(true),
   }).parse(req.body);
-  if (b.role === 'station' && !b.station_id) throw bad('Station staff need a station');
+
+  const normPhone = normalizePhone(b.phone);
+  const { rows: existing } = await query('SELECT id FROM users WHERE phone=$1', [normPhone]);
+  if (existing.length) throw bad('A user with this mobile number already exists');
+
+  if (b.role === 'station' && !b.station_id) throw bad('Station staff need an assigned station');
+  if (b.role === 'partner' && !b.managed_station_ids.length) throw bad('Partner cafe owner must manage at least one station');
+
   const u = await tx(async (db) => {
     const { rows } = await db.query(
-      `INSERT INTO users(name, phone, password_hash, role, station_id) VALUES ($1,$2,$3,$4,$5) RETURNING id, name, phone, role, station_id, active`,
-      [b.name, normalizePhone(b.phone), await bcrypt.hash(b.password, 10), b.role, b.role === 'station' ? b.station_id : null],
+      `INSERT INTO users(name, phone, email, password_hash, role, station_id, active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, name, phone, email, role, station_id, active, created_at`,
+      [
+        b.name.trim(),
+        normPhone,
+        b.email ? b.email.trim().toLowerCase() : null,
+        await bcrypt.hash(b.password, 10),
+        b.role,
+        b.role === 'station' ? b.station_id : null,
+        b.active ?? true,
+      ],
     );
-    if (b.role === 'partner' && !b.managed_station_ids.length) throw bad('Choose the partner cafe this person owns');
-    if (b.role === 'manager' || b.role === 'partner') for (const s of b.managed_station_ids) await db.query('INSERT INTO station_managers(station_id,user_id) VALUES ($1,$2)', [s, rows[0].id]);
-    await audit(req.user.id, 'user.create', 'user', rows[0].id, { role: b.role }, db);
+    const userId = rows[0].id;
+    if (b.role === 'manager' || b.role === 'partner') {
+      for (const s of b.managed_station_ids) {
+        await db.query('INSERT INTO station_managers(station_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [s, userId]);
+      }
+    }
+    await audit(req.user.id, 'user.create', 'user', userId, { role: b.role, name: b.name, phone: normPhone }, db);
     return rows[0];
   });
   res.status(201).json(u);
 }));
+
 owner.patch('/users/:id', wrap(async (req, res) => {
-  const b = z.object({ active: z.boolean().optional(), password: z.string().min(6).optional(), managed_station_ids: z.array(z.string().uuid()).optional() }).parse(req.body);
-  if (req.params.id === req.user.id && b.active === false) throw bad('You cannot deactivate yourself');
-  await query(`UPDATE users SET active=COALESCE($2,active), password_hash=COALESCE($3,password_hash) WHERE id=$1`, [req.params.id, b.active, b.password ? await bcrypt.hash(b.password, 10) : null]);
-  if (b.managed_station_ids) {
-    await query('DELETE FROM station_managers WHERE user_id=$1', [req.params.id]);
-    for (const s of b.managed_station_ids) await query('INSERT INTO station_managers(station_id,user_id) VALUES ($1,$2)', [s, req.params.id]);
+  const b = z.object({
+    name: z.string().min(2).optional(),
+    phone: z.string().min(8).optional(),
+    email: z.string().email().optional().nullable(),
+    password: z.string().min(6).optional(),
+    role: z.enum(['manager', 'owner', 'station', 'partner', 'customer']).optional(),
+    station_id: z.string().uuid().optional().nullable(),
+    managed_station_ids: z.array(z.string().uuid()).optional(),
+    active: z.boolean().optional(),
+  }).parse(req.body);
+
+  if (req.params.id === req.user.id && b.active === false) throw bad('You cannot deactivate your own account');
+  if (req.params.id === req.user.id && b.role && b.role !== 'owner') throw bad('You cannot revoke your own owner role');
+
+  if (b.phone) {
+    const normPhone = normalizePhone(b.phone);
+    const { rows: phoneDup } = await query('SELECT id FROM users WHERE phone=$1 AND id<>$2', [normPhone, req.params.id]);
+    if (phoneDup.length) throw bad('This mobile number is already in use by another user');
   }
-  if (b.password || b.active === false) await query('UPDATE refresh_tokens SET revoked=true WHERE user_id=$1', [req.params.id]);
-  await audit(req.user.id, 'user.update', 'user', req.params.id, { active: b.active });
-  res.json({ ok: true });
+
+  if (b.role === 'station' && !b.station_id) {
+    const { rows: current } = await query('SELECT station_id FROM users WHERE id=$1', [req.params.id]);
+    if (!current[0]?.station_id) throw bad('Station staff need an assigned station');
+  }
+
+  await tx(async (db) => {
+    const normPhone = b.phone ? normalizePhone(b.phone) : undefined;
+    const pwHash = b.password ? await bcrypt.hash(b.password, 10) : undefined;
+
+    await db.query(
+      `UPDATE users
+          SET name = COALESCE($2, name),
+              phone = COALESCE($3, phone),
+              email = CASE WHEN $4::boolean IS TRUE THEN $5::text ELSE email END,
+              password_hash = COALESCE($6, password_hash),
+              role = COALESCE($7, role),
+              station_id = CASE
+                WHEN $8::boolean IS TRUE THEN $9::uuid
+                WHEN $7::text IS NOT NULL AND $7 <> 'station' THEN NULL
+                ELSE station_id
+              END,
+              active = COALESCE($10, active)
+        WHERE id = $1`,
+      [
+        req.params.id,
+        b.name ? b.name.trim() : null,
+        normPhone,
+        b.email !== undefined,
+        b.email ? b.email.trim().toLowerCase() : null,
+        pwHash,
+        b.role || null,
+        b.station_id !== undefined,
+        b.station_id || null,
+        b.active,
+      ],
+    );
+
+    if (b.managed_station_ids !== undefined || (b.role && b.role !== 'manager' && b.role !== 'partner')) {
+      await db.query('DELETE FROM station_managers WHERE user_id=$1', [req.params.id]);
+      if (b.managed_station_ids && (b.role === 'manager' || b.role === 'partner' || (!b.role))) {
+        for (const s of b.managed_station_ids) {
+          await db.query('INSERT INTO station_managers(station_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [s, req.params.id]);
+        }
+      }
+    }
+
+    if (b.password || b.active === false) {
+      await db.query('UPDATE refresh_tokens SET revoked=true WHERE user_id=$1', [req.params.id]);
+    }
+
+    await audit(req.user.id, 'user.update', 'user', req.params.id, b, db);
+  });
+
+  const { rows: updated } = await query(
+    `SELECT u.id, u.name, u.phone, u.email, u.role, u.active, u.station_id, u.beans, u.last_login_at, u.created_at,
+            s.name AS station_name,
+            COALESCE((SELECT json_agg(sm.station_id) FROM station_managers sm WHERE sm.user_id=u.id), '[]') AS managed_stations
+       FROM users u LEFT JOIN stations s ON s.id=u.station_id WHERE u.id=$1`,
+    [req.params.id],
+  );
+  res.json(updated[0] || { ok: true });
+}));
+
+owner.delete('/users/:id', wrap(async (req, res) => {
+  if (req.params.id === req.user.id) throw bad('You cannot delete your own account');
+
+  const { rows: target } = await query('SELECT id, name, phone, role FROM users WHERE id=$1', [req.params.id]);
+  if (!target.length) throw notFound('User not found');
+
+  const { rows: oRows } = await query('SELECT count(*)::int AS count FROM orders WHERE user_id=$1', [req.params.id]);
+  if (oRows[0]?.count > 0) {
+    throw bad(`This user has ${oRows[0].count} historical order(s). Due to financial audit regulations, deactivate the user instead of deleting.`);
+  }
+
+  await tx(async (db) => {
+    await db.query('DELETE FROM station_managers WHERE user_id=$1', [req.params.id]);
+    await db.query('DELETE FROM refresh_tokens WHERE user_id=$1', [req.params.id]);
+    await db.query('DELETE FROM staff_profiles WHERE user_id=$1', [req.params.id]);
+    await db.query('DELETE FROM time_off WHERE user_id=$1', [req.params.id]);
+    await db.query('DELETE FROM coupons WHERE user_id=$1', [req.params.id]);
+    await db.query('DELETE FROM passes WHERE user_id=$1', [req.params.id]);
+    await db.query('DELETE FROM referrals WHERE referrer_id=$1 OR referee_id=$1', [req.params.id]);
+    await db.query('UPDATE shifts SET user_id=NULL WHERE user_id=$1', [req.params.id]);
+    await db.query('UPDATE shift_tasks SET done_by=NULL WHERE done_by=$1', [req.params.id]);
+    await db.query('UPDATE audit_log SET actor_id=NULL WHERE actor_id=$1', [req.params.id]);
+    await db.query('UPDATE cash_closes SET closed_by=NULL WHERE closed_by=$1', [req.params.id]);
+    await db.query('UPDATE stock_counts SET counted_by=NULL WHERE counted_by=$1', [req.params.id]);
+    await db.query('UPDATE stock_transfers SET requested_by=NULL WHERE requested_by=$1', [req.params.id]);
+    await db.query('UPDATE stock_transfers SET dispatched_by=NULL WHERE dispatched_by=$1', [req.params.id]);
+    await db.query('UPDATE stock_transfers SET received_by=NULL WHERE received_by=$1', [req.params.id]);
+    await db.query('UPDATE purchase_orders SET created_by=NULL WHERE created_by=$1', [req.params.id]);
+    await db.query('UPDATE purchase_orders SET received_by=NULL WHERE received_by=$1', [req.params.id]);
+    await db.query('UPDATE settlements SET entered_by=NULL WHERE entered_by=$1', [req.params.id]);
+    await db.query('UPDATE enquiries SET handled_by=NULL WHERE handled_by=$1', [req.params.id]);
+    await db.query('UPDATE orders SET accepted_by=NULL WHERE accepted_by=$1', [req.params.id]);
+    await db.query('UPDATE orders SET ready_by=NULL WHERE ready_by=$1', [req.params.id]);
+    await db.query('UPDATE orders SET picked_up_by=NULL WHERE picked_up_by=$1', [req.params.id]);
+    await db.query('UPDATE users SET referred_by=NULL WHERE referred_by=$1', [req.params.id]);
+
+    await db.query('DELETE FROM users WHERE id=$1', [req.params.id]);
+    await audit(req.user.id, 'user.delete', 'user', req.params.id, target[0], db);
+  });
+
+  res.json({ ok: true, deleted: target[0] });
 }));
 
 /* ---- menu ---- */
@@ -323,3 +479,172 @@ owner.patch('/enquiries/:id', wrap(async (req, res) => {
   await audit(req.user.id, 'enquiry.update', 'enquiry', req.params.id, b);
   res.json({ ok: true });
 }));
+
+/* ============================================================================
+   Data Management: Export, Selective Reset, and Restore
+   ============================================================================ */
+
+const EXPORT_TABLES = [
+  'stations', 'categories', 'products', 'option_groups', 'options', 'recipes', 'option_recipes',
+  'suppliers', 'ingredients', 'station_inventory', 'central_inventory', 'settings',
+  'users', 'station_managers', 'orders', 'order_items', 'payments', 'passes', 'coupons',
+  'promo_codes', 'daily_offers', 'drops', 'settlements', 'cash_closes',
+  'shifts', 'shift_tasks', 'shift_templates', 'time_off', 'staff_profiles',
+  'stock_counts', 'stock_count_lines', 'stock_transfers', 'transfer_lines',
+  'purchase_orders', 'purchase_lines', 'enquiries', 'audit_log'
+];
+
+/** 1. Export all data to JSON */
+owner.get('/data/export', wrap(async (req, res) => {
+  const tables = {};
+  for (const tbl of EXPORT_TABLES) {
+    try {
+      const { rows } = await query(`SELECT * FROM ${tbl}`);
+      // Scrub passwords from users table export for security
+      if (tbl === 'users') {
+        tables[tbl] = rows.map((u) => {
+          const { password_hash, ...safe } = u;
+          return safe;
+        });
+      } else {
+        tables[tbl] = rows;
+      }
+    } catch {
+      tables[tbl] = [];
+    }
+  }
+
+  const filename = `sadhai-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Content-Type', 'application/json');
+  res.json({
+    app: 'sadhai-coffee',
+    version: '1.6.0',
+    exported_at: new Date().toISOString(),
+    exported_by: req.user.id,
+    table_counts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])),
+    tables,
+  });
+}));
+
+/** 2. Selective secured reset */
+owner.post('/data/reset', wrap(async (req, res) => {
+  const b = z.object({
+    password: z.string().min(1, 'Password required'),
+    confirmation: z.string().min(1, 'Type RESET to confirm'),
+    targets: z.array(z.string()).min(1, 'Select at least one category to reset'),
+  }).parse(req.body);
+
+  if (b.confirmation.trim().toUpperCase() !== 'RESET') {
+    throw bad('Confirmation phrase must be RESET');
+  }
+
+  // Verify owner password
+  const { rows: uRows } = await query('SELECT password_hash FROM users WHERE id=$1', [req.user.id]);
+  if (!uRows[0] || !(await bcrypt.compare(b.password, uRows[0].password_hash))) {
+    throw bad('Incorrect password. Security verification failed.');
+  }
+
+  const cleared = [];
+  await tx(async (db) => {
+    // Orders & Transactions
+    if (b.targets.includes('orders') || b.targets.includes('all')) {
+      await db.query('TRUNCATE order_items, orders, payments, settlements, cash_closes CASCADE');
+      cleared.push('orders', 'order_items', 'payments', 'settlements', 'cash_closes');
+    }
+
+    // Customers & Customer Loyalty
+    if (b.targets.includes('customers') || b.targets.includes('all')) {
+      await db.query('TRUNCATE referrals, coupons, passes CASCADE');
+      await db.query("DELETE FROM users WHERE role = 'customer'");
+      cleared.push('customers', 'coupons', 'passes', 'referrals');
+    }
+
+    // Shifts, Attendance & Payroll
+    if (b.targets.includes('shifts') || b.targets.includes('all')) {
+      await db.query('TRUNCATE payroll_adjustments, payroll_lines, payroll_runs, time_off, shift_tasks, shifts CASCADE');
+      cleared.push('shifts', 'payroll');
+    }
+
+    // Inventory audit counts & movement history
+    if (b.targets.includes('inventory_history') || b.targets.includes('all')) {
+      await db.query('TRUNCATE stock_count_lines, stock_counts, transfer_lines, stock_transfers, purchase_lines, purchase_orders, central_moves, inventory_moves CASCADE');
+      cleared.push('inventory_movements', 'stock_counts', 'purchases');
+    }
+
+    // Marketing campaigns & drops
+    if (b.targets.includes('marketing') || b.targets.includes('all')) {
+      await db.query('TRUNCATE daily_offers, drops, promo_codes CASCADE');
+      cleared.push('daily_offers', 'drops', 'promo_codes');
+    }
+
+    // Full baseline catalog reset (clears everything and leaves 0 orders with clean catalog)
+    if (b.targets.includes('clean_baseline')) {
+      await db.query(`TRUNCATE payroll_adjustments, payroll_lines, payroll_runs, time_off, shift_tasks, shifts, shift_templates, staff_profiles, stock_count_lines, stock_counts, transfer_lines, stock_transfers, purchase_lines, purchase_orders, central_moves, daily_offers, settlements, cash_closes, notifications, referrals, payments, order_items, orders, drops, promo_codes, coupons, passes, refresh_tokens CASCADE`);
+      await db.query("DELETE FROM users WHERE id <> $1 AND role = 'customer'", [req.user.id]);
+      cleared.push('clean_baseline');
+    }
+
+    await audit(req.user.id, 'data.reset', 'system', { targets: b.targets, cleared }, db);
+  });
+
+  res.json({ ok: true, cleared, time: new Date().toISOString() });
+}));
+
+/** 3. Restore data from backup JSON */
+owner.post('/data/restore', wrap(async (req, res) => {
+  const b = z.object({
+    password: z.string().min(1, 'Password required'),
+    backup: z.object({
+      app: z.literal('sadhai-coffee'),
+      tables: z.record(z.array(z.any())),
+    }),
+  }).parse(req.body);
+
+  // Verify owner password
+  const { rows: uRows } = await query('SELECT password_hash FROM users WHERE id=$1', [req.user.id]);
+  if (!uRows[0] || !(await bcrypt.compare(b.password, uRows[0].password_hash))) {
+    throw bad('Incorrect password. Restore denied.');
+  }
+
+  const restored = [];
+  await tx(async (db) => {
+    // Restore tables that are present in the backup
+    for (const [tbl, rows] of Object.entries(b.backup.tables)) {
+      if (!EXPORT_TABLES.includes(tbl) || !Array.isArray(rows) || !rows.length) continue;
+      
+      // For safety, do not overwrite the active owner with restored hash if missing
+      if (tbl === 'users') {
+        for (const row of rows) {
+          if (row.id === req.user.id) continue;
+          const cols = Object.keys(row).filter((k) => k !== 'password_hash');
+          const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
+          const vals = cols.map((k) => row[k]);
+          await db.query(
+            `INSERT INTO users (${cols.join(',')}, password_hash) VALUES (${placeholders}, $${cols.length + 1})
+             ON CONFLICT (id) DO UPDATE SET ${cols.map((c) => `${c}=EXCLUDED.${c}`).join(',')}`,
+            [...vals, uRows[0].password_hash]
+          );
+        }
+      } else {
+        for (const row of rows) {
+          const cols = Object.keys(row);
+          if (!cols.length) continue;
+          const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
+          const vals = cols.map((k) => row[k]);
+          await db.query(
+            `INSERT INTO ${tbl} (${cols.join(',')}) VALUES (${placeholders})
+             ON CONFLICT DO NOTHING`,
+            vals
+          );
+        }
+      }
+      restored.push(tbl);
+    }
+
+    await audit(req.user.id, 'data.restore', 'system', { restored_tables: restored }, db);
+  });
+
+  res.json({ ok: true, restored, time: new Date().toISOString() });
+}));
+
