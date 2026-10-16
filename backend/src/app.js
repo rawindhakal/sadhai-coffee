@@ -23,8 +23,11 @@ export function createApp() {
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
   app.use(helmet());
-  // Allowed browsers: the CORS_ORIGINS list plus whatever website address the owner has saved.
-  app.use(cors({ origin: (origin, cb) => cb(null, !origin || config.corsOrigins.includes(origin) || origin === rt('public_web_url')), credentials: true }));
+  // Allowed browsers: the CORS_ORIGINS list, owner's saved URL, and any local dev/flutter port
+  app.use(cors({
+    origin: (origin, cb) => cb(null, !origin || config.corsOrigins.includes(origin) || origin === rt('public_web_url') || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)),
+    credentials: true,
+  }));
   app.use('/owner/media', express.json({ limit: '6mb' })); // picture uploads; everything else stays at 200 kb
   app.use(express.json({ limit: '200kb' }));
   // Log the path only: query strings can carry coordinates and SSE access tokens, which must never reach logs.
