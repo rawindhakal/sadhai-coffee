@@ -252,22 +252,49 @@ owner.get('/menu', wrap(async (_req, res) => {
             COALESCE((SELECT json_agg(json_build_object('id', g.id, 'name', g.name, 'name_ne', g.name_ne, 'required', g.required, 'multi', g.multi,
               'options', COALESCE((SELECT json_agg(json_build_object('id', o.id, 'name', o.name, 'name_ne', o.name_ne, 'price_delta', o.price_delta, 'is_default', o.is_default) ORDER BY o.sort) FROM options o WHERE o.group_id=g.id), '[]')) ORDER BY g.sort)
               FROM option_groups g WHERE g.product_id=p.id), '[]') AS option_groups,
-            COALESCE((SELECT json_agg(json_build_object('ingredient_id', r.ingredient_id, 'name', i.name, 'unit', i.unit, 'qty', r.qty)) FROM recipes r JOIN ingredients i ON i.id=r.ingredient_id WHERE r.product_id=p.id), '[]') AS recipe
-       FROM products p LEFT JOIN categories c ON c.id=p.category_id ORDER BY c.sort, p.sort, p.name`,
+            COALESCE((SELECT json_agg(json_build_object('ingredient_id', r.ingredient_id, 'name', i.name, 'unit', i.unit, 'qty', r.qty)) FROM recipes r JOIN ingredients i ON i.id=r.ingredient_id WHERE r.product_id=p.id), '[]') AS recipe,
+            (SELECT count(*)::int FROM order_items oi WHERE oi.product_id=p.id) AS sold_count,
+            -- one row per live station: its price, whether it is switched on, and how many cups its current stock can still make
+            COALESCE((SELECT json_agg(json_build_object(
+                'station_id', s.id, 'station_name', s.name, 'station_code', s.code,
+                'available', COALESCE(sp.available, true), 'price_override', sp.price_override, 'price', COALESCE(sp.price_override, p.price),
+                'can_make', (SELECT min(floor(si.qty / r.qty))::int FROM recipes r JOIN station_inventory si ON si.ingredient_id=r.ingredient_id AND si.station_id=s.id WHERE r.product_id=p.id)
+              ) ORDER BY s.code)
+              FROM stations s LEFT JOIN station_products sp ON sp.station_id=s.id AND sp.product_id=p.id WHERE s.active), '[]') AS stations
+       FROM products p LEFT JOIN categories c ON c.id=p.category_id ORDER BY c.sort NULLS LAST, p.sort, p.name`,
   );
-  const cats = (await query('SELECT * FROM categories ORDER BY sort')).rows;
+  const cats = (await query('SELECT c.*, (SELECT count(*)::int FROM products p WHERE p.category_id=c.id) AS product_count FROM categories c ORDER BY c.sort, c.name')).rows;
   res.json({ categories: cats, products: rows });
 }));
 owner.post('/categories', wrap(async (req, res) => {
   const b = z.object({ name: z.string().min(2), name_ne: z.string().optional(), sort: z.number().int().default(0) }).parse(req.body);
-  res.status(201).json((await query('INSERT INTO categories(name,name_ne,sort) VALUES ($1,$2,$3) RETURNING *', [b.name, b.name_ne, b.sort])).rows[0]);
+  const r = (await query('INSERT INTO categories(name,name_ne,sort) VALUES ($1,$2,$3) RETURNING *', [b.name, b.name_ne, b.sort])).rows[0];
+  await audit(req.user.id, 'category.create', 'category', r.id, { name: b.name });
+  res.status(201).json(r);
+}));
+owner.patch('/categories/:id', wrap(async (req, res) => {
+  const b = z.object({ name: z.string().min(2).optional(), name_ne: z.string().nullable().optional(), sort: z.number().int().optional() }).parse(req.body);
+  const cols = Object.keys(b);
+  if (!cols.length) throw bad('Nothing to update');
+  const { rows } = await query(`UPDATE categories SET ${cols.map((c, i) => `${c}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [req.params.id, ...cols.map((c) => b[c])]);
+  if (!rows[0]) throw notFound('Category not found');
+  await audit(req.user.id, 'category.update', 'category', req.params.id, b);
+  res.json(rows[0]);
+}));
+owner.delete('/categories/:id', wrap(async (req, res) => {
+  const n = (await query('SELECT count(*)::int AS n FROM products WHERE category_id=$1', [req.params.id])).rows[0].n;
+  if (n) throw bad(`This category still has ${n} item${n > 1 ? 's' : ''}. Move or delete them first.`);
+  const r = await query('DELETE FROM categories WHERE id=$1 RETURNING name', [req.params.id]);
+  if (!r.rows[0]) throw notFound('Category not found');
+  await audit(req.user.id, 'category.delete', 'category', req.params.id, { name: r.rows[0].name });
+  res.json({ ok: true });
 }));
 const productSchema = z.object({
   category_id: z.string().uuid().optional(), sku: z.string().min(2).max(20), name: z.string().min(2), name_ne: z.string().optional(),
   description: z.string().optional(), description_ne: z.string().optional(), price: z.number().int().min(0), cost: z.number().int().min(0).default(0),
   prep_seconds: z.number().int().min(10).max(600).default(90), is_signature: z.boolean().default(false), is_seasonal: z.boolean().default(false),
   pass_eligible: z.boolean().default(true), origin: z.string().optional(), image_url: z.string().url().nullable().optional(), active: z.boolean().default(true), sort: z.number().int().default(0),
-  price_tier: z.enum(['hot', 'flavored', 'iced']).nullable().optional(),
+  price_tier: z.enum(['hot', 'flavored', 'iced']).nullable().optional(), kind: z.enum(['drink', 'food', 'merch']).optional(),
 });
 async function tierPrice(tier) { return tier ? (await getSettings())[`price_${tier}`] : null; }
 owner.post('/products', wrap(async (req, res) => {
@@ -279,9 +306,17 @@ owner.post('/products', wrap(async (req, res) => {
   await audit(req.user.id, 'product.create', 'product', rows[0].id, { sku: b.sku });
   res.status(201).json(rows[0]);
 }));
+const mediaIdOf = (url) => (typeof url === 'string' ? url.match(/\/media\/([0-9a-f-]{36})\./i)?.[1] : null) || null;
+/** Delete an uploaded picture once nothing on the menu or site uses it any more. */
+async function dropMediaIfUnused(db, url) {
+  const id = mediaIdOf(url);
+  if (!id) return;
+  const used = (await db.query(`SELECT 1 FROM products WHERE image_url LIKE '%' || $1 || '%' UNION ALL SELECT 1 FROM site_content WHERE value::text LIKE '%' || $1 || '%' LIMIT 1`, [id])).rows.length;
+  if (!used) await db.query('DELETE FROM media WHERE id=$1', [id]);
+}
 owner.patch('/products/:id', wrap(async (req, res) => {
   const b = productSchema.partial().parse(req.body);
-  const cur = (await query('SELECT price_tier FROM products WHERE id=$1', [req.params.id])).rows[0];
+  const cur = (await query('SELECT price_tier, image_url FROM products WHERE id=$1', [req.params.id])).rows[0];
   if (!cur) throw notFound('Product not found');
   if (b.price_tier) b.price = await tierPrice(b.price_tier);                 // tiered drinks take the tier price
   else if (b.price_tier === undefined && cur.price_tier) delete b.price;    // ...and cannot be priced by hand
@@ -289,20 +324,114 @@ owner.patch('/products/:id', wrap(async (req, res) => {
   if (!cols.length) throw bad('Nothing to update');
   const { rows } = await query(`UPDATE products SET ${cols.map((c, i) => `${c}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [req.params.id, ...cols.map((c) => b[c])]);
   if (!rows[0]) throw notFound('Product not found');
+  if (b.image_url !== undefined && cur.image_url && cur.image_url !== b.image_url) await dropMediaIfUnused({ query }, cur.image_url);
   await audit(req.user.id, 'product.update', 'product', req.params.id, b);
   res.json(rows[0]);
 }));
+owner.delete('/products/:id', wrap(async (req, res) => {
+  const p = (await query('SELECT id, sku, name, image_url FROM products WHERE id=$1', [req.params.id])).rows[0];
+  if (!p) throw notFound('Product not found');
+  try {
+    await tx(async (db) => {
+      await db.query('DELETE FROM products WHERE id=$1', [p.id]); // recipes, options and station settings go with it
+      await audit(req.user.id, 'product.delete', 'product', p.id, { sku: p.sku, name: p.name }, db);
+    });
+  } catch (e) {
+    if (e.code === '23503') throw bad(`${p.name} is part of past orders, offers or a drop, so it cannot be erased without breaking your sales history. Switch off "On the menu" to retire it instead.`);
+    throw e;
+  }
+  await dropMediaIfUnused({ query }, p.image_url);
+  res.json({ ok: true });
+}));
+owner.post('/products/:id/duplicate', wrap(async (req, res) => {
+  const src = (await query('SELECT * FROM products WHERE id=$1', [req.params.id])).rows[0];
+  if (!src) throw notFound('Product not found');
+  const copy = await tx(async (db) => {
+    let sku = `${src.sku}-2`.slice(0, 20), n = 2;
+    while ((await db.query('SELECT 1 FROM products WHERE sku=$1', [sku])).rows.length) { n += 1; sku = `${src.sku.slice(0, 17)}-${n}`; }
+    const { id: _i, created_at: _c, sku: _s, name, image_url: _img, ...rest } = src;
+    const cols = ['sku', 'name', 'image_url', 'active', ...Object.keys(rest).filter((k) => !['active'].includes(k))];
+    const vals = [sku, `${name} (copy)`, null, false, ...Object.keys(rest).filter((k) => !['active'].includes(k)).map((k) => rest[k])];
+    const np = (await db.query(`INSERT INTO products(${cols.join(',')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`, vals)).rows[0];
+    await db.query('INSERT INTO recipes(product_id, ingredient_id, qty) SELECT $2, ingredient_id, qty FROM recipes WHERE product_id=$1', [src.id, np.id]);
+    const groups = (await db.query('SELECT * FROM option_groups WHERE product_id=$1 ORDER BY sort', [src.id])).rows;
+    for (const g of groups) {
+      const ng = (await db.query('INSERT INTO option_groups(product_id,name,name_ne,required,multi,sort) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [np.id, g.name, g.name_ne, g.required, g.multi, g.sort])).rows[0];
+      for (const o of (await db.query('SELECT * FROM options WHERE group_id=$1 ORDER BY sort', [g.id])).rows) {
+        const no = (await db.query('INSERT INTO options(group_id,name,name_ne,price_delta,is_default,sort) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [ng.id, o.name, o.name_ne, o.price_delta, o.is_default, o.sort])).rows[0];
+        await db.query('INSERT INTO option_recipes(option_id, ingredient_id, qty) SELECT $2, ingredient_id, qty FROM option_recipes WHERE option_id=$1', [o.id, no.id]);
+      }
+    }
+    await audit(req.user.id, 'product.duplicate', 'product', np.id, { from: src.id }, db);
+    return np;
+  });
+  res.status(201).json(copy);
+}));
+/** Price and on/off for one item at every station in a single save. A null price falls back to the base price. */
+owner.put('/products/:id/stations', wrap(async (req, res) => {
+  const rows = z.array(z.object({ station_id: z.string().uuid(), available: z.boolean().optional(), price_override: z.number().int().min(0).nullable().optional() })).min(1).parse(req.body);
+  const p = (await query('SELECT id, price_tier FROM products WHERE id=$1', [req.params.id])).rows[0];
+  if (!p) throw notFound('Product not found');
+  if (p.price_tier && rows.some((r) => r.price_override != null)) throw bad('Hot, flavored and iced drinks have one price at every station. Change the tier price in Settings.');
+  await tx(async (db) => {
+    for (const r of rows) {
+      await db.query(
+        `INSERT INTO station_products(station_id, product_id, available, price_override) VALUES ($1,$2,COALESCE($3,true),$4)
+         ON CONFLICT (station_id, product_id) DO UPDATE SET available=COALESCE($3, station_products.available),
+           price_override = CASE WHEN $5 THEN $4 ELSE station_products.price_override END`,
+        [r.station_id, p.id, r.available, r.price_override ?? null, r.price_override !== undefined],
+      );
+    }
+    await audit(req.user.id, 'menu.station_bulk', 'product', p.id, { stations: rows.length }, db);
+  });
+  res.json({ ok: true });
+}));
+/** For one item: every ingredient in its recipe and how much of it each station holds, i.e. how many cups are left. */
+owner.get('/products/:id/stock', wrap(async (req, res) => {
+  const { rows } = await query(
+    `SELECT s.id AS station_id, s.name AS station_name, i.id AS ingredient_id, i.name AS ingredient, i.unit, r.qty AS per_cup,
+            COALESCE(si.qty, 0) AS on_hand, COALESCE(si.reorder_level, 0) AS reorder_level, floor(COALESCE(si.qty, 0) / r.qty)::int AS cups
+       FROM stations s CROSS JOIN recipes r JOIN ingredients i ON i.id=r.ingredient_id
+       LEFT JOIN station_inventory si ON si.station_id=s.id AND si.ingredient_id=i.id
+      WHERE r.product_id=$1 AND s.active ORDER BY s.code, i.name`, [req.params.id],
+  );
+  res.json(rows.map((r) => ({ ...r, per_cup: Number(r.per_cup), on_hand: Number(r.on_hand), reorder_level: Number(r.reorder_level) })));
+}));
+/** Save a new order for items (and optionally categories) after the owner moves them. */
+owner.put('/menu/order', wrap(async (req, res) => {
+  const b = z.object({ products: z.array(z.string().uuid()).default([]), categories: z.array(z.string().uuid()).default([]) }).parse(req.body);
+  await tx(async (db) => {
+    for (const [i, id] of b.products.entries()) await db.query('UPDATE products SET sort=$2 WHERE id=$1', [id, i]);
+    for (const [i, id] of b.categories.entries()) await db.query('UPDATE categories SET sort=$2 WHERE id=$1', [id, i]);
+  });
+  res.json({ ok: true });
+}));
 owner.put('/products/:id/options', wrap(async (req, res) => {
   const groups = z.array(z.object({
-    name: z.string(), name_ne: z.string().optional(), required: z.boolean().default(false), multi: z.boolean().default(false),
-    options: z.array(z.object({ name: z.string(), name_ne: z.string().optional(), price_delta: z.number().int().default(0), is_default: z.boolean().default(false) })).min(1),
+    id: z.string().uuid().optional(),
+    name: z.string().min(1), name_ne: z.string().nullish(), required: z.boolean().default(false), multi: z.boolean().default(false),
+    options: z.array(z.object({ id: z.string().uuid().optional(), name: z.string().min(1), name_ne: z.string().nullish(), price_delta: z.number().int().default(0), is_default: z.boolean().default(false) })).min(1),
   })).parse(req.body);
+  const pid = req.params.id;
+  if (!(await query('SELECT 1 FROM products WHERE id=$1', [pid])).rows.length) throw notFound('Product not found');
   await tx(async (db) => {
-    await db.query('DELETE FROM option_groups WHERE product_id=$1', [req.params.id]);
+    const keepG = [];
     for (const [gi, g] of groups.entries()) {
-      const gid = (await db.query('INSERT INTO option_groups(product_id,name,name_ne,required,multi,sort) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [req.params.id, g.name, g.name_ne, g.required, g.multi, gi])).rows[0].id;
-      for (const [oi, o] of g.options.entries()) await db.query('INSERT INTO options(group_id,name,name_ne,price_delta,is_default,sort) VALUES ($1,$2,$3,$4,$5,$6)', [gid, o.name, o.name_ne, o.price_delta, o.is_default, oi]);
+      const own = g.id && (await db.query('SELECT 1 FROM option_groups WHERE id=$1 AND product_id=$2', [g.id, pid])).rows.length;
+      let gid;
+      if (own) { gid = g.id; await db.query('UPDATE option_groups SET name=$2, name_ne=$3, required=$4, multi=$5, sort=$6 WHERE id=$1', [gid, g.name, g.name_ne ?? null, g.required, g.multi, gi]); }
+      else gid = (await db.query('INSERT INTO option_groups(product_id,name,name_ne,required,multi,sort) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [pid, g.name, g.name_ne ?? null, g.required, g.multi, gi])).rows[0].id;
+      keepG.push(gid);
+      const keepO = [];
+      for (const [oi, o] of g.options.entries()) {
+        const ownO = o.id && (await db.query('SELECT 1 FROM options WHERE id=$1 AND group_id=$2', [o.id, gid])).rows.length;
+        if (ownO) { await db.query('UPDATE options SET name=$2, name_ne=$3, price_delta=$4, is_default=$5, sort=$6 WHERE id=$1', [o.id, o.name, o.name_ne ?? null, o.price_delta, o.is_default, oi]); keepO.push(o.id); }
+        else keepO.push((await db.query('INSERT INTO options(group_id,name,name_ne,price_delta,is_default,sort) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [gid, o.name, o.name_ne ?? null, o.price_delta, o.is_default, oi])).rows[0].id);
+      }
+      await db.query('DELETE FROM options WHERE group_id=$1 AND id <> ALL($2::uuid[])', [gid, keepO]);
     }
+    await db.query('DELETE FROM option_groups WHERE product_id=$1 AND id <> ALL($2::uuid[])', [pid, keepG]);
+    await audit(req.user.id, 'product.options', 'product', pid, { groups: groups.length }, db);
   });
   res.json({ ok: true });
 }));

@@ -1,7 +1,8 @@
 'use client';
 import { Empty, Loading, useData } from '../ui';
 import { PartnerStatementCard, AccountabilityTab, CashTab, InventoryTab, OffersTab, PromosTab, ReviewsTab, StaffTab, StationMenuTab } from '../admin';
-import { AuditTab, DropsTab, FinanceTab, GrowthTab, MenuTab, SettingsTab, StationsTab, TeamTab } from '../owner';
+import { AuditTab, DropsTab, FinanceTab, GrowthTab, SettingsTab, StationsTab, TeamTab } from '../owner';
+import { MenuStudio } from '../menu-studio';
 import { StationWorkspace } from '../station';
 import { CostingSection } from '../recipes';
 import { PushSection } from '../push';
@@ -32,7 +33,7 @@ function Body({ section, role }: { section: string; role: 'owner' | 'manager' | 
     case 'inventory': return <InventoryHub days={days} />;
     case 'recipes': return <CostingSection canEdit={isOwner} />;
     case 'ingredients': return <IngredientsTab canEdit={isOwner || canWarehouse} />;
-    case 'menu': return isOwner ? <div className="col" style={{ gap: 16 }}><P><MenuTab /></P><P><h3 style={{ marginBottom: 12 }}>Per-station prices and availability</h3>{first && <StationMenuTab stationId={first} isOwner />}</P></div> : <P>{first ? <StationMenuTab stationId={first} isOwner={false} /> : null}</P>;
+    case 'menu': return isOwner ? <MenuStudio /> : <P>{first ? <StationMenuTab stationId={first} isOwner={false} /> : null}</P>;
     case 'reviews': return <P><ReviewsTab stationId={sid} /></P>;
     case 'offers': return <P><OffersTab stations={stations} isOwner={isOwner} /></P>;
     case 'push': return <PushSection isOwner={isOwner} />;
