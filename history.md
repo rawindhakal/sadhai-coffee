@@ -17,6 +17,45 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.6.1 (2026-10-16)
+
+### Added
+- **Owner Data Management & Security (`/settings`)**:
+  - Full JSON database backup: complete system snapshot export (stations, products, recipes, users, managers, shifts, orders, ledgers, and settings) with audit logging.
+  - Password-protected JSON restore: requires owner re-authentication with password verification, validates schema pre-flight, and transactionally restores data with audit trails.
+  - Granular selective data reset: allows the owner to selectively wipe orders, transactions, stock ledgers, or rosters while safeguarding core products, stations, and user accounts.
+- **User & Manager Administration (`/users`)**:
+  - Full CRUD console for users and managers.
+  - Role-based tabs (All, Customers, Baristas & Staff, Managers, Owners) with real-time phone/name search and status filters.
+  - Add manager/barista dialog with station assignment, phone validation, and role assignment.
+  - Direct password reset and credential updates with safety checks preventing self-deletion or deletion of the last owner.
+- **Menu Studio & Inventory-Linked Pricing (`/menu`)**:
+  - Menu Studio with full CRUD for products and categories: create, edit, sort, toggle active status, and delete.
+  - Product photo uploading and custom media URLs with live preview cards.
+  - Station-specific pricing overrides: customize prices per outlet with fallback to standard category/tier pricing.
+  - Recipe & central inventory integration: connects products to ingredient bills of materials, showing live real-time "cups left" stock counts per station.
+  - Preservation of option IDs and recipes during edits to ensure order history integrity.
+- **Production Android Application Build**:
+  - Production release APK (`app-release.apk`) generated with ProGuard code obfuscation and resource shrinking.
+  - OpenJDK 17 and Android SDK 36 toolchain configured with accepted Google licenses.
+
+### Changed
+- **Default Mobile API Endpoint**:
+  - Updated `mobile/lib/api.dart` to default to `https://sadhaicoffee.com/api` (with automatic trailing-slash trimming) so Android APK builds connect immediately to the live production server without requiring custom `--dart-define` flags.
+- **Nginx API & CORS Routing**:
+  - Configured reverse proxy on `sadhaicoffee.com` for `/api/` endpoints with complete CORS headers (`Access-Control-Allow-Origin`, `Access-Control-Allow-Headers`, `Access-Control-Allow-Methods`) to resolve preflight cross-origin issues across web and mobile clients.
+- **Mobile Product Artwork**:
+  - Enhanced `mobile/lib/art.dart` to normalize leading slashes on uploaded media URLs and apply rounded clipping (`ClipRRect`) with smooth loading indicators and fallback illustration art.
+
+### Fixed
+- **Flutter Material Assertion Crash**:
+  - Fixed runtime crash `Assertion failed: !(shape != null && borderRadius != null)` in `mobile/lib/screens/home.dart` (`_CatBox`) by removing conflicting `borderRadius` parameter when `shape: RoundedRectangleBorder` is present.
+- **Flutter Layout Overflow**:
+  - Fixed `RenderFlex overflowed by 78 pixels on the right` in `_Head` banner by enclosing the subtitle text in an `Expanded` widget with `TextOverflow.ellipsis`.
+- **Flutter Async Context Warnings**:
+  - Fixed all `use_build_context_synchronously` warnings in `mobile/lib/screens/account.dart` and `mobile/lib/screens/customer.dart` using proper `context.mounted` guards.
+  - Achieved 100% clean `flutter analyze` with 0 warnings and 0 errors.
+
 ## v1.6.0 (2026-10-15)
 
 ### Added

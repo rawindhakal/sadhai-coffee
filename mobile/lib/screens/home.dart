@@ -345,9 +345,26 @@ class _Head extends StatelessWidget {
   final String title;
   final String? sub;
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(top: 22, bottom: 10), child: Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-        Text(title, style: display(22)), const Spacer(), if (sub != null) Text(sub!, style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
-      ]));
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 22, bottom: 10),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text(title, style: display(22)),
+        const SizedBox(width: 8),
+        if (sub != null)
+          Expanded(
+            child: Text(
+              sub!,
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Brand.inkMuted, fontSize: 13),
+            ),
+          ),
+      ],
+    ),
+  );
 }
 
 enum _CircleStyle { plain, hot, gold }
@@ -387,7 +404,7 @@ class _CatBox extends StatelessWidget {
     final icon = switch (c['name']) { 'Merch' => Icons.shopping_bag_outlined, 'Bites' => Icons.bakery_dining_outlined, 'Signature' => Icons.star_outline, 'Cold coffee' => Icons.water_drop_outlined, _ => Icons.local_cafe_outlined };
     final fg = on ? Brand.onCherry : Brand.ink;
     return Material(
-      color: on ? Brand.cherry : Brand.surfaceRaised, borderRadius: BorderRadius.circular(Brand.radiusLg),
+      color: on ? Brand.cherry : Brand.surfaceRaised,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Brand.radiusLg), side: BorderSide(color: on ? Brand.cherry : Brand.hairline, width: 2)),
       child: InkWell(
         borderRadius: BorderRadius.circular(Brand.radiusLg), onTap: onTap,

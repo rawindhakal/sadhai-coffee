@@ -1,16 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Override at build time: flutter run --dart-define=API_URL=https://api.sadhaicoffee.com
+/// Override at build time: flutter run --dart-define=API_URL=https://sadhaicoffee.com/api
 const _envUrl = String.fromEnvironment('API_URL');
 String get apiBase {
-  if (_envUrl.isNotEmpty) return _envUrl;
-  if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:4747'; // Android emulator -> host machine
-  return 'http://localhost:4747';
+  if (_envUrl.isNotEmpty) return _envUrl.endsWith('/') ? _envUrl.substring(0, _envUrl.length - 1) : _envUrl;
+  return 'https://sadhaicoffee.com/api';
 }
 
 class ApiException implements Exception {

@@ -355,14 +355,25 @@ class _NotificationSettingsState extends State<NotificationSettings> {
             setState(() => _busy = true);
             var ok = false;
             if (v) { ok = await PushService.enable(); } else { await PushService.disable(); }
-            if (mounted) { setState(() { _on = v && ok; _busy = false; }); if (v && !ok) toast(context, 'Notifications are blocked. Allow them in your phone settings to turn this on.', bad: true); }
+            if (!mounted) return;
+            setState(() { _on = v && ok; _busy = false; });
+            if (v && !ok) {
+              if (context.mounted) toast(context, 'Notifications are blocked. Allow them in your phone settings to turn this on.', bad: true);
+            }
           },
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero, activeTrackColor: Brand.hill, title: const Text('Offers and news'), subtitle: const Text('One a day at most. Order messages are always sent.', style: TextStyle(fontSize: 13)),
           value: _offers, onChanged: (v) async {
             setState(() => _offers = v);
-            try { final u = await Api.instance.patch('/me', {'notif_offers': v}); Api.instance.user = {...Api.instance.user!, ...Map<String, dynamic>.from(u)}; } on ApiException catch (e) { if (mounted) { setState(() => _offers = !v); toast(context, e.message, bad: true); } }
+            try {
+              final u = await Api.instance.patch('/me', {'notif_offers': v});
+              Api.instance.user = {...Api.instance.user!, ...Map<String, dynamic>.from(u)};
+            } on ApiException catch (e) {
+              if (!mounted) return;
+              setState(() => _offers = !v);
+              if (context.mounted) toast(context, e.message, bad: true);
+            }
           },
         ),
       ]);

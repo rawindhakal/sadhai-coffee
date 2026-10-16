@@ -34,10 +34,13 @@ class ProductArt extends StatelessWidget {
     final url = p['image_url'] as String?;
     final fallback = SvgPicture.asset(artFor(p), width: size, height: size, fit: BoxFit.contain, excludeFromSemantics: true);
     if (url == null || url.isEmpty) return fallback;
-    final full = url.startsWith('http') ? url : '$apiBase$url';
+    final full = url.startsWith('http') ? url : (url.startsWith('/') ? '$apiBase$url' : '$apiBase/$url');
     final img = full.toLowerCase().endsWith('.svg')
         ? SvgPicture.network(full, width: size, height: size, fit: BoxFit.contain, excludeFromSemantics: true, placeholderBuilder: (_) => fallback)
-        : Image.network(full, width: size, height: size, fit: BoxFit.cover, excludeFromSemantics: true, errorBuilder: (_, _, _) => fallback);
+        : ClipRRect(
+            borderRadius: BorderRadius.circular(Brand.radiusMd),
+            child: Image.network(full, width: size, height: size, fit: BoxFit.cover, excludeFromSemantics: true, errorBuilder: (_, _, _) => fallback),
+          );
     return img;
   }
 }
