@@ -18,8 +18,7 @@ export default function Cart() {
   const router = useRouter();
   const coupons = useData<any[]>(user ? '/coupons' : null, [user?.id]);
   const passes = useData<any[]>(user ? '/passes' : null, [user?.id]);
-  const [offer, setOffer] = useState<{ type: 'none' | 'coupon' | 'promo' | 'pass'; id?: string; code?: string }>({ type: 'none' });
-  const [promo, setPromo] = useState('');
+  const [offer, setOffer] = useState<{ type: 'none' | 'coupon' | 'pass'; id?: string }>({ type: 'none' });
   const [method, setMethod] = useState('cash');
   const [note, setNote] = useState('');
   const [quote, setQuote] = useState<any>(null);
@@ -44,7 +43,7 @@ export default function Cart() {
   const payload = useMemo(() => cart.station ? ({
     station_id: cart.station.id, items: cart.lines.map((l) => ({ product_id: l.product.id, qty: l.qty, option_ids: l.option_ids })),
     payment_method: offer.type === 'pass' ? 'pass' : method, channel: 'web',
-    coupon_id: offer.type === 'coupon' ? offer.id : undefined, promo_code: offer.type === 'promo' ? offer.code : undefined, note: note || undefined,
+    coupon_id: offer.type === 'coupon' ? offer.id : undefined, note: note || undefined,
     scheduled_for: when === 'later' && at ? at : undefined,
   }) : null, [cart.station?.id, cart.lines, method, offer, note, when, at]);
 
@@ -97,7 +96,6 @@ export default function Cart() {
             <Radio on={offer.type === 'none'} label={t('none')} onClick={() => setOffer({ type: 'none' })} />
             {active.map((c) => <Radio key={c.id} on={offer.type === 'coupon' && offer.id === c.id} label={c.title} hint={`until ${new Date(c.expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`} onClick={() => setOffer({ type: 'coupon', id: c.id })} />)}
             {activePass && <Radio on={offer.type === 'pass'} label={t('pass')} hint={`${activePass.remaining} cups left`} onClick={() => setOffer({ type: 'pass' })} />}
-            <div className="row"><input placeholder="Promo code" value={promo} onChange={(e) => setPromo(e.target.value.toUpperCase())} aria-label="Promo code" /><button className="btn sm" onClick={() => promo && setOffer({ type: 'promo', code: promo })}>Apply</button></div>
           </div>
           {closed && <div className="card flat" role="alert" style={{ marginTop: 16, borderColor: 'var(--cherry)' }}><strong>{times.data.open_now ? 'This station is not taking orders for a moment.' : `This station is closed. It opens at ${String(times.data.opens).slice(0, 5)}.`}</strong> <button className="btn sm" style={{ marginLeft: 8 }} onClick={() => router.push('/order')}>Choose another station</button></div>}
           {!closed && w && (

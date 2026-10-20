@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.6.2] - 2026-10-20
+
+### Changed
+- **Simplified Home Page (Web & Mobile Unified)**:
+  - Removed unnecessary marketing clutter from the web home page: stripped the interactive 90-second BrewLab timer simulation, people profile figures, terroir narrative cards, redundant partner recruiting banner, and FAQ accordions.
+  - Aligned data and information identically across web and mobile: live counter status with nearest-first finder, standard price tiers (Hot Rs 100, Flavored Rs 120, Iced Rs 150), live category/product menu with photos, and digital 10-cup pass.
+  - Replaced the gamified punch pass slider with a clean, clear 10-Cup Punch Pass card ({rs(900)} for 10 cups, Rs 90/cup, valid 30 days at all counters).
+  - Streamlined main navigation links to Menu & prices, 10-cup pass, Counters, Order ahead, and For cafes.
+- **Unified Checkout Experience (Mobile & Web)**:
+  - Removed promo code input field and apply button from mobile checkout ([`mobile/lib/screens/cart.dart`](file:///Users/rawindhakal/Developments/sadhai-coffee/mobile/lib/screens/cart.dart)).
+  - Removed promo code input field from web checkout ([`web/src/app/cart/page.tsx`](file:///Users/rawindhakal/Developments/sadhai-coffee/web/src/app/cart/page.tsx)).
+  - Kept the Offer selector clean and identical across platforms: "No offer", active earned coupons, and 10-cup pass.
+
+---
+
 ## [1.6.1] - 2026-10-16
 
 ### Added

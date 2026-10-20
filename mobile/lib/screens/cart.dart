@@ -21,10 +21,10 @@ class CartScreen extends StatefulWidget {
 class _CartScreenState extends State<CartScreen> {
   List _coupons = [];
   Json? _pass, _quote;
-  String _offerType = 'none'; // none | coupon | promo | pass
-  String? _offerId, _promo;
+  String _offerType = 'none'; // none | coupon | pass
+  String? _offerId;
   String _method = 'cash';
-  final _promoCtl = TextEditingController(), _note = TextEditingController();
+  final _note = TextEditingController();
   String? _error;
   bool _busy = false;
   String _sig = '';
@@ -66,7 +66,7 @@ class _CartScreenState extends State<CartScreen> {
 
   Map<String, dynamic> _payload(CartState cart) => {
         'station_id': cart.station!['id'], 'items': cart.payloadItems, 'payment_method': _offerType == 'pass' ? 'pass' : _method, 'channel': 'app',
-        if (_offerType == 'coupon') 'coupon_id': _offerId, if (_offerType == 'promo') 'promo_code': _promo,
+        if (_offerType == 'coupon') 'coupon_id': _offerId,
         if (_note.text.trim().isNotEmpty) 'note': _note.text.trim(),
         if (_later && _at != null) 'scheduled_for': _at,
       };
@@ -159,12 +159,6 @@ class _CartScreenState extends State<CartScreen> {
         _opt(_offerType == 'none', 'No offer', () { setState(() { _offerType = 'none'; _offerId = null; }); _requote(cart); }),
         for (final c in _coupons) _opt(_offerType == 'coupon' && _offerId == c['id'], c['title'], () { setState(() { _offerType = 'coupon'; _offerId = c['id']; }); _requote(cart); }),
         if (_pass != null) _opt(_offerType == 'pass', '10-cup pass', () { setState(() { _offerType = 'pass'; _offerId = null; }); _requote(cart); }, hint: '${_pass!['remaining']} cups left${(_pass!['count'] as int) > 1 ? ' · ${_pass!['count']} passes' : ''}'),
-        Row(children: [
-          Expanded(child: TextField(controller: _promoCtl, decoration: const InputDecoration(hintText: 'Promo code', isDense: true), textCapitalization: TextCapitalization.characters)),
-          const SizedBox(width: 8),
-          OutlinedButton(onPressed: () { if (_promoCtl.text.trim().isEmpty) return; setState(() { _offerType = 'promo'; _promo = _promoCtl.text.trim(); }); _requote(cart); }, child: const Text('Apply')),
-        ]),
-        const SizedBox(height: 8),
       ]))),
       if (_times != null && _times!['can_order'] == false) Container(margin: const EdgeInsets.only(top: 16), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Brand.surfaceSunk, borderRadius: BorderRadius.circular(Brand.radiusMd), border: Border.all(color: Brand.cherry)), child: Text(_times!['open_now'] == true ? 'This station is not taking orders for a moment.' : 'This station is closed. It opens at ${(_times!['opens'] as String).substring(0, 5)}.', style: const TextStyle(fontWeight: FontWeight.w700))),
       if (_times != null && _times!['preorder'] != null) ...[
