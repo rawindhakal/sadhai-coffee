@@ -17,6 +17,18 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.6.4 (2026-10-20)
+
+### Added
+- **Promo code section on Offers (mobile and web)**: enter a code once on the Offers tab; it is validated by the new `POST /promos/check` and offered as an option at checkout.
+
+### Changed
+- **Offer of the day removed** from the Home page (hero, "Today" circle, section) and the Offers tab on both mobile and web. Limited drops stay.
+- **Home layout polish**: round shortcut badges no longer clipped, relaxed heading line height, consistent spacing between web and mobile.
+
+### Fixed
+- `/offers` returned 500 because of a wrong product price column.
+
 ## v1.6.3 (2026-10-20)
 
 ### Added

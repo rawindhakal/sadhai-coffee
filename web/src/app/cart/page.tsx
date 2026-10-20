@@ -18,7 +18,7 @@ export default function Cart() {
   const router = useRouter();
   const coupons = useData<any[]>(user ? '/coupons' : null, [user?.id]);
   const passes = useData<any[]>(user ? '/passes' : null, [user?.id]);
-  const [offer, setOffer] = useState<{ type: 'none' | 'coupon' | 'pass'; id?: string }>({ type: 'none' });
+  const [offer, setOffer] = useState<{ type: 'none' | 'coupon' | 'pass' | 'promo'; id?: string }>({ type: 'none' });
   const [method, setMethod] = useState('cash');
   const [note, setNote] = useState('');
   const [quote, setQuote] = useState<any>(null);
@@ -43,9 +43,9 @@ export default function Cart() {
   const payload = useMemo(() => cart.station ? ({
     station_id: cart.station.id, items: cart.lines.map((l) => ({ product_id: l.product.id, qty: l.qty, option_ids: l.option_ids })),
     payment_method: offer.type === 'pass' ? 'pass' : method, channel: 'web',
-    coupon_id: offer.type === 'coupon' ? offer.id : undefined, note: note || undefined,
+    coupon_id: offer.type === 'coupon' ? offer.id : undefined, promo_code: offer.type === 'promo' && cart.promo ? cart.promo.code : undefined, note: note || undefined,
     scheduled_for: when === 'later' && at ? at : undefined,
-  }) : null, [cart.station?.id, cart.lines, method, offer, note, when, at]);
+  }) : null, [cart.station?.id, cart.lines, cart.promo?.code, method, offer, note, when, at]);
 
   useEffect(() => {
     if (!user || !payload || !cart.lines.length) { setQuote(null); return; }
@@ -53,6 +53,9 @@ export default function Cart() {
     api('/orders/quote', { method: 'POST', body: payload }).then((q) => { if (live) { setQuote(q); setError(null); } }).catch((e) => { if (live) { setQuote(null); setError(e.message); } });
     return () => { live = false; };
   }, [JSON.stringify(payload), user?.id]);
+
+  // A promo applied on the Offers tab is selected here automatically.
+  useEffect(() => { if (cart.promo) setOffer({ type: 'promo' }); else setOffer((o) => (o.type === 'promo' ? { type: 'none' } : o)); }, [cart.promo?.code]);
 
   const activePass = passes.data?.some((p) => p.status === 'active' && p.remaining > 0) ? { remaining: passes.data![0].total_remaining } : null;
   const active = (coupons.data || []).filter((c) => c.status === 'active');
@@ -97,6 +100,7 @@ export default function Cart() {
           <div className="card flat col" style={{ gap: 8 }}>
             <Radio on={offer.type === 'none'} label={t('none')} onClick={() => setOffer({ type: 'none' })} />
             {active.map((c) => <Radio key={c.id} on={offer.type === 'coupon' && offer.id === c.id} label={c.title} hint={`until ${new Date(c.expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`} onClick={() => setOffer({ type: 'coupon', id: c.id })} />)}
+            {cart.promo && <Radio on={offer.type === 'promo'} label={`Promo ${cart.promo.code}`} hint={`${cart.promo.pct}% off`} onClick={() => setOffer({ type: 'promo' })} />}
             {activePass && <Radio on={offer.type === 'pass'} label={t('pass')} hint={`${activePass.remaining} cups left`} onClick={() => setOffer({ type: 'pass' })} />}
           </div>
           {closed && <div className="card flat" role="alert" style={{ marginTop: 16, borderColor: 'var(--cherry)' }}><strong>{times.data.open_now ? 'This station is not taking orders for a moment.' : `This station is closed. It opens at ${String(times.data.opens).slice(0, 5)}.`}</strong> <button className="btn sm" style={{ marginLeft: 8 }} onClick={() => router.push('/order')}>Choose another station</button></div>}

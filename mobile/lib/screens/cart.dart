@@ -23,6 +23,7 @@ class _CartScreenState extends State<CartScreen> {
   Json? _pass, _quote;
   String _offerType = 'none'; // none | coupon | pass
   String? _offerId;
+  String? _lastPromo;
   String _method = 'cash';
   final _note = TextEditingController();
   String? _error;
@@ -72,6 +73,7 @@ class _CartScreenState extends State<CartScreen> {
   Map<String, dynamic> _payload(CartState cart) => {
         'station_id': cart.station!['id'], 'items': cart.payloadItems, 'payment_method': _offerType == 'pass' ? 'pass' : _method, 'channel': 'app',
         if (_offerType == 'coupon') 'coupon_id': _offerId,
+        if (_offerType == 'promo' && cart.promo != null) 'promo_code': cart.promo!['code'],
         if (_note.text.trim().isNotEmpty) 'note': _note.text.trim(),
         if (_later && _at != null) 'scheduled_for': _at,
       };
@@ -147,7 +149,13 @@ class _CartScreenState extends State<CartScreen> {
     }
 
     // re-quote whenever the cart contents change
-    final sig = '${cart.station?['id']}|${cart.lines.map((l) => '${l.key}x${l.qty}').join(',')}';
+    final promoCode = cart.promo?['code'] as String?;
+    if (promoCode != _lastPromo) {
+      _lastPromo = promoCode;
+      if (promoCode != null) { _offerType = 'promo'; _offerId = null; }
+      else if (_offerType == 'promo') { _offerType = 'none'; }
+    }
+    final sig = '${cart.station?['id']}|$promoCode|${cart.lines.map((l) => '${l.key}x${l.qty}').join(',')}';
     if (sig != _sig) { _sig = sig; WidgetsBinding.instance.addPostFrameCallback((_) => _requote(cart)); }
 
     if (cart.lines.isEmpty) {
@@ -179,6 +187,7 @@ class _CartScreenState extends State<CartScreen> {
       Card(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6), child: Column(children: [
         _opt(_offerType == 'none', 'No offer', () { setState(() { _offerType = 'none'; _offerId = null; }); _requote(cart); }),
         for (final c in _coupons) _opt(_offerType == 'coupon' && _offerId == c['id'], c['title'], () { setState(() { _offerType = 'coupon'; _offerId = c['id']; }); _requote(cart); }),
+        if (cart.promo != null) _opt(_offerType == 'promo', 'Promo ${cart.promo!['code']}', () { setState(() { _offerType = 'promo'; _offerId = null; }); _requote(cart); }, hint: '${cart.promo!['pct']}% off'),
         if (_pass != null) _opt(_offerType == 'pass', '10-cup pass', () { setState(() { _offerType = 'pass'; _offerId = null; }); _requote(cart); }, hint: '${_pass!['remaining']} cups left${(_pass!['count'] as int) > 1 ? ' · ${_pass!['count']} passes' : ''}'),
       ]))),
       if (_times != null && _times!['can_order'] == false) Container(margin: const EdgeInsets.only(top: 16), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Brand.surfaceSunk, borderRadius: BorderRadius.circular(Brand.radiusMd), border: Border.all(color: Brand.cherry)), child: Text(_times!['open_now'] == true ? 'This station is not taking orders for a moment.' : 'This station is closed. It opens at ${(_times!['opens'] as String).substring(0, 5)}.', style: const TextStyle(fontWeight: FontWeight.w700))),

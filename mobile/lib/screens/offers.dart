@@ -6,7 +6,6 @@ import '../state.dart';
 import '../theme.dart';
 import 'account.dart';
 import 'customer.dart';
-import 'home.dart' show DealCard;
 
 /// Everything that saves the customer money, in one place.
 class OffersScreen extends StatefulWidget {
@@ -17,7 +16,6 @@ class OffersScreen extends StatefulWidget {
 
 class _OffersScreenState extends State<OffersScreen> {
   Json? _home;
-  List _centralOffers = [];
   List _centralDrops = [];
   List _coupons = [];
   String? _stationId;
@@ -33,7 +31,6 @@ class _OffersScreenState extends State<OffersScreen> {
         final off = await Api.instance.get('/offers') as Map;
         if (mounted) {
           setState(() {
-            _centralOffers = (off['offers'] as List? ?? []).cast<Map>();
             _centralDrops = (off['drops'] as List? ?? []).cast<Map>();
           });
         }
@@ -53,17 +50,13 @@ class _OffersScreenState extends State<OffersScreen> {
       _lastEpoch = epoch;
       WidgetsBinding.instance.addPostFrameCallback((_) => _load());
     }
-    final offers = (_home?['offers'] as List? ?? _centralOffers).cast<Map>();
     final drops = (_home?['drops'] as List? ?? _centralDrops).cast<Map>();
-    final products = [for (final c in (_home?['categories'] as List? ?? [])) ...(c['products'] as List).cast<Map>()];
     return RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(16), children: [
       Text('Offers', style: display(30)),
+      const SizedBox(height: 16),
+      Text('Promo code', style: display(20)),
       const SizedBox(height: 8),
-      Text('Offer of the day${cart.station != null ? ' · ${cart.station!['name']}' : ''}', style: display(20)),
-      const SizedBox(height: 8),
-      if (cart.station == null && offers.isEmpty) const Text('Choose a station on Home to see today’s outlet offers.', style: TextStyle(color: Brand.inkMuted)),
-      if (cart.station != null && offers.isEmpty) const Text('No special offer at this station today.', style: TextStyle(color: Brand.inkMuted)),
-      for (final o in offers) Padding(padding: const EdgeInsets.only(bottom: 10), child: DealCard(o: o, products: products, onSee: () {}, onAdd: (p) { if (p != null) { final l = CartLine.quick(p); if (l != null) { cart.add(l); toast(context, '${p['name']} added'); } } })),
+      const _PromoBox(),
       if (drops.isNotEmpty) ...[
         const SizedBox(height: 16),
         Text('This month’s drop', style: display(20)),
@@ -96,5 +89,59 @@ class _OffersScreenState extends State<OffersScreen> {
       const SizedBox(height: 12),
       Card(child: ListTile(leading: const Icon(Icons.card_giftcard, color: Brand.cherry), title: const Text('Give a cup. Get a cup.', style: TextStyle(fontWeight: FontWeight.w600)), trailing: const Icon(Icons.chevron_right), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReferralScreen())))),
     ]));
+  }
+}
+
+/// Enter a promo code once; it is then offered at checkout.
+class _PromoBox extends StatefulWidget {
+  const _PromoBox();
+  @override
+  State<_PromoBox> createState() => _PromoBoxState();
+}
+
+class _PromoBoxState extends State<_PromoBox> {
+  final _code = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() { _code.dispose(); super.dispose(); }
+
+  Future<void> _apply() async {
+    final cart = context.read<CartState>();
+    final code = _code.text.trim();
+    if (code.isEmpty) return;
+    setState(() { _busy = true; _error = null; });
+    try {
+      final r = await Api.instance.post('/promos/check', {'code': code, if (cart.station != null) 'station_id': cart.station!['id']});
+      cart.setPromo(Map<String, dynamic>.from(r as Map));
+      _code.clear();
+      if (mounted) toast(context, 'Promo ${r['code']} applied. Choose it at checkout.');
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final promo = context.watch<CartState>().promo;
+    return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (promo != null) Row(children: [
+        const Icon(Icons.sell, color: Brand.cherry),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${promo['code']} · ${promo['pct']}% off', style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text('${promo['title']}${(promo['min_total'] ?? 0) > 0 ? ' · min Rs ${promo['min_total']}' : ''}. Applied at checkout.', style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
+        ])),
+        TextButton(onPressed: () => context.read<CartState>().setPromo(null), child: const Text('Remove')),
+      ]) else Row(children: [
+        Expanded(child: TextField(controller: _code, textCapitalization: TextCapitalization.characters, textInputAction: TextInputAction.done, onSubmitted: (_) => _apply(), decoration: const InputDecoration(hintText: 'Enter promo code', isDense: true))),
+        const SizedBox(width: 10),
+        FilledButton(onPressed: _busy ? null : _apply, child: Text(_busy ? '…' : 'Apply')),
+      ]),
+      if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: const TextStyle(color: Brand.cherry, fontSize: 13))),
+    ])));
   }
 }

@@ -83,7 +83,10 @@ class CartState extends ChangeNotifier {
     _changed();
   }
 
-  void clear() { lines.clear(); _changed(); }
+  /// Promo code the customer applied on the Offers tab; used at checkout.
+  Json? promo;
+  void setPromo(Json? p) { promo = p; notifyListeners(); }
+  void clear() { lines.clear(); promo = null; _changed(); }
   List<Json> get payloadItems => [for (final l in lines) {'product_id': l.product['id'], 'qty': l.qty, 'option_ids': l.optionIds}];
 
   int passEpoch = 0;

@@ -23,6 +23,18 @@ const orderSchema = z.object({
   scheduled_for: z.string().datetime().optional(),
 });
 
+// Validate a promo code from the Offers tab (the discount itself is applied at checkout).
+customer.post('/promos/check', wrap(async (req, res) => {
+  const b = z.object({ code: z.string().trim().min(1).max(30), station_id: z.string().uuid().optional().nullable() }).parse(req.body);
+  const { rows } = await query('SELECT * FROM promo_codes WHERE upper(code)=upper($1)', [b.code]);
+  const p = rows[0];
+  if (!p || !p.active) throw bad('That promo code is not valid');
+  if (p.valid_until && new Date(p.valid_until) < new Date()) throw bad('That promo code has expired');
+  if (p.max_uses != null && p.used >= p.max_uses) throw bad('That promo code has been fully used');
+  if (p.station_id && b.station_id && p.station_id !== b.station_id) throw bad('That promo code is not valid at this station');
+  res.json({ code: p.code, title: p.title, pct: p.pct, min_total: p.min_total, valid_until: p.valid_until });
+}));
+
 // --- Fonepay sends a signed notification when a customer has paid (no bearer token) ---
 customer.post('/payments/webhook/fonepay', wrap(async (req, res) => {
   if (!verifyWebhookSignature(req.body, req.headers['x-signature'])) throw new HttpError(401, 'Bad signature');

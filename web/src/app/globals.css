@@ -112,17 +112,17 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; } .table
 .searchbar { display: flex; align-items: center; gap: 10px; background: var(--surface-raised); border: 2px solid var(--ink-muted); border-radius: var(--radius-pill); padding: 0 16px; min-height: 48px; }
 .searchbar input { border: 0; background: transparent; min-height: 44px; padding: 0; outline: none; }
 .searchbar:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
-.circles { display: flex; gap: 16px; overflow-x: auto; padding: 4px 2px 8px; scrollbar-width: none; }
+.circles { display: flex; gap: 16px; overflow-x: auto; padding: 10px 8px 8px; scrollbar-width: none; }
 .circles::-webkit-scrollbar { display: none; }
 .circle { flex: 0 0 auto; width: 72px; display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: 0; font: inherit; color: var(--ink); cursor: pointer; text-decoration: none; }
 .circle .dot { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--surface-raised); border: 2px solid var(--hairline); color: var(--cherry); position: relative; }
 .circle.hot .dot { background: var(--cherry); color: var(--on-cherry); border-color: var(--cherry); }
 .circle.gold .dot { background: var(--marigold); color: var(--on-marigold); border-color: var(--marigold); }
-.circle span { font-size: 12px; font-weight: 600; text-align: center; line-height: 14px; }
+.circle span { font-size: 12px; font-weight: 600; text-align: center; line-height: 1.25; }
 .circle:hover { text-decoration: none; }
-.circle .pip { position: absolute; top: -2px; right: -2px; background: var(--ink); color: var(--surface); font-size: 11px; font-weight: 700; border-radius: 99px; min-width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; padding: 0 5px; }
+.circle .pip { position: absolute; top: -4px; right: -4px; background: var(--ink); color: var(--surface); font-size: 11px; font-weight: 700; border-radius: 99px; min-width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; padding: 0 5px; }
 .hero-card { background: var(--cherry); color: var(--on-cherry); border-radius: var(--radius-lg); padding: 24px; position: relative; overflow: hidden; min-height: 170px; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; box-shadow: var(--shadow-card); }
-.hero-card h2 { font-size: 30px; color: inherit; max-width: 70%; } .hero-card .sun { position: absolute; right: -30px; top: -30px; width: 130px; height: 130px; border-radius: 50%; background: var(--marigold); display: flex; align-items: flex-end; justify-content: flex-start; padding: 40px 0 0 20px; }
+.hero-card h2 { font-size: 30px; line-height: 1.18; color: inherit; max-width: 70%; } .hero-card .sun { position: absolute; right: -30px; top: -30px; width: 130px; height: 130px; border-radius: 50%; background: var(--marigold); display: flex; align-items: flex-end; justify-content: flex-start; padding: 40px 0 0 20px; }
 .hero-card .sun b { color: var(--on-marigold); font-family: var(--font-display); font-size: 22px; line-height: 1; position: relative; left: -2px; top: 6px; }
 .hero-card .ridge { position: absolute; left: 0; right: 0; bottom: 0; height: 24px; background: url('/pattern-ridge.svg') repeat-x left bottom/40px 24px; filter: brightness(0) invert(1); opacity: 0.12; }
 .hscroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 10px; scroll-snap-type: x proximity; scrollbar-width: none; } .hscroll::-webkit-scrollbar { display: none; }

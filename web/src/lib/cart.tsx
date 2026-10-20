@@ -7,7 +7,9 @@ type Ctx = {
   station: Station | null; setStation: (s: Station | null) => void;
   lines: Line[]; add: (l: Line) => void; setQty: (key: string, qty: number) => void; remove: (key: string) => void; clear: () => void;
   count: number; total: number; ready: boolean;
+  promo: Promo | null; setPromo: (p: Promo | null) => void;
 };
+export type Promo = { code: string; title: string; pct: number; min_total?: number };
 const CartCtx = createContext<Ctx>(null as any);
 export const useCart = () => useContext(CartCtx);
 const KEY = 'sadhai.cart.v2';
@@ -16,6 +18,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [station, setStationState] = useState<Station | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
   const [ready, setReady] = useState(false);
+  const [promo, setPromo] = useState<Promo | null>(null);
   useEffect(() => {
     try { const j = JSON.parse(localStorage.getItem(KEY) || 'null'); if (j) { setStationState(j.station); setLines(j.lines || []); } } catch {}
     setReady(true);
@@ -26,10 +29,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const add = (l: Line) => setLines((cur) => { const ex = cur.find((x) => x.key === l.key); return ex ? cur.map((x) => (x === ex ? { ...x, qty: Math.min(10, x.qty + l.qty) } : x)) : [...cur, l]; });
   const setQty = (key: string, qty: number) => setLines((cur) => (qty <= 0 ? cur.filter((x) => x.key !== key) : cur.map((x) => (x.key === key ? { ...x, qty: Math.min(10, qty) } : x))));
   const remove = (key: string) => setLines((cur) => cur.filter((x) => x.key !== key));
-  const clear = () => setLines([]);
+  const clear = () => { setLines([]); setPromo(null); };
   const count = lines.reduce((a, l) => a + l.qty, 0);
   const total = lines.reduce((a, l) => a + l.qty * l.unit, 0);
-  return <CartCtx.Provider value={{ station, setStation, lines, add, setQty, remove, clear, count, total, ready }}>{children}</CartCtx.Provider>;
+  return <CartCtx.Provider value={{ station, setStation, lines, add, setQty, remove, clear, count, total, ready, promo, setPromo }}>{children}</CartCtx.Provider>;
 }
 
 /** Default selection for a product (used for one-tap add). Returns null when a required choice has no default. */

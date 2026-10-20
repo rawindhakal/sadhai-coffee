@@ -21,9 +21,33 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
-    version: '1.6.3',
+    version: '1.6.4',
     date: '20 October 2026',
     badge: 'Latest',
+    highlight: 'Promo Code on Offers, Offer of the Day Removed, Home Polish',
+    changes: [
+      {
+        category: 'Added',
+        items: [
+          { title: 'Promo code section on Offers', desc: 'Enter a promo code once on the Offers tab on web and mobile. It is validated and offered as an option at checkout.' },
+        ],
+      },
+      {
+        category: 'Changed',
+        items: [
+          { title: 'Offer of the day removed', desc: 'Removed from the Home page and the Offers tab on both platforms so Home stays simple.' },
+          { title: 'Home layout polish', desc: 'Shortcut badges are no longer clipped and heading line heights are more comfortable, consistent across web and mobile.' },
+        ],
+      },
+      {
+        category: 'Fixed',
+        items: [{ title: 'Offers endpoint error', desc: 'The central offers endpoint no longer fails with a server error.' }],
+      },
+    ],
+  },
+  {
+    version: '1.6.3',
+    date: '20 October 2026',
     highlight: '10-Cup Pass Wallet, Live Sync, Dedicated Passes Reporting, Station Kiosk QR & Dual Keyboards',
     changes: [
       {

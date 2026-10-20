@@ -20,7 +20,7 @@ class Brand {
 }
 
 TextStyle display(double size, {Color color = Brand.ink}) => GoogleFonts.bricolageGrotesque(
-    fontSize: size, fontWeight: FontWeight.w800, letterSpacing: -0.03 * size, height: 1.08, color: color);
+    fontSize: size, fontWeight: FontWeight.w800, letterSpacing: -0.03 * size, height: 1.18, color: color);
 
 ThemeData buildTheme() {
   final base = ThemeData(

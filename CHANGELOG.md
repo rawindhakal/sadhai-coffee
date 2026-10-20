@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.6.4] - 2026-10-20
+
+### Added
+- Promo code section on the Offers tab (mobile and web), validated by `POST /promos/check` and selectable at checkout.
+
+### Changed
+- Removed "Offer of the day" from Home and Offers on mobile and web.
+- Home layout polish: unclipped shortcut badges, relaxed heading line height.
+
+### Fixed
+- `/offers` returned 500 (wrong price column).
+
+---
+
 ## [1.6.3] - 2026-10-20
 
 ### Added
