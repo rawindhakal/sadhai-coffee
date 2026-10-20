@@ -187,7 +187,16 @@ class _CartScreenState extends State<CartScreen> {
       Text('Offer', style: display(18)),
       Card(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6), child: Column(children: [
         _opt(_offerType == 'none', 'No offer', () { setState(() { _offerType = 'none'; _offerId = null; }); _requote(cart); }),
-        for (final c in _coupons) _opt(_offerType == 'coupon' && _offerId == c['id'], c['title'], () { setState(() { _offerType = 'coupon'; _offerId = c['id']; }); _requote(cart); }),
+        for (final c in _coupons) _opt(
+          _offerType == 'coupon' && _offerId == c['id'],
+          c['title'],
+          () { setState(() { _offerType = 'coupon'; _offerId = c['id']; }); _requote(cart); },
+          hint: [
+            c['kind'] == 'pct' ? '${c['pct']}% off' : 'Free cup',
+            if ((c['min_spend'] ?? 0) > 0) 'min Rs ${c['min_spend']}',
+            if ((c['max_discount'] ?? 0) > 0) 'up to Rs ${c['max_discount']}',
+          ].join(' · '),
+        ),
         if (cart.promo != null) _opt(_offerType == 'promo', 'Promo ${cart.promo!['code']}', () { setState(() { _offerType = 'promo'; _offerId = null; }); _requote(cart); }, hint: '${cart.promo!['pct']}% off'),
         if (_pass != null) _opt(_offerType == 'pass', '10-cup pass', () { setState(() { _offerType = 'pass'; _offerId = null; }); _requote(cart); }, hint: '${_pass!['remaining']} cups left${(_pass!['count'] as int) > 1 ? ' · ${_pass!['count']} passes' : ''}'),
       ]))),
@@ -212,7 +221,7 @@ class _CartScreenState extends State<CartScreen> {
         const SizedBox(height: 16),
         Text('Pay with', style: display(18)),
         const SizedBox(height: 8),
-        Wrap(spacing: 8, runSpacing: 4, children: [for (final m in ['cash', 'fonepay']) ChoiceChip(label: Text(payLabel[m]!), selected: _method == m, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _method == m ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { setState(() => _method = m); _requote(cart); })]),
+        Wrap(spacing: 8, runSpacing: 4, children: [for (final m in ['cash', 'fonepay', 'esewa', 'khalti']) ChoiceChip(label: Text(payLabel[m]!), selected: _method == m, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _method == m ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { setState(() => _method = m); _requote(cart); })]),
       ],
       const SizedBox(height: 16),
       TextField(controller: _note, maxLength: 200, decoration: const InputDecoration(labelText: 'Note for the barista (optional)'), onSubmitted: (_) => _requote(cart)),

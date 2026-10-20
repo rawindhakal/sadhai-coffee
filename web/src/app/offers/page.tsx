@@ -52,12 +52,20 @@ export default function Offers() {
 
       {active.length > 0 && (
         <>
-      <div className="sectionhead"><h3>My coupons</h3></div>
-      {(
-        <div className="col">{active.map((c) => (
-          <div key={c.id} className="card flat row between"><div><strong>{c.title}</strong><div className="small muted">Valid until {fmtDate(c.expires_at)}</div></div><span className="chip marigold">{c.kind === 'pct' ? `${c.pct}% off` : 'Free cup'}</span></div>
-        ))}</div>
-      )}
+          <div className="sectionhead"><h3>My coupons</h3></div>
+          <div className="col">{active.map((c) => (
+            <div key={c.id} className="card flat row between">
+              <div>
+                <strong>{c.title}</strong>
+                <div className="small muted">
+                  Valid until {fmtDate(c.expires_at)}
+                  {c.min_spend ? ` · Min order ${rs(c.min_spend)}` : ''}
+                  {(c.max_discount || c.free_max) ? ` · Up to ${rs(c.max_discount || c.free_max)} off 1 drink` : ''}
+                </div>
+              </div>
+              <span className="chip marigold">{c.pct && c.pct < 100 ? `${c.pct}% off` : 'Free cup'}</span>
+            </div>
+          ))}</div>
         </>
       )}
 
@@ -65,7 +73,10 @@ export default function Offers() {
       {user ? <PassTab /> : <Empty><Link href="/login">Sign in</Link> to buy a pass.</Empty>}
 
       <div className="sectionhead"><h3>Give a cup. Get a cup.</h3></div>
-      <Link href="/account?tab=friends" className="card flat row between" style={{ color: 'inherit', textDecoration: 'none' }}><span className="row"><Icon name="gift" color="var(--cherry)" />Share your code with a friend</span><Icon name="nav" size={18} /></Link>
+      <Link href="/account?tab=friends" className="card flat row between" style={{ color: 'inherit', textDecoration: 'none' }}>
+        <span className="row"><Icon name="gift" color="var(--cherry)" />Share your referral code with a friend</span>
+        <Icon name="nav" size={18} />
+      </Link>
     </CustomerShell>
   );
 }

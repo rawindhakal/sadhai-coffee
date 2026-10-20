@@ -12,7 +12,7 @@ import { statement, scorecard } from '../lib/partners.js';
 import { labour } from '../lib/roster.js';
 import { range as dateRange } from '../lib/reports.js';
 import { costingTable, recipeBreakdown, effectiveUnitCost } from '../lib/costing.js';
-import { getSettings } from '../lib/settings.js';
+import { DEFAULT_SETTINGS, getSettings, validateSettingValue } from '../lib/settings.js';
 import { audienceUsers, deviceCounts, processCampaign, runAutomations } from '../lib/campaigns.js';
 import { pushStatus } from '../lib/push.js';
 import { extras, liveBoard, alerts, customerInsights, customerDetail, search } from '../lib/insights.js';
@@ -199,16 +199,19 @@ admin.get('/promos', wrap(async (req, res) => {
 admin.post('/promos', wrap(async (req, res) => {
   const b = z.object({
     code: z.string().trim().min(3).max(20).regex(/^[A-Za-z0-9]+$/), title: z.string().min(3).max(60), pct: z.number().int().min(1).max(60),
-    min_total: z.number().int().min(0).default(0), max_uses: z.number().int().min(1).optional(), per_user_limit: z.number().int().min(1).default(1),
+    min_total: z.number().int().min(0).default(0), max_discount: z.number().int().min(10).max(500).optional().nullable(),
+    drinks_only: z.boolean().default(true), max_uses: z.number().int().min(1).optional(), per_user_limit: z.number().int().min(1).default(1),
     valid_until: z.string().datetime().optional(), station_id: z.string().uuid().optional(),
   }).parse(req.body);
   if (req.user.role === 'manager') {
     if (!b.station_id) throw forbidden('Managers create promos for one of their stations');
     await assertStationAccess(req.user, b.station_id);
+    if (b.pct > 40) throw forbidden('Managers can offer up to 40% off. Ask the owner for more.');
   }
   const { rows } = await query(
-    `INSERT INTO promo_codes(code, title, pct, min_total, max_uses, per_user_limit, valid_until, station_id, created_by) VALUES (upper($1),$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [b.code, b.title, b.pct, b.min_total, b.max_uses || null, b.per_user_limit, b.valid_until || null, b.station_id || null, req.user.id],
+    `INSERT INTO promo_codes(code, title, pct, min_total, max_discount, drinks_only, max_uses, per_user_limit, valid_until, station_id, created_by)
+     VALUES (upper($1),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [b.code, b.title, b.pct, b.min_total, b.max_discount ?? null, b.drinks_only, b.max_uses || null, b.per_user_limit, b.valid_until || null, b.station_id || null, req.user.id],
   );
   await audit(req.user.id, 'promo.create', 'promo', rows[0].id, { code: b.code });
   res.status(201).json(rows[0]);
@@ -219,6 +222,90 @@ admin.patch('/promos/:id', wrap(async (req, res) => {
   if (!p) throw notFound('Promo not found');
   if (req.user.role === 'manager') { if (!p.station_id) throw forbidden(); await assertStationAccess(req.user, p.station_id); }
   await query('UPDATE promo_codes SET active=$2 WHERE id=$1', [p.id, active]);
+  res.json({ ok: true });
+}));
+
+/* ---- marketing: welcome offers & referrals (anti-breach) ---- */
+const WELCOME_REFERRAL_KEYS = [
+  'welcome_enabled', 'welcome_trigger', 'offer_require_verified_phone',
+  'first_cup_discount_pct', 'first_cup_free_max', 'first_cup_min_spend', 'first_cup_valid_days',
+  'ladder_enabled', 'ladder_pct', 'ladder_cups', 'ladder_max_discount', 'ladder_min_spend', 'ladder_days',
+  'referral_enabled', 'referral_min_spend', 'referral_cup_max', 'referral_reward_pct',
+  'referral_cap_month', 'referral_lifetime_cap', 'referrer_require_paid_order',
+];
+
+admin.get('/marketing/welcome-referrals', wrap(async (_req, res) => {
+  const [s, econRes, kpiRes, refRows, coupRows] = await Promise.all([
+    getSettings(),
+    query(`SELECT COALESCE(min(price), 120)::int AS min_drink_price, COALESCE(round(avg(price)), 160)::int AS avg_drink_price, COALESCE(round(avg(cost)), 45)::int AS avg_drink_cost FROM products WHERE active AND kind='drink' AND price > 0`),
+    query(`SELECT
+      (SELECT count(*)::int FROM coupons WHERE kind IN ('first_cup','pct') AND status='active' AND expires_at > now()) AS active_welcome_coupons,
+      (SELECT count(*)::int FROM coupons WHERE kind IN ('first_cup','pct') AND status='used') AS used_welcome_coupons,
+      (SELECT COALESCE(sum(o.discount),0)::int FROM orders o JOIN coupons c ON c.id=o.coupon_id WHERE c.kind IN ('first_cup','pct') AND o.status='picked_up') AS welcome_discount_spend,
+      (SELECT COALESCE(sum(o.total),0)::int FROM orders o JOIN coupons c ON c.id=o.coupon_id WHERE c.kind IN ('first_cup','pct') AND o.status='picked_up') AS welcome_net_revenue,
+      (SELECT count(*)::int FROM referrals WHERE status='pending') AS pending_referrals,
+      (SELECT count(*)::int FROM referrals WHERE status='rewarded') AS rewarded_referrals,
+      (SELECT count(*)::int FROM referrals WHERE status='blocked_duplicate') AS blocked_referrals,
+      (SELECT COALESCE(sum(o.discount),0)::int FROM orders o JOIN coupons c ON c.id=o.coupon_id WHERE c.kind='referral_cup' AND o.status='picked_up') AS referral_discount_spend,
+      (SELECT COALESCE(sum(o.total),0)::int FROM orders o JOIN coupons c ON c.id=o.coupon_id WHERE c.kind='referral_cup' AND o.status='picked_up') AS referral_net_revenue,
+      (SELECT count(*)::int FROM claimed_phones) AS tracked_phones`),
+    query(`SELECT r.id, r.status, r.created_at, r.rewarded_at, r.qualifying_amount,
+                  u1.name AS referrer_name, u1.phone AS referrer_phone,
+                  u2.name AS referee_name, u2.phone AS referee_phone, u2.phone_verified AS referee_verified
+             FROM referrals r
+             JOIN users u1 ON u1.id = r.referrer_id
+             JOIN users u2 ON u2.id = r.referee_id
+            ORDER BY r.created_at DESC LIMIT 60`),
+    query(`SELECT c.id, c.kind, c.title, c.pct, c.free_max, c.min_spend, c.max_discount, c.single_cup, c.status, c.expires_at, c.created_at,
+                  u.name AS customer_name, u.phone AS customer_phone
+             FROM coupons c JOIN users u ON u.id = c.user_id
+            ORDER BY c.created_at DESC LIMIT 80`),
+  ]);
+
+  const settings = Object.fromEntries(WELCOME_REFERRAL_KEYS.map((k) => [k, s[k]]));
+  res.json({
+    settings,
+    economics: econRes.rows[0],
+    kpi: kpiRes.rows[0],
+    referrals: refRows.rows,
+    coupons: coupRows.rows,
+  });
+}));
+
+admin.put('/marketing/welcome-referrals', wrap(async (req, res) => {
+  if (req.user.role !== 'owner') throw forbidden('Only the owner can change welcome offer and referral rules');
+  const raw = z.record(z.number()).parse(req.body);
+  const entries = Object.entries(raw)
+    .filter(([k]) => WELCOME_REFERRAL_KEYS.includes(k) && k in DEFAULT_SETTINGS)
+    .map(([k, v]) => [k, validateSettingValue(k, v)]);
+
+  const cur = await getSettings();
+  const next = { ...cur, ...Object.fromEntries(entries) };
+
+  // Anti-loss cross-field guardrails: minimum order spend must always cover or exceed the maximum discount cap
+  if (Number(next.first_cup_min_spend) < Number(next.first_cup_free_max)) {
+    throw bad(`Welcome 1st cup minimum spend (Rs ${next.first_cup_min_spend}) cannot be lower than its maximum discount cap (Rs ${next.first_cup_free_max}).`);
+  }
+  if (Number(next.ladder_min_spend) < Number(next.ladder_max_discount) + 60) {
+    throw bad(`Follow-up ladder minimum spend (Rs ${next.ladder_min_spend}) must be at least Rs ${Number(next.ladder_max_discount) + 60} to protect drink margin.`);
+  }
+  if (Number(next.referral_min_spend) < Number(next.referral_cup_max)) {
+    throw bad(`Referral qualifying minimum spend (Rs ${next.referral_min_spend}) cannot be lower than the referral reward cap (Rs ${next.referral_cup_max}).`);
+  }
+
+  for (const [k, v] of entries) {
+    await query(`INSERT INTO settings(key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=now()`, [k, JSON.stringify(v)]);
+  }
+  await audit(req.user.id, 'marketing.welcome_referrals_update', 'settings', null, Object.fromEntries(entries));
+  const updated = await getSettings();
+  res.json({ ok: true, settings: Object.fromEntries(WELCOME_REFERRAL_KEYS.map((k) => [k, updated[k]])) });
+}));
+
+admin.post('/marketing/welcome-referrals/revoke-coupon/:id', wrap(async (req, res) => {
+  if (req.user.role !== 'owner') throw forbidden('Only the owner can revoke coupons');
+  const { rows } = await query(`UPDATE coupons SET status='expired' WHERE id=$1 AND status='active' RETURNING id, user_id, title`, [req.params.id]);
+  if (!rows[0]) throw notFound('Active coupon not found');
+  await audit(req.user.id, 'coupon.revoke', 'coupon', rows[0].id, rows[0]);
   res.json({ ok: true });
 }));
 

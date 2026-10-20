@@ -133,20 +133,34 @@ export function PromosTab({ stations, isOwner }: { stations: any[]; isOwner: boo
   const { data, reload } = useData<any[]>('/admin/promos');
   const toast = useToast();
   const [add, setAdd] = useState(false);
-  const [f, setF] = useState<any>({ code: '', title: '', pct: 15, min_total: 0, max_uses: '', station_id: isOwner ? '' : stations[0]?.id, days: 14 });
+  const [f, setF] = useState<any>({ code: '', title: '', pct: 15, min_total: 200, max_discount: 100, drinks_only: true, max_uses: '', per_user_limit: 1, station_id: isOwner ? '' : stations[0]?.id, days: 14 });
   async function create() {
     try {
-      await api('/admin/promos', { method: 'POST', body: { code: f.code, title: f.title, pct: Number(f.pct), min_total: Number(f.min_total), max_uses: f.max_uses ? Number(f.max_uses) : undefined, station_id: f.station_id || undefined, valid_until: new Date(Date.now() + f.days * 86400000).toISOString() } });
+      await api('/admin/promos', {
+        method: 'POST',
+        body: {
+          code: f.code,
+          title: f.title,
+          pct: Number(f.pct),
+          min_total: Number(f.min_total) || 0,
+          max_discount: f.max_discount ? Number(f.max_discount) : null,
+          drinks_only: !!f.drinks_only,
+          max_uses: f.max_uses ? Number(f.max_uses) : undefined,
+          per_user_limit: Number(f.per_user_limit) || 1,
+          station_id: f.station_id || undefined,
+          valid_until: new Date(Date.now() + f.days * 86400000).toISOString(),
+        },
+      });
       setAdd(false); reload(); toast('Promo code created');
     } catch (e: any) { toast(e.message, true); }
   }
   return (
     <>
       <div className="row between" style={{ marginBottom: 12 }}><h3>Promo codes</h3><button className="btn primary sm" onClick={() => setAdd(true)}>New code</button></div>
-      <p className="small muted" style={{ marginBottom: 12 }}>Cap the spend: set a maximum number of uses and an end date. Pause any code that is not paying back within 30 days.</p>
+      <p className="small muted" style={{ marginBottom: 12 }}>Anti-loss guardrails: promo codes never stack on Offer of the Day or Limited Drops, and can be capped with a maximum Rs discount and restricted to drinks only.</p>
       {!data ? <Loading /> : !data.length ? <Empty>No promo codes yet.</Empty> : (
-        <div className="card tablewrap" style={{ padding: 0 }}><table><thead><tr><th>Code</th><th>Offer</th><th>Where</th><th className="num">Used</th><th>Ends</th><th /></tr></thead>
-          <tbody>{data.map((p) => <tr key={p.id}><td><strong>{p.code}</strong></td><td>{p.title} · {p.pct}% off{p.min_total ? ` over ${rs(p.min_total)}` : ''}</td><td>{p.station_name || 'All stations'}</td><td className="num">{p.used}{p.max_uses ? ` / ${p.max_uses}` : ''}</td><td>{p.valid_until ? fmtDate(p.valid_until) : 'No end'}</td>
+        <div className="card tablewrap" style={{ padding: 0 }}><table><thead><tr><th>Code</th><th>Offer & guardrails</th><th>Where</th><th className="num">Used</th><th>Ends</th><th /></tr></thead>
+          <tbody>{data.map((p) => <tr key={p.id}><td><strong>{p.code}</strong></td><td>{p.title} · {p.pct}% off{p.max_discount ? ` (up to ${rs(p.max_discount)})` : ''}{p.min_total ? ` · min ${rs(p.min_total)}` : ''}{p.drinks_only !== false ? ' · drinks only' : ''}</td><td>{p.station_name || 'All stations'}</td><td className="num">{p.used}{p.max_uses ? ` / ${p.max_uses}` : ''}</td><td>{p.valid_until ? fmtDate(p.valid_until) : 'No end'}</td>
             <td className="right"><button className={`btn sm ${p.active ? 'ghost' : 'hill'}`} onClick={async () => { await api(`/admin/promos/${p.id}`, { method: 'PATCH', body: { active: !p.active } }); reload(); }}>{p.active ? 'Pause' : 'Resume'}</button></td></tr>)}</tbody></table></div>
       )}
       {add && (
@@ -154,14 +168,286 @@ export function PromosTab({ stations, isOwner }: { stations: any[]; isOwner: boo
           <div className="col">
             <Field label="Code" hint="Letters and numbers only"><input value={f.code} onChange={(e) => setF({ ...f, code: e.target.value.toUpperCase() })} /></Field>
             <Field label="Name for staff"><input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
-            <div className="grid g2"><Field label="Percent off (max 60)"><input type="number" value={f.pct} onChange={(e) => setF({ ...f, pct: e.target.value })} /></Field><Field label="Minimum spend (Rs)"><input type="number" value={f.min_total} onChange={(e) => setF({ ...f, min_total: e.target.value })} /></Field></div>
-            <div className="grid g2"><Field label="Maximum uses"><input type="number" value={f.max_uses} onChange={(e) => setF({ ...f, max_uses: e.target.value })} /></Field><Field label="Valid for (days)"><input type="number" value={f.days} onChange={(e) => setF({ ...f, days: Number(e.target.value) })} /></Field></div>
+            <div className="grid g2"><Field label="Percent off (max 60)"><input type="number" min={1} max={60} value={f.pct} onChange={(e) => setF({ ...f, pct: e.target.value })} /></Field><Field label="Max discount cap (Rs)" hint="Prevents large-order loss"><input type="number" min={10} max={500} value={f.max_discount} onChange={(e) => setF({ ...f, max_discount: e.target.value })} /></Field></div>
+            <div className="grid g2"><Field label="Minimum spend (Rs)"><input type="number" min={0} value={f.min_total} onChange={(e) => setF({ ...f, min_total: e.target.value })} /></Field><Field label="Uses per customer"><input type="number" min={1} max={10} value={f.per_user_limit} onChange={(e) => setF({ ...f, per_user_limit: e.target.value })} /></Field></div>
+            <div className="grid g2"><Field label="Total max uses (optional)"><input type="number" value={f.max_uses} onChange={(e) => setF({ ...f, max_uses: e.target.value })} /></Field><Field label="Valid for (days)"><input type="number" value={f.days} onChange={(e) => setF({ ...f, days: Number(e.target.value) })} /></Field></div>
+            <label className="row card flat" style={{ justifyContent: 'space-between' }}><span>Apply to drinks only (exclude food & retail merch)</span><input type="checkbox" style={{ width: 22, minHeight: 22 }} checked={!!f.drinks_only} onChange={(e) => setF({ ...f, drinks_only: e.target.checked })} /></label>
             <Field label="Station"><select value={f.station_id} onChange={(e) => setF({ ...f, station_id: e.target.value })}>{isOwner && <option value="">All stations</option>}{stations.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
             <button className="btn primary" onClick={create}>Create</button>
           </div>
         </Modal>
       )}
     </>
+  );
+}
+
+export function WelcomeReferralsTab({ isOwner }: { isOwner: boolean }) {
+  const { data, reload, error } = useData<any>('/admin/marketing/welcome-referrals');
+  const toast = useToast();
+  const [v, setV] = useState<Record<string, number>>({});
+  const [subTab, setSubTab] = useState<'rules' | 'referrals' | 'coupons'>('rules');
+
+  if (!data) return <><ErrorNote error={error} /><Loading what="Loading welcome & referral rules" /></>;
+  const s = { ...data.settings, ...v };
+  const kpi = data.kpi || {};
+  const econ = data.economics || { min_drink_price: 120, avg_drink_price: 160, avg_drink_cost: 45 };
+  const changed = Object.keys(v).length;
+
+  const setNum = (key: string, val: number) => setV((prev) => ({ ...prev, [key]: val }));
+
+  async function save() {
+    try {
+      await api('/admin/marketing/welcome-referrals', { method: 'PUT', body: v });
+      setV({});
+      reload();
+      toast('Welcome & referral rules updated');
+    } catch (e: any) {
+      toast(e.message, true);
+    }
+  }
+
+  async function revokeCoupon(id: string) {
+    if (!confirm('Expire this coupon immediately?')) return;
+    try {
+      await api(`/admin/marketing/welcome-referrals/revoke-coupon/${id}`, { method: 'POST', body: {} });
+      reload();
+      toast('Coupon expired');
+    } catch (e: any) {
+      toast(e.message, true);
+    }
+  }
+
+  // Unit economics preview for anti-loss verification
+  const firstEffectiveDiscount = Math.min(s.first_cup_free_max, Math.floor((econ.avg_drink_price * s.first_cup_discount_pct) / 100));
+  const firstNetCash = Math.max(s.first_cup_min_spend, econ.avg_drink_price) - firstEffectiveDiscount;
+  const refEffectiveDiscount = Math.min(s.referral_cup_max, Math.floor((econ.avg_drink_price * s.referral_reward_pct) / 100));
+  const refNetCash = s.referral_min_spend + Math.max(s.referral_min_spend, econ.avg_drink_price) - refEffectiveDiscount * 2;
+
+  return (
+    <div className="col" style={{ gap: 20 }}>
+      <div className="row between wrap">
+        <div>
+          <h3>Welcome offers &amp; referrals</h3>
+          <p className="small muted" style={{ maxWidth: 720 }}>
+            Centralised customer acquisition engine with strict anti-breach &amp; anti-loss guardrails. Every welcome or referral coupon is locked to a single drink’s base price, requires a minimum order spend, never stacks on Daily Offers or Drops, and permanently tracks phone hashes so deleting &amp; recreating an account can never re-claim a reward.
+          </p>
+        </div>
+        <div className="row">
+          {(['rules', 'referrals', 'coupons'] as const).map((t) => (
+            <button key={t} className={`btn sm ${subTab === t ? 'primary' : 'ghost'}`} onClick={() => setSubTab(t)}>
+              {t === 'rules' ? 'Rules & Guardrails' : t === 'referrals' ? `Referrals (${data.referrals?.length || 0})` : `Coupon Ledger (${data.coupons?.length || 0})`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid g4">
+        <Stat label="Welcome coupons" value={`${kpi.active_welcome_coupons || 0} active`} delta={`${kpi.used_welcome_coupons || 0} redeemed · ${rs(kpi.welcome_net_revenue || 0)} net sales`} />
+        <Stat label="Welcome discount spend" value={rs(kpi.welcome_discount_spend || 0)} delta="Capped to 1 drink base price" />
+        <Stat label="Referrals rewarded" value={kpi.rewarded_referrals || 0} delta={`${kpi.pending_referrals || 0} pending · ${kpi.blocked_referrals || 0} duplicate blocked`} />
+        <Stat label="Anti-recreate registry" value={`${kpi.tracked_phones || 0} phones`} delta={`Referral net sales: ${rs(kpi.referral_net_revenue || 0)}`} />
+      </div>
+
+      {subTab === 'rules' && (
+        <>
+          <div className="card" style={{ background: 'var(--surface-sunk)', borderLeft: '4px solid var(--hill)' }}>
+            <div className="row between wrap">
+              <div>
+                <strong>Anti-Breach &amp; Unit Economics Protection Summary</strong>
+                <p className="small muted" style={{ marginTop: 4 }}>
+                  Average drink price: <strong>{rs(econ.avg_drink_price)}</strong> · Average drink food cost: <strong>{rs(econ.avg_drink_cost)}</strong>
+                </p>
+              </div>
+              <span className="chip hill">6 Active Guardrails</span>
+            </div>
+            <div className="grid g3" style={{ marginTop: 12, gap: 12 }}>
+              <div className="card flat">
+                <div className="small muted">1. Single-Cup Base Price Cap</div>
+                <div className="small" style={{ marginTop: 4 }}>Coupons apply to <strong>1 drink’s base price only</strong> (never cart-wide, never paid syrups/shots, never food or retail merch).</div>
+              </div>
+              <div className="card flat">
+                <div className="small muted">2. Minimum Spend Floor</div>
+                <div className="small" style={{ marginTop: 4 }}>
+                  Welcome 1st cup collects at least <strong>{rs(firstNetCash)}</strong> cash (vs {rs(econ.avg_drink_cost)} cost). Referral cycle collects <strong>{rs(Math.max(0, refNetCash))}</strong> net cash across qualifying + reward orders.
+                </div>
+              </div>
+              <div className="card flat">
+                <div className="small muted">3. Permanent Phone Hash Registry</div>
+                <div className="small" style={{ marginTop: 4 }}>Deleting an account and signing up again with the same phone number is permanently blocked from re-claiming welcome or referral rewards.</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="row between wrap" style={{ marginBottom: 14 }}>
+              <div>
+                <h3>1. Welcome offer (1st cup)</h3>
+                <p className="small muted">Reward new customers without giving away free inventory on zero-revenue accounts.</p>
+              </div>
+              <span className={`chip ${s.welcome_enabled ? 'hill' : ''}`}>{s.welcome_enabled ? 'Enabled' : 'Disabled'}</span>
+            </div>
+            <div className="grid g3" style={{ gap: 14 }}>
+              <label className="row card flat" style={{ justifyContent: 'space-between' }}>
+                <span>Enable welcome offer for new customers</span>
+                <input type="checkbox" disabled={!isOwner} style={{ width: 22, minHeight: 22 }} checked={!!s.welcome_enabled} onChange={(e) => setNum('welcome_enabled', e.target.checked ? 1 : 0)} />
+              </label>
+              <Field label="When to unlock welcome coupon" hint="Unlocking after 1st paid order prevents fake signups">
+                <select disabled={!isOwner} value={s.welcome_trigger ?? 1} onChange={(e) => setNum('welcome_trigger', Number(e.target.value))}>
+                  <option value={1}>After 1st full-price paid order (Recommended)</option>
+                  <option value={0}>Immediately on registration</option>
+                </select>
+              </Field>
+              <label className="row card flat" style={{ justifyContent: 'space-between' }}>
+                <span>Require NestSMS verified phone to redeem</span>
+                <input type="checkbox" disabled={!isOwner} style={{ width: 22, minHeight: 22 }} checked={!!s.offer_require_verified_phone} onChange={(e) => setNum('offer_require_verified_phone', e.target.checked ? 1 : 0)} />
+              </label>
+              <Field label="1st cup discount (%)" hint="50% covers margin; 100% = free up to cap">
+                <input type="number" disabled={!isOwner} min={0} max={100} value={s.first_cup_discount_pct} onChange={(e) => setNum('first_cup_discount_pct', Number(e.target.value))} />
+              </Field>
+              <Field label="Max discount cap (Rs)" hint="Max Rs taken off 1 drink base price">
+                <input type="number" disabled={!isOwner} min={30} max={300} value={s.first_cup_free_max} onChange={(e) => setNum('first_cup_free_max', Number(e.target.value))} />
+              </Field>
+              <Field label="Minimum order spend (Rs)" hint="Must be >= Max discount cap">
+                <input type="number" disabled={!isOwner} min={100} max={2000} value={s.first_cup_min_spend} onChange={(e) => setNum('first_cup_min_spend', Number(e.target.value))} />
+              </Field>
+              <Field label="Coupon valid for (days)" hint="1 to 60 days">
+                <input type="number" disabled={!isOwner} min={1} max={60} value={s.first_cup_valid_days} onChange={(e) => setNum('first_cup_valid_days', Number(e.target.value))} />
+              </Field>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="row between wrap" style={{ marginBottom: 14 }}>
+              <div>
+                <h3>2. Follow-up cup ladder (cups 2, 3…)</h3>
+                <p className="small muted">Optional single-cup percentage coupons to build a daily habit after the welcome cup.</p>
+              </div>
+              <span className={`chip ${s.ladder_enabled ? 'hill' : ''}`}>{s.ladder_enabled ? 'Enabled' : 'Disabled'}</span>
+            </div>
+            <div className="grid g3" style={{ gap: 14 }}>
+              <label className="row card flat" style={{ justifyContent: 'space-between' }}>
+                <span>Enable follow-up cup ladder</span>
+                <input type="checkbox" disabled={!isOwner} style={{ width: 22, minHeight: 22 }} checked={!!s.ladder_enabled} onChange={(e) => setNum('ladder_enabled', e.target.checked ? 1 : 0)} />
+              </label>
+              <Field label="Number of follow-up coupons" hint="0 to 3 coupons (1 cup per order)">
+                <input type="number" disabled={!isOwner} min={0} max={3} value={s.ladder_cups} onChange={(e) => setNum('ladder_cups', Number(e.target.value))} />
+              </Field>
+              <Field label="Discount percent (%)" hint="Max 40% off 1 drink base price">
+                <input type="number" disabled={!isOwner} min={5} max={40} value={s.ladder_pct} onChange={(e) => setNum('ladder_pct', Number(e.target.value))} />
+              </Field>
+              <Field label="Max discount cap per coupon (Rs)" hint="30 to 200 Rs">
+                <input type="number" disabled={!isOwner} min={30} max={200} value={s.ladder_max_discount} onChange={(e) => setNum('ladder_max_discount', Number(e.target.value))} />
+              </Field>
+              <Field label="Minimum order spend (Rs)" hint="Must be at least cap + Rs 60">
+                <input type="number" disabled={!isOwner} min={120} max={2000} value={s.ladder_min_spend} onChange={(e) => setNum('ladder_min_spend', Number(e.target.value))} />
+              </Field>
+              <Field label="Valid for (days)" hint="1 to 60 days">
+                <input type="number" disabled={!isOwner} min={1} max={60} value={s.ladder_days} onChange={(e) => setNum('ladder_days', Number(e.target.value))} />
+              </Field>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="row between wrap" style={{ marginBottom: 14 }}>
+              <div>
+                <h3>3. Referral program (“Give a cup, get a cup”)</h3>
+                <p className="small muted">Both friend and referrer are rewarded ONLY after the friend completes a full-price paid cash/Fonepay/eSewa/Khalti order meeting the minimum spend.</p>
+              </div>
+              <span className={`chip ${s.referral_enabled ? 'hill' : ''}`}>{s.referral_enabled ? 'Enabled' : 'Disabled'}</span>
+            </div>
+            <div className="grid g3" style={{ gap: 14 }}>
+              <label className="row card flat" style={{ justifyContent: 'space-between' }}>
+                <span>Enable referral program</span>
+                <input type="checkbox" disabled={!isOwner} style={{ width: 22, minHeight: 22 }} checked={!!s.referral_enabled} onChange={(e) => setNum('referral_enabled', e.target.checked ? 1 : 0)} />
+              </label>
+              <label className="row card flat" style={{ justifyContent: 'space-between' }}>
+                <span>Referrer must have ≥1 paid order</span>
+                <input type="checkbox" disabled={!isOwner} style={{ width: 22, minHeight: 22 }} checked={!!s.referrer_require_paid_order} onChange={(e) => setNum('referrer_require_paid_order', e.target.checked ? 1 : 0)} />
+              </label>
+              <Field label="Friend’s qualifying order min spend (Rs)" hint="Full-price paid order required to unlock">
+                <input type="number" disabled={!isOwner} min={120} max={2000} value={s.referral_min_spend} onChange={(e) => setNum('referral_min_spend', Number(e.target.value))} />
+              </Field>
+              <Field label="Referral reward discount (%)" hint="50% = half-price cup; 100% = free cup up to cap">
+                <input type="number" disabled={!isOwner} min={10} max={100} value={s.referral_reward_pct} onChange={(e) => setNum('referral_reward_pct', Number(e.target.value))} />
+              </Field>
+              <Field label="Referral reward max cap (Rs)" hint="Max Rs discount on 1 drink base price">
+                <input type="number" disabled={!isOwner} min={50} max={350} value={s.referral_cup_max} onChange={(e) => setNum('referral_cup_max', Number(e.target.value))} />
+              </Field>
+              <Field label="Monthly cap per referrer" hint="1 to 20 rewards / month">
+                <input type="number" disabled={!isOwner} min={1} max={20} value={s.referral_cap_month} onChange={(e) => setNum('referral_cap_month', Number(e.target.value))} />
+              </Field>
+              <Field label="Lifetime cap per referrer" hint="1 to 100 rewards all-time">
+                <input type="number" disabled={!isOwner} min={1} max={100} value={s.referral_lifetime_cap} onChange={(e) => setNum('referral_lifetime_cap', Number(e.target.value))} />
+              </Field>
+            </div>
+          </div>
+
+          {isOwner && (
+            <div className="row" style={{ position: 'sticky', bottom: 12 }}>
+              <button className="btn primary lg" disabled={!changed} onClick={save}>
+                {changed ? `Save ${changed} change${changed > 1 ? 's' : ''}` : 'All rules saved'}
+              </button>
+              {changed > 0 && <button className="btn ghost" onClick={() => setV({})}>Reset unsaved</button>}
+            </div>
+          )}
+        </>
+      )}
+
+      {subTab === 'referrals' && (
+        !data.referrals?.length ? <Empty>No referrals recorded yet.</Empty> : (
+          <div className="card tablewrap" style={{ padding: 0 }}>
+            <table>
+              <thead><tr><th>When</th><th>Referrer</th><th>Friend (Referee)</th><th>Phone Verified</th><th>Qualifying Order</th><th>Status</th></tr></thead>
+              <tbody>
+                {data.referrals.map((r: any) => (
+                  <tr key={r.id}>
+                    <td>{fmtDateTime(r.created_at)}</td>
+                    <td><strong>{r.referrer_name}</strong><div className="small muted">{r.referrer_phone}</div></td>
+                    <td><strong>{r.referee_name}</strong><div className="small muted">{r.referee_phone}</div></td>
+                    <td>{r.referee_verified ? <span className="chip hill">Verified</span> : <span className="chip">Unverified</span>}</td>
+                    <td>{r.qualifying_amount ? rs(r.qualifying_amount) : 'Waiting for 1st paid order'}</td>
+                    <td>
+                      <span className={`chip ${r.status === 'rewarded' ? 'hill' : r.status === 'blocked_duplicate' ? 'cherry' : ''}`}>
+                        {r.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+
+      {subTab === 'coupons' && (
+        !data.coupons?.length ? <Empty>No welcome or referral coupons issued yet.</Empty> : (
+          <div className="card tablewrap" style={{ padding: 0 }}>
+            <table>
+              <thead><tr><th>Issued</th><th>Customer</th><th>Coupon</th><th>Guardrails</th><th>Expires</th><th>Status</th><th /></tr></thead>
+              <tbody>
+                {data.coupons.map((c: any) => (
+                  <tr key={c.id}>
+                    <td>{fmtDate(c.created_at)}</td>
+                    <td><strong>{c.customer_name}</strong><div className="small muted">{c.customer_phone}</div></td>
+                    <td><strong>{c.title}</strong><div className="small muted">{c.kind}</div></td>
+                    <td className="small">
+                      {c.pct ? `${c.pct}% off` : 'Free'} · cap {rs(c.max_discount || c.free_max || 180)} · min spend {rs(c.min_spend || 0)} · 1 drink base
+                    </td>
+                    <td>{fmtDate(c.expires_at)}</td>
+                    <td><span className={`chip ${c.status === 'active' ? 'hill' : ''}`}>{c.status}</span></td>
+                    <td className="right">
+                      {isOwner && c.status === 'active' && (
+                        <button className="btn sm ghost" onClick={() => revokeCoupon(c.id)}>Revoke</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+    </div>
   );
 }
 

@@ -21,9 +21,51 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
-    version: '1.6.5',
+    version: '1.6.6',
     date: '20 October 2026',
     badge: 'Latest',
+    highlight: 'Fonepay Dynamic QR Fix, eSewa & Khalti QR Gateways, NestSMS OTP, and Non-Breachable Marketing Welcome & Referrals',
+    changes: [
+      {
+        category: 'Added',
+        items: [
+          {
+            title: 'eSewa & Khalti Dynamic QR Payment Gateways',
+            desc: 'Pay with Fonepay QR, eSewa QR, or Khalti QR across Web, Android, Kiosk, Station POS, and 10-cup Pass purchases, complete with live status polling, signed callbacks/webhooks, and Owner settlement reconciliation.',
+          },
+          {
+            title: 'NestSMS Gateway & Phone Verification',
+            desc: 'Integrated NestSMS (api.nestsms.com) for 6-digit SMS OTP phone verification, optional order-ready SMS alerts, and one-click Owner Studio connection tests.',
+          },
+          {
+            title: 'Marketing -> Welcome & Referrals Console',
+            desc: 'Moved Welcome offers and referrals into the Marketing section for Owners and Managers, with live KPIs, referral ledger, active coupon audit, and one-click revocation.',
+          },
+        ],
+      },
+      {
+        category: 'Security',
+        items: [
+          {
+            title: 'Six Non-Breachable Anti-Loss Guardrails',
+            desc: 'Enforced single-drink base-price discount caps (excluding add-ons and food), non-stacking with Offer of the Day or Limited Drops, minimum spend floors, permanent SHA-256 phone hash registry blocking delete-and-recreate loops, and qualifying full-price paid order verification before referral rewards unlock.',
+          },
+        ],
+      },
+      {
+        category: 'Fixed',
+        items: [
+          {
+            title: 'Fonepay Dynamic QR Hardening',
+            desc: 'Fixed PRN length truncation with compact 24-character alphanumeric PRNs, strict paymentStatus verification, exact amount validation, and sanitized remarks.',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: '1.6.5',
+    date: '20 October 2026',
     highlight: 'Offer of the Day Restored, Coupon Code at Checkout, Automatic Coupons Retired',
     changes: [
       {

@@ -5,8 +5,9 @@ import { wrap, bad, notFound, forbidden, HttpError } from '../lib/http.js';
 import { authenticate, requireRole, verifyAccess } from '../lib/auth.js';
 import { subscribe } from '../lib/hub.js';
 import { createOrder, quote, fullOrder, cancelOrder, rateOrder, confirmPayment, buyPass } from '../lib/orders.js';
+import { getSettings } from '../lib/settings.js';
 import { rt } from '../lib/runtime.js';
-import { verifyWebhookSignature, checkFonepay } from '../lib/payments.js';
+import { verifyWebhookSignature, checkPaymentStatus, verifyEsewa, checkKhalti, ONLINE_PROVIDERS } from '../lib/payments.js';
 import { pool } from '../lib/db.js';
 
 export const customer = Router();
@@ -15,7 +16,7 @@ const itemSchema = z.object({ product_id: z.string().uuid(), qty: z.number().int
 const orderSchema = z.object({
   station_id: z.string().uuid(),
   items: z.array(itemSchema).min(1).max(20),
-  payment_method: z.enum(['cash', 'fonepay', 'pass']),
+  payment_method: z.enum(['cash', 'fonepay', 'esewa', 'khalti', 'pass']),
   coupon_id: z.string().uuid().optional().nullable(),
   promo_code: z.string().trim().max(30).optional().nullable(),
   note: z.string().max(200).optional(),
@@ -32,14 +33,83 @@ customer.post('/promos/check', wrap(async (req, res) => {
   if (p.valid_until && new Date(p.valid_until) < new Date()) throw bad('That promo code has expired');
   if (p.max_uses != null && p.used >= p.max_uses) throw bad('That promo code has been fully used');
   if (p.station_id && b.station_id && p.station_id !== b.station_id) throw bad('That promo code is not valid at this station');
-  res.json({ code: p.code, title: p.title, pct: p.pct, min_total: p.min_total, valid_until: p.valid_until });
+  res.json({ code: p.code, title: p.title, pct: p.pct, min_total: p.min_total, max_discount: p.max_discount, drinks_only: p.drinks_only, valid_until: p.valid_until });
 }));
 
-// --- Fonepay sends a signed notification when a customer has paid (no bearer token) ---
-customer.post('/payments/webhook/fonepay', wrap(async (req, res) => {
-  if (!verifyWebhookSignature(req.body, req.headers['x-signature'])) throw new HttpError(401, 'Bad signature');
-  const r = await confirmPayment(req.body.payment_id, { ref: req.body.provider_ref, raw: req.body, outcome: req.body.status === 'success' ? 'paid' : 'failed' });
+// --- Signed webhooks for Fonepay, eSewa, and Khalti (no bearer token) ---
+customer.post('/payments/webhook/:provider', wrap(async (req, res) => {
+  const provider = req.params.provider;
+  if (!ONLINE_PROVIDERS.includes(provider)) throw bad('Unknown payment provider');
+  if (!verifyWebhookSignature(req.body, req.headers['x-signature'], provider)) throw new HttpError(401, 'Bad signature');
+  const paymentId = req.body.payment_id || req.body.transaction_uuid || req.body.purchase_order_id;
+  if (!paymentId) throw bad('Missing payment_id');
+  const statusStr = String(req.body.status || '').toLowerCase();
+  const outcome = ['success', 'paid', 'complete', 'completed'].includes(statusStr) ? 'paid' : 'failed';
+  const ref = req.body.provider_ref || req.body.transaction_code || req.body.pidx || `${provider.toUpperCase()}-WH`;
+  const r = await confirmPayment(paymentId, { ref, raw: req.body, outcome });
   res.json({ ok: true, already: !!r.already });
+}));
+
+// Auto-submitting HTML form for eSewa ePay v2 when opened on a customer's phone via QR scan or "Open in eSewa"
+customer.get('/payments/esewa/start', wrap(async (req, res) => {
+  const pid = String(req.query.payment_id || '');
+  const { rows } = await query('SELECT * FROM payments WHERE id=$1 AND provider=$2', [pid, 'esewa']);
+  const p = rows[0];
+  if (!p) throw notFound('eSewa payment not found');
+  const form = p.raw?.epay_form;
+  const action = p.raw?.epay_action || 'https://epay.esewa.com.np/api/epay/main/v2/form';
+  if (!form) throw bad('eSewa payment form is not available for this transaction');
+  const inputs = Object.entries(form)
+    .map(([k, v]) => `<input type="hidden" name="${k.replace(/"/g, '&quot;')}" value="${String(v ?? '').replace(/"/g, '&quot;')}" />`)
+    .join('\n');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Redirecting to eSewa…</title></head>
+    <body style="font-family:system-ui,sans-serif;background:#1A1410;color:#FAF6F0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+      <div style="text-align:center">
+        <p style="font-size:16px;margin-bottom:8px">Opening eSewa secure checkout…</p>
+        <p style="font-size:12px;opacity:0.7">Rs ${p.amount} · Sadhai Coffee</p>
+        <form id="esewaForm" method="POST" action="${action}">${inputs}</form>
+      </div>
+      <script>document.getElementById('esewaForm').submit();</script>
+    </body></html>`);
+}));
+
+// eSewa callback after customer completes or cancels payment in browser/app
+customer.get('/payments/esewa/callback', wrap(async (req, res) => {
+  const pid = String(req.query.payment_id || '');
+  const outcomeParam = String(req.query.outcome || '');
+  const dataB64 = String(req.query.data || '');
+  const { rows } = await query('SELECT * FROM payments WHERE id=$1', [pid]);
+  const p = rows[0];
+  const baseUrl = rt('public_web_url') || 'https://sadhaicoffee.com';
+  if (!p) return res.redirect(`${baseUrl}/orders`);
+  if (outcomeParam === 'failed') {
+    await confirmPayment(p.id, { raw: { callback: 'failed' }, outcome: 'failed' });
+  } else if (p.status === 'pending') {
+    try {
+      const c = await verifyEsewa(p, dataB64 || undefined);
+      if (c.paid) await confirmPayment(p.id, { ref: c.ref, raw: c.raw, outcome: 'paid' });
+      else if (c.failed) await confirmPayment(p.id, { raw: c.raw, outcome: 'failed' });
+    } catch { /* poll will retry */ }
+  }
+  return res.redirect(p.order_id ? `${baseUrl}/orders/${p.order_id}` : `${baseUrl}/account`);
+}));
+
+// Khalti callback after customer completes or cancels payment in browser/app
+customer.get('/payments/khalti/callback', wrap(async (req, res) => {
+  const pid = String(req.query.payment_id || req.query.purchase_order_id || '');
+  const { rows } = await query('SELECT * FROM payments WHERE id=$1', [pid]);
+  const p = rows[0];
+  const baseUrl = rt('public_web_url') || 'https://sadhaicoffee.com';
+  if (!p) return res.redirect(`${baseUrl}/orders`);
+  if (p.status === 'pending') {
+    try {
+      const c = await checkKhalti(p);
+      if (c.paid) await confirmPayment(p.id, { ref: c.ref, raw: c.raw, outcome: 'paid' });
+      else if (c.failed) await confirmPayment(p.id, { raw: c.raw, outcome: 'failed' });
+    } catch { /* poll will retry */ }
+  }
+  return res.redirect(p.order_id ? `${baseUrl}/orders/${p.order_id}` : `${baseUrl}/account`);
 }));
 
 // SSE: EventSource cannot send headers, so accept ?access_token=
@@ -58,21 +128,30 @@ customer.get('/events', wrap(async (req, res) => {
 
 customer.use(authenticate);
 
-// Status of a payment. While it is pending in live mode, this asks Fonepay and confirms the order if it has been paid.
+// Status of a payment. While it is pending in live mode, this polls Fonepay, eSewa, or Khalti and confirms the order if paid.
 customer.get('/payments/:id', wrap(async (req, res) => {
   const { rows } = await query('SELECT * FROM payments WHERE id=$1', [req.params.id]);
   let p = rows[0];
   const mine = p && (p.user_id === req.user.id || req.user.role !== 'customer');
   if (!mine) throw notFound('Payment not found');
-  if (p.status === 'pending' && p.provider === 'fonepay' && rt('payment_mode') === 'live') {
+  if (p.status === 'pending' && ONLINE_PROVIDERS.includes(p.provider) && rt('payment_mode') === 'live') {
     try {
-      const c = await checkFonepay(p);
+      const c = await checkPaymentStatus(p);
       if (c.paid) await confirmPayment(p.id, { ref: c.ref, raw: c.raw });
       else if (c.failed) await confirmPayment(p.id, { raw: c.raw, outcome: 'failed' });
     } catch { /* still waiting; the customer can try again */ }
     p = (await query('SELECT * FROM payments WHERE id=$1', [p.id])).rows[0];
   }
-  res.json({ id: p.id, status: p.status, amount: p.amount, provider: p.provider, mode: p.raw?.sandbox ? 'sandbox' : 'qr', qr_message: p.raw?.qr_message || null, order: p.order_id ? await fullOrder(p.order_id) : null });
+  res.json({
+    id: p.id,
+    status: p.status,
+    amount: p.amount,
+    provider: p.provider,
+    mode: p.raw?.sandbox ? 'sandbox' : 'qr',
+    qr_message: p.raw?.qr_message || null,
+    pay_url: p.raw?.pay_url || null,
+    order: p.order_id ? await fullOrder(p.order_id) : null,
+  });
 }));
 
 customer.post('/payments/:id/confirm', wrap(async (req, res) => {
@@ -142,30 +221,46 @@ customer.get('/passes', wrap(async (req, res) => {
     .sort((a, b) => (!a.activated_at - !b.activated_at) || (new Date(a.expires_at) - new Date(b.expires_at)) || (new Date(a.purchased_at) - new Date(b.purchased_at)));
   queue.forEach((p, i) => { p.queue_position = i + 1; p.state = i === 0 ? 'using' : 'next'; });
   for (const p of list) { if (!p.state) p.state = p.status === 'used' ? 'used' : p.status; p.starts_on_first_use = !p.activated_at && p.status === 'active'; }
-  res.json(list.map((p, i) => ({ ...p, total_remaining: queue.reduce((a, q) => a + q.remaining, 0) })));
+  res.json(list.map((p) => ({ ...p, total_remaining: queue.reduce((a, q) => a + q.remaining, 0) })));
 }));
 
 customer.post('/passes', requireRole('customer'), wrap(async (req, res) => {
-  const b = z.object({ payment_method: z.enum(['fonepay', 'cash']) }).parse(req.body);
+  const b = z.object({ payment_method: z.enum(['fonepay', 'esewa', 'khalti', 'cash']).default('fonepay') }).parse(req.body);
   res.status(201).json(await buyPass(req.user, b.payment_method));
 }));
 
 customer.get('/coupons', wrap(async (req, res) => {
   await query(`UPDATE coupons SET status='expired' WHERE user_id=$1 AND status='active' AND expires_at < now()`, [req.user.id]);
   const { rows } = await query(
-    `SELECT id, kind, title, pct, free_max, status, expires_at, created_at FROM coupons WHERE user_id=$1
+    `SELECT id, kind, title, pct, free_max, min_spend, max_discount, single_cup, status, expires_at, created_at FROM coupons WHERE user_id=$1
       ORDER BY (status='active') DESC, expires_at`, [req.user.id],
   );
   res.json(rows);
 }));
 
 customer.get('/referrals', wrap(async (req, res) => {
-  const u = (await query('SELECT referral_code FROM users WHERE id=$1', [req.user.id])).rows[0];
-  const { rows } = await query(
-    `SELECT r.status, r.created_at, u.name FROM referrals r JOIN users u ON u.id=r.referee_id WHERE r.referrer_id=$1 ORDER BY r.created_at DESC`, [req.user.id],
-  );
-  const month = (await query(`SELECT count(*)::int AS n FROM referrals WHERE referrer_id=$1 AND status='rewarded' AND rewarded_at >= date_trunc('month', now())`, [req.user.id])).rows[0].n;
-  res.json({ code: u.referral_code, friends: rows, rewarded_this_month: month, cap: 3 });
+  const [uRes, rowsRes, monthRes, lifeRes, s] = await Promise.all([
+    query('SELECT referral_code, phone_verified FROM users WHERE id=$1', [req.user.id]),
+    query(`SELECT r.status, r.created_at, r.rewarded_at, r.qualifying_amount, u.name FROM referrals r JOIN users u ON u.id=r.referee_id WHERE r.referrer_id=$1 ORDER BY r.created_at DESC`, [req.user.id]),
+    query(`SELECT count(*)::int AS n FROM referrals WHERE referrer_id=$1 AND status='rewarded' AND rewarded_at >= date_trunc('month', now())`, [req.user.id]),
+    query(`SELECT count(*)::int AS n FROM referrals WHERE referrer_id=$1 AND status='rewarded'`, [req.user.id]),
+    getSettings(),
+  ]);
+  const u = uRes.rows[0];
+  res.json({
+    code: u?.referral_code || '',
+    phone_verified: !!u?.phone_verified,
+    friends: rowsRes.rows,
+    rewarded_this_month: monthRes.rows[0].n,
+    rewarded_lifetime: lifeRes.rows[0].n,
+    cap: Number(s.referral_cap_month) || 5,
+    lifetime_cap: Number(s.referral_lifetime_cap) || 25,
+    enabled: !!Number(s.referral_enabled),
+    min_spend: Number(s.referral_min_spend) || 180,
+    cup_max: Number(s.referral_cup_max) || 180,
+    reward_pct: Number(s.referral_reward_pct) || 50,
+    require_verified_phone: !!Number(s.offer_require_verified_phone),
+  });
 }));
 
 customer.get('/notifications', wrap(async (req, res) => {
@@ -176,3 +271,4 @@ customer.post('/notifications/read', wrap(async (req, res) => {
   await query('UPDATE notifications SET read=true WHERE user_id=$1', [req.user.id]);
   res.json({ ok: true });
 }));
+

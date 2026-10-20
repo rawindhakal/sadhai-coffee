@@ -3,10 +3,14 @@ import { bad, conflict, forbidden, notFound } from './http.js';
 import { publish } from './hub.js';
 import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
-import { initiate } from './payments.js';
+import { initiate, ONLINE_PROVIDERS, ALL_PAYMENT_METHODS } from './payments.js';
+import { sendSms } from './sms.js';
 import { rtBool } from './runtime.js';
 import crypto from 'node:crypto';
 import { stockNeeds, recipeBreakdown } from './costing.js';
+
+export const hashPhone = (phone) =>
+  crypto.createHash('sha256').update(String(phone || '').trim()).digest('hex');
 
 const KTM_NOW = `(now() AT TIME ZONE 'Asia/Kathmandu')::time`;
 
@@ -179,7 +183,7 @@ async function priceLines(db, stationId, items) {
     }
     const unit = base + chosen.reduce((a, o) => a + o.price_delta, 0);
     lines.push({
-      product: p, product_id: p.id, name: p.name, qty, unit_price: unit, line_total: unit * qty,
+      product: p, product_id: p.id, name: p.name, qty, base_price: base, unit_price: unit, line_total: unit * qty,
       options: chosen.map((o) => ({ id: o.id, name: o.name, price_delta: o.price_delta })),
       drop_id: drop?.id || null, offer_id: offerId,
     });
@@ -192,6 +196,8 @@ async function discountFor(db, user, input, lines, subtotal, stationId) {
   const cups = lines.reduce((a, l) => a + l.qty, 0);
   const wants = [input.payment_method === 'pass', !!input.coupon_id, !!input.promo_code].filter(Boolean).length;
   if (wants > 1) throw bad('Use one offer at a time: a pass, a coupon or a promo code');
+  const s = await getSettings(db);
+  const noStack = s.offer_no_stacking !== 0;
 
   if (input.payment_method === 'pass') {
     if (!user) throw bad('Sign in to use your pass');
@@ -217,14 +223,40 @@ async function discountFor(db, user, input, lines, subtotal, stationId) {
   }
   if (input.coupon_id) {
     if (!user) throw bad('Sign in to use a coupon');
+    if (s.offer_require_verified_phone) {
+      const { rows: uRows } = await db.query('SELECT phone_verified FROM users WHERE id=$1', [user.id]);
+      if (!uRows[0]?.phone_verified) {
+        throw bad('Verify your mobile number via SMS in Offers or Account before redeeming a coupon');
+      }
+    }
     const { rows } = await db.query(`SELECT * FROM coupons WHERE id=$1 AND user_id=$2 FOR UPDATE`, [input.coupon_id, user.id]);
     const c = rows[0];
     if (!c || c.status !== 'active' || new Date(c.expires_at) < new Date()) throw conflict('That coupon is no longer valid', 'coupon_invalid');
+
+    const minSpend = Number(c.min_spend || (c.kind === 'pct' ? s.ladder_min_spend : c.kind === 'referral_cup' ? s.referral_min_redeem_spend : s.first_cup_min_spend) || 0);
+    if (subtotal < minSpend) throw bad(`Spend at least Rs ${minSpend} to use "${c.title}"`);
+
+    const eligible = lines.filter((l) => l.product.kind === 'drink' && (!noStack || (!l.offer_id && !l.drop_id)));
+    if (!eligible.length) {
+      if (lines.some((l) => l.offer_id || l.drop_id)) {
+        throw bad('Today’s special offer is already applied to your drink. Choose "No offer" to keep today’s price, or add a regular drink to use your coupon.');
+      }
+      throw bad('Coupons apply to drinks only (not food or merch).');
+    }
+
+    // Anti-loss rule: coupons apply only to 1 single drink's base price (excluding paid add-ons) unless single_cup is explicitly false
+    const topBase = Math.max(...eligible.map((l) => l.base_price));
     if (c.kind === 'first_cup' || c.kind === 'referral_cup') {
-      const top = Math.max(...lines.map((l) => l.unit_price));
-      out.discount = Math.min(c.free_max ?? top, top);
+      const pct = Number(c.pct || 100);
+      const rawDisc = Math.floor((topBase * pct) / 100);
+      const cap = c.free_max ?? (c.kind === 'referral_cup' ? s.referral_cup_max : s.first_cup_max) ?? topBase;
+      out.discount = Math.min(cap, c.max_discount ?? 999999, rawDisc, topBase);
     } else {
-      out.discount = Math.floor((subtotal * c.pct) / 100);
+      const singleCup = c.single_cup !== false || s.offer_single_cup_only !== 0;
+      const basis = singleCup ? topBase : eligible.reduce((a, l) => a + l.line_total, 0);
+      const rawDisc = Math.floor((basis * Number(c.pct || 0)) / 100);
+      const cap = c.max_discount ?? s.ladder_max_discount ?? topBase;
+      out.discount = Math.min(cap, rawDisc, basis);
     }
     return { ...out, label: c.title, coupon_id: c.id };
   }
@@ -241,8 +273,20 @@ async function discountFor(db, user, input, lines, subtotal, stationId) {
         `SELECT count(*)::int AS n FROM orders WHERE user_id=$1 AND promo_code_id=$2 AND status <> 'cancelled'`, [user.id, p.id],
       );
       if (u[0].n >= p.per_user_limit) throw bad('You have already used this promo code');
+    } else if (input.customer_phone) {
+      const { rows: u } = await db.query(
+        `SELECT count(*)::int AS n FROM orders WHERE customer_phone=$1 AND promo_code_id=$2 AND status <> 'cancelled'`, [input.customer_phone, p.id],
+      );
+      if (u[0].n >= p.per_user_limit) throw bad('This mobile number has already used this promo code');
     }
-    return { ...out, discount: Math.floor((subtotal * p.pct) / 100), label: `${p.code} · ${p.title}`, promo_code_id: p.id };
+    const eligible = lines.filter((l) => (!p.drinks_only || l.product.kind === 'drink') && (!noStack || (!l.offer_id && !l.drop_id)));
+    if (!eligible.length) {
+      throw bad('Today’s special offer is already applied to the items in your cart. Promo codes cannot be stacked on daily offers.');
+    }
+    const eligibleSub = eligible.reduce((a, l) => a + l.line_total, 0);
+    let disc = Math.floor((eligibleSub * p.pct) / 100);
+    if (p.max_discount != null && p.max_discount > 0) disc = Math.min(disc, p.max_discount);
+    return { ...out, discount: disc, label: `${p.code} · ${p.title}`, promo_code_id: p.id };
   }
   return out;
 }
@@ -382,10 +426,21 @@ export async function createOrder(user, input) {
   const result = await tx(async (db) => {
     const q = await quote(db, user, { ...input, channel });
     const method = q.total === 0 && q.pass_id ? 'pass' : input.payment_method;
-    if (!['cash', 'fonepay', 'pass'].includes(method)) throw bad('Choose how you will pay');
+    if (!ALL_PAYMENT_METHODS.includes(method)) throw bad('Choose how you will pay');
+
+    // Prevent unpaid cash order spam that locks stock or coupons
+    if (method === 'cash' && channel !== 'counter' && user?.id) {
+      const { rows: openCash } = await db.query(
+        `SELECT count(*)::int AS n FROM orders WHERE user_id=$1 AND payment_method='cash' AND payment_status='unpaid' AND status IN ('placed','preparing','ready')`,
+        [user.id],
+      );
+      if (openCash[0].n >= 2) {
+        throw conflict('You already have two unpaid cash orders waiting for pickup. Pick them up or pay online with Fonepay, eSewa or Khalti.', 'unpaid_limit');
+      }
+    }
 
     const code = await nextPickupCode(db, q.station);
-    const digital = method === 'fonepay' && q.total > 0; // counter Fonepay orders show a QR too; they are never taken on trust
+    const digital = ONLINE_PROVIDERS.includes(method) && q.total > 0; // online QR orders wait for payment confirmation before hitting the bar
     const paidNow = q.total === 0 || (channel === 'counter' && !digital && input.paid_now !== false);
     const { rows } = await db.query(
       `INSERT INTO orders(station_id, user_id, customer_name, pickup_code, channel, status, subtotal, discount, total, discount_label,
@@ -588,19 +643,22 @@ export async function advanceOrder(orderId, next, actor, { code, override } = {}
       next === 'picked_up' ? [orderId, next, actor.id, overridden] : next === 'ready' || next === 'preparing' ? [orderId, next, actor.id] : [orderId, next],
     );
     let referral = null;
+    let welcome = null;
     if (next === 'picked_up') {
       if (o.payment_status === 'unpaid') {
         await db.query(`UPDATE orders SET payment_status='paid' WHERE id=$1`, [orderId]);
         await db.query(`UPDATE payments SET status='paid', settled_at=now() WHERE order_id=$1 AND status='pending'`, [orderId]);
+        o.payment_status = 'paid';
       }
       if (o.user_id) {
         const cups = (await db.query(`SELECT COALESCE(sum(i.qty),0)::int AS n FROM order_items i JOIN products p ON p.id=i.product_id WHERE i.order_id=$1 AND p.kind='drink'`, [orderId])).rows[0].n;
         await db.query('UPDATE users SET beans = beans + $2 WHERE id=$1', [o.user_id, cups]);
-        referral = await rewardReferral(db, o.user_id);
+        welcome = await maybeUnlockWelcomeOrder(db, o.user_id, o);
+        referral = await rewardReferral(db, o.user_id, o);
       }
     }
     await audit(actor.id, `order.${next}`, 'order', orderId, null, db);
-    return { referral };
+    return { referral, welcome };
   });
   const order = await fullOrder(orderId);
   emitOrder(order);
@@ -611,34 +669,110 @@ export async function advanceOrder(orderId, next, actor, { code, override } = {}
       picked_up: { title: 'Enjoy your coffee', body: 'You earned beans for this order. Tell us how it was.' },
     }[next];
     if (msg) await notify(order.user_id, { kind: 'order', ...msg, data: { order_id: order.id } });
+    if (next === 'ready' && rtBool('sms_order_ready') && order.customer?.phone) {
+      sendSms({
+        phone: order.customer.phone,
+        message: `Sadhai Coffee: Order ${order.pickup_code} is ready at ${order.station_name || 'the counter'}. Handover code: ${order.handover_code || '—'}.`,
+        purpose: 'order_ready',
+        userId: order.user_id,
+      }).catch(() => {});
+    }
+    if (res.welcome) {
+      await notify(order.user_id, { kind: 'info', title: 'Welcome reward unlocked!', body: res.welcome.body });
+    }
     if (res.referral) {
-      for (const r of res.referral) await notify(r.user_id, { kind: 'info', title: 'A free cup is waiting', body: r.body });
+      for (const r of res.referral) await notify(r.user_id, { kind: 'info', title: 'Referral reward unlocked', body: r.body });
     }
   }
   return order;
 }
 
-/** "Give a cup. Get a cup." Both sides rewarded after the friend's first completed order. Capped per month. */
-async function rewardReferral(db, userId) {
+/**
+ * Anti-Loss Referral Reward Engine:
+ * 1. Referral program must be enabled (`referral_enabled = 1`).
+ * 2. Referee must have a pending referral row (`referrals.status = 'pending'`).
+ * 3. Qualifying order MUST be a real paid order (`payment_status = 'paid'`, `payment_method` in cash/fonepay/esewa/khalti — NOT a pass order),
+ *    with NO coupon/promo discount (`discount = 0`) and `total >= referral_min_spend`.
+ * 4. If `offer_require_verified_phone = 1`, referee phone must be verified (`phone_verified = true`).
+ * 5. Referrer must not have exceeded `referral_cap_month` this calendar month or `referral_lifetime_cap` all-time.
+ * 6. If `referrer_require_paid_order = 1`, referrer must have completed at least 1 paid order (`total > 0`) themselves (prevents shell accounts farming referrals).
+ * 7. Issued coupons are single-cup, drinks-only, base-price capped (`free_max = referral_cup_max`, `pct = referral_reward_pct`), with `min_spend = referral_min_spend`.
+ */
+async function rewardReferral(db, userId, order) {
+  const s = await getSettings(db);
+  if (!Number(s.referral_enabled)) return null;
+
   const { rows } = await db.query(`SELECT * FROM referrals WHERE referee_id=$1 AND status='pending' FOR UPDATE`, [userId]);
   const ref = rows[0];
   if (!ref) return null;
-  const done = (await db.query(`SELECT count(*)::int AS n FROM orders WHERE user_id=$1 AND status='picked_up'`, [userId])).rows[0].n;
-  if (done !== 1) return null;
-  const s = await getSettings(db);
+  if (ref.referrer_id === userId) return null;
+
+  // Must be a real paid cash/QR order without existing coupon/promo discount and meeting minimum spend
+  const minSpend = Math.max(100, Number(s.referral_min_spend) || 180);
+  if (!order || order.payment_status !== 'paid' || order.payment_method === 'pass') return null;
+  if (Number(order.discount || 0) > 0) return null;
+  if (Number(order.total || 0) < minSpend) return null;
+
+  // Verify referee phone & check claimed_phones anti-recreate guard
+  const referee = (await db.query('SELECT phone, phone_verified FROM users WHERE id=$1', [userId])).rows[0];
+  if (!referee) return null;
+  if (Number(s.offer_require_verified_phone) && !referee.phone_verified) return null;
+
+  const pHash = hashPhone(referee.phone);
+  const claimed = (await db.query('SELECT referral_claimed FROM claimed_phones WHERE phone_hash=$1 FOR UPDATE', [pHash])).rows[0];
+  if (claimed?.referral_claimed) {
+    await db.query(`UPDATE referrals SET status='blocked_duplicate' WHERE id=$1`, [ref.id]);
+    return null;
+  }
+
+  // Referrer must be an active customer; if configured, must have at least 1 paid picked_up order
+  if (Number(s.referrer_require_paid_order)) {
+    const refPaid = (await db.query(
+      `SELECT count(*)::int AS n FROM orders WHERE user_id=$1 AND status='picked_up' AND payment_status='paid' AND total > 0 AND payment_method <> 'pass'`,
+      [ref.referrer_id],
+    )).rows[0].n;
+    if (refPaid < 1) return null;
+  }
+
   const monthCount = (await db.query(
-    `SELECT count(*)::int AS n FROM referrals WHERE referrer_id=$1 AND status='rewarded' AND rewarded_at >= date_trunc('month', now())`, [ref.referrer_id],
+    `SELECT count(*)::int AS n FROM referrals WHERE referrer_id=$1 AND status='rewarded' AND rewarded_at >= date_trunc('month', now())`,
+    [ref.referrer_id],
   )).rows[0].n;
-  await db.query(`UPDATE referrals SET status='rewarded', rewarded_at=now() WHERE id=$1`, [ref.id]);
-  const out = [];
-  const grant = async (uid, title) => db.query(
-    `INSERT INTO coupons(user_id, kind, title, free_max, expires_at) VALUES ($1,'referral_cup',$2,$3, now() + interval '30 days')`, [uid, title, s.referral_cup_max],
+  const lifeCount = (await db.query(
+    `SELECT count(*)::int AS n FROM referrals WHERE referrer_id=$1 AND status='rewarded'`,
+    [ref.referrer_id],
+  )).rows[0].n;
+
+  await db.query(
+    `UPDATE referrals SET status='rewarded', rewarded_at=now(), qualifying_order_id=$2, qualifying_amount=$3 WHERE id=$1`,
+    [ref.id, order.id, order.total],
   );
-  await grant(userId, 'Free cup from a friend');
-  out.push({ user_id: userId, body: 'Your friend gave you a cup. Use it on your next order.' });
-  if (monthCount < s.referral_cap_month) {
-    await grant(ref.referrer_id, 'Free cup: your friend joined');
-    out.push({ user_id: ref.referrer_id, body: 'Your friend had their first cup. Yours is on us.' });
+  await db.query(
+    `INSERT INTO claimed_phones(phone_hash, first_user_id, referral_claimed, updated_at)
+     VALUES ($1, $2, true, now())
+     ON CONFLICT (phone_hash) DO UPDATE SET referral_claimed = true, updated_at = now()`,
+    [pHash, userId],
+  );
+
+  const cupMax = Math.max(50, Math.min(350, Number(s.referral_cup_max) || 180));
+  const rewardPct = Math.max(10, Math.min(100, Number(s.referral_reward_pct) || 50));
+  const label = rewardPct >= 100 ? `Referral cup (up to Rs ${cupMax})` : `Referral ${rewardPct}% off cup (up to Rs ${cupMax})`;
+
+  const grant = async (uid, title) => db.query(
+    `INSERT INTO coupons(user_id, kind, title, pct, free_max, min_spend, max_discount, single_cup, expires_at)
+     VALUES ($1, 'referral_cup', $2, $3, $4, $5, $4, true, now() + interval '14 days')`,
+    [uid, title, rewardPct, cupMax, minSpend],
+  );
+
+  const out = [];
+  await grant(userId, `${label} · Friend invite`);
+  out.push({ user_id: userId, body: `You unlocked ${label} on your next order (min spend Rs ${minSpend}).` });
+
+  const capMonth = Math.max(1, Number(s.referral_cap_month) || 5);
+  const capLife = Math.max(1, Number(s.referral_lifetime_cap) || 25);
+  if (monthCount < capMonth && lifeCount < capLife) {
+    await grant(ref.referrer_id, `${label} · Friend completed 1st order`);
+    out.push({ user_id: ref.referrer_id, body: `Your friend completed their first qualifying order! ${label} is in your wallet.` });
   }
   return out;
 }
@@ -660,6 +794,9 @@ const newPassCode = () => {
 
 /** Buying another pass is always allowed. Each pass gets its own unique code and passes are used one after another. */
 export async function buyPass(user, method, { stationId = null, soldBy = null } = {}) {
+  if (!ONLINE_PROVIDERS.includes(method) && method !== 'cash') {
+    throw bad('Choose Fonepay, eSewa, Khalti, or counter cash');
+  }
   const s = await getSettings();
   const price = s.pass_price;
   const { pass, pay } = await tx(async (db) => {
@@ -692,17 +829,98 @@ export async function buyPass(user, method, { stationId = null, soldBy = null } 
     await notify(user.id, { kind: 'pass', title: 'Your 10-cup pass is ready', body: `Pass ${pass.code}. It starts when you use your first cup, then lasts 30 days.`, data: { pass_id: pass.id } });
     return { pass, payment: null };
   }
-  if (method === 'cash') throw bad('Pay for a pass in the app with Fonepay, or buy it at the counter');
+  if (method === 'cash') throw bad('Pay for a pass in the app with Fonepay, eSewa, or Khalti, or buy it at the counter');
   const init = await initiate(method, pay, { orderLabel: 'Sadhai 10-cup pass' });
   await query('UPDATE payments SET provider_ref=COALESCE($2, provider_ref), raw=$3 WHERE id=$1', [pay.id, init.provider_ref || null, init.raw || null]);
   return { pass, payment: init };
 }
 
-/* ---------------------------------------------------------- user ladder */
+/* ---------------------------------------------------------- welcome & ladder */
 
-/** Retired: new customers no longer get an automatic free first cup or 30%-off ladder. Discounts now come from promo codes. */
-export async function issueSignupLadder(_userId, _db = { query }) {
-  return;
+async function insertWelcomeCoupons(userId, db, s) {
+  const firstPct = Math.max(0, Math.min(100, Number(s.first_cup_discount_pct) || 0));
+  const firstMax = Math.max(30, Math.min(300, Number(s.first_cup_free_max) || 120));
+  const firstMinSpend = Math.max(100, Number(s.first_cup_min_spend) || 200);
+  const firstDays = Math.max(1, Math.min(60, Number(s.first_cup_valid_days) || 7));
+
+  let count = 0;
+  if (firstPct > 0) {
+    const title = firstPct >= 100
+      ? `Welcome cup (up to Rs ${firstMax})`
+      : `Welcome ${firstPct}% off 1st cup (up to Rs ${firstMax})`;
+    await db.query(
+      `INSERT INTO coupons(user_id, kind, title, pct, free_max, min_spend, max_discount, single_cup, step, expires_at)
+       VALUES ($1, 'first_cup', $2, $3, $4, $5, $4, true, 1, now() + ($6 || ' days')::interval)`,
+      [userId, title, firstPct, firstMax, firstMinSpend, String(firstDays)],
+    );
+    count++;
+  }
+
+  if (Number(s.ladder_enabled)) {
+    const lPct = Math.max(5, Math.min(40, Number(s.ladder_pct) || 15));
+    const lCups = Math.max(0, Math.min(3, Number(s.ladder_cups) || 0));
+    const lMax = Math.max(30, Math.min(200, Number(s.ladder_max_discount) || 80));
+    const lMinSpend = Math.max(120, Number(s.ladder_min_spend) || 220);
+    const lDays = Math.max(1, Math.min(60, Number(s.ladder_days) || 14));
+    for (let i = 0; i < lCups; i++) {
+      const cupNum = i + 2;
+      await db.query(
+        `INSERT INTO coupons(user_id, kind, title, pct, free_max, min_spend, max_discount, single_cup, step, expires_at)
+         VALUES ($1, 'pct', $2, $3, $4, $5, $4, true, $6, now() + ($7 || ' days')::interval)`,
+        [userId, `${lPct}% off · cup ${cupNum} (up to Rs ${lMax})`, lPct, lMax, lMinSpend, cupNum, String(lDays)],
+      );
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Controlled by Marketing -> Welcome & Referrals settings:
+ * - If `welcome_enabled = 0` (default), no welcome coupons are issued.
+ * - If `welcome_enabled = 1` and `welcome_trigger = 0` (on signup), issues only if phone has never claimed welcome before.
+ * - If `welcome_enabled = 1` and `welcome_trigger = 1` (after 1st paid order, default), waits for `maybeUnlockWelcomeOrder`.
+ */
+export async function issueSignupLadder(userId, db = { query }, { onSignup = true } = {}) {
+  const s = await getSettings(db);
+  if (!Number(s.welcome_enabled)) return 0;
+  const triggerAfterFirstPaid = Number(s.welcome_trigger ?? 1) === 1;
+  if (onSignup && triggerAfterFirstPaid) return 0;
+
+  const u = (await db.query('SELECT phone, phone_verified FROM users WHERE id=$1', [userId])).rows[0];
+  if (!u?.phone) return 0;
+  if (Number(s.offer_require_verified_phone) && !u.phone_verified && onSignup) return 0;
+
+  const pHash = hashPhone(u.phone);
+  const claimed = (await db.query('SELECT welcome_claimed FROM claimed_phones WHERE phone_hash=$1 FOR UPDATE', [pHash])).rows[0];
+  if (claimed?.welcome_claimed) return 0;
+
+  const count = await insertWelcomeCoupons(userId, db, s);
+  if (count > 0) {
+    await db.query(
+      `INSERT INTO claimed_phones(phone_hash, first_user_id, welcome_claimed, updated_at)
+       VALUES ($1, $2, true, now())
+       ON CONFLICT (phone_hash) DO UPDATE SET welcome_claimed = true, updated_at = now()`,
+      [pHash, userId],
+    );
+  }
+  return count;
+}
+
+async function maybeUnlockWelcomeOrder(db, userId, order) {
+  const s = await getSettings(db);
+  if (!Number(s.welcome_enabled)) return null;
+  if (Number(s.welcome_trigger ?? 1) !== 1) return null;
+  if (!order || order.payment_status !== 'paid' || order.payment_method === 'pass') return null;
+  if (Number(order.discount || 0) > 0) return null;
+  const minSpend = Math.max(100, Number(s.first_cup_min_spend) || 200);
+  if (Number(order.total || 0) < minSpend) return null;
+
+  const count = await issueSignupLadder(userId, db, { onSignup: false });
+  if (count > 0) {
+    return { body: `Thank you for your first order! You unlocked ${count} welcome reward coupon${count > 1 ? 's' : ''} in your wallet.` };
+  }
+  return null;
 }
 
 /** Moves scheduled orders onto the station queue shortly before their pickup time. Run every 30 seconds. */
@@ -713,7 +931,8 @@ export async function releaseDueOrders() {
   for (const r of rows) {
     const order = await fullOrder(r.id);
     emitOrder(order, 'order_new');
-    if (order.user_id) await notify(order.user_id, { kind: 'order', title: `Order ${order.pickup_code} is with the barista`, body: 'Your coffee is being lined up for your pickup time.', data: { order_id: order.id } });
+    if (order.user_id) await notify(order.user_id, { kind: 'order', title: `Order ${order.pickup_code} is with the barista`, body: 'Your coffee is being lined up for your pickup time.', data: { order_id: r.id } });
   }
   return rows.length;
 }
+

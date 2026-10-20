@@ -11,7 +11,8 @@ import { DEFS, describeRuntime, setRuntime, rt } from '../lib/runtime.js';
 import { pushStatus, sendToUser, testFcm } from '../lib/push.js';
 import { SITE_DEFAULTS, loadSite, mediaUrl } from '../lib/site.js';
 import { getSettings } from '../lib/settings.js';
-import { fonepayMissing, initiate } from '../lib/payments.js';
+import { fonepayMissing, esewaMissing, khaltiMissing, initiate } from '../lib/payments.js';
+import { nestsmsMissing, sendSms, smsStatus } from '../lib/sms.js';
 import { todayNpt, addDays } from '../lib/roster.js';
 
 /** Owner-only: integration keys, pictures and website content. */
@@ -56,10 +57,50 @@ studio.post('/integrations/test/:name', wrap(async (req, res) => {
   } else if (name === 'fonepay') {
     const missing = fonepayMissing();
     if (missing.length) return res.json({ ok: false, message: `Missing: ${missing.map((k) => DEFS[k].label).join(', ')}.` });
-    if (rt('payment_mode') === 'sandbox') return res.json({ ok: true, message: 'The keys are saved. Payment mode is still Sandbox, so customers see a test QR. Switch to Live when Fonepay has approved you.' });
+    if (rt('payment_mode') === 'sandbox') return res.json({ ok: true, message: 'The Fonepay keys are saved. Payment mode is still Sandbox, so customers see a test QR. Switch to Live when Fonepay has approved you.' });
     try {
-      const r = await initiate('fonepay', { id: `TEST${Date.now()}`, amount: 10 }, { orderLabel: 'Key test' });
-      res.json({ ok: true, message: `Fonepay made a QR code (${r.qr_message.slice(0, 18)}…). Real payments are ready.` });
+      const r = await initiate('fonepay', { id: `TESTFP${Date.now()}`, amount: 10 }, { orderLabel: 'Key test' });
+      res.json({ ok: true, message: `Fonepay generated a Dynamic QR (${r.qr_message.slice(0, 18)}…). Real payments are ready.` });
+    } catch (e) { res.json({ ok: false, message: e.message }); }
+  } else if (name === 'esewa') {
+    const missing = esewaMissing();
+    if (missing.length) return res.json({ ok: false, message: `Missing: ${missing.map((k) => DEFS[k].label).join(', ')}.` });
+    if (rt('payment_mode') === 'sandbox') return res.json({ ok: true, message: 'The eSewa keys are saved. Payment mode is still Sandbox, so customers see a test QR. Switch to Live when eSewa has approved you.' });
+    try {
+      const r = await initiate('esewa', { id: `TESTESW${Date.now()}`, amount: 10 }, { orderLabel: 'Key test' });
+      res.json({ ok: true, message: `eSewa generated a payment QR (${r.qr_message.slice(0, 28)}…). Real eSewa payments are ready.` });
+    } catch (e) { res.json({ ok: false, message: e.message }); }
+  } else if (name === 'khalti') {
+    const missing = khaltiMissing();
+    if (missing.length) return res.json({ ok: false, message: `Missing: ${missing.map((k) => DEFS[k].label).join(', ')}.` });
+    if (rt('payment_mode') === 'sandbox') return res.json({ ok: true, message: 'The Khalti keys are saved. Payment mode is still Sandbox, so customers see a test QR. Switch to Live when Khalti has approved you.' });
+    try {
+      const r = await initiate('khalti', { id: `TESTKHL${Date.now()}`, amount: 10 }, { orderLabel: 'Key test' });
+      res.json({ ok: true, message: `Khalti generated a payment QR (${r.qr_message.slice(0, 28)}…). Real Khalti payments are ready.` });
+    } catch (e) { res.json({ ok: false, message: e.message }); }
+  } else if (name === 'nestsms') {
+    const missing = nestsmsMissing();
+    const st = smsStatus();
+    const u = (await query('SELECT phone FROM users WHERE id=$1', [req.user.id])).rows[0];
+    if (!u?.phone) return res.json({ ok: false, message: 'Your owner account does not have a phone number.' });
+    try {
+      const out = await sendSms({
+        phone: u.phone,
+        message: 'Sadhai Coffee: NestSMS integration test successful.',
+        purpose: 'test',
+        userId: req.user.id,
+      });
+      if (out.dry_run) {
+        return res.json({
+          ok: true,
+          message: missing.length
+            ? `Sandbox mode: test SMS logged for ${u.phone}. Add ${missing.map((k) => DEFS[k].label).join(', ')} to send live SMS via NestSMS.`
+            : `Sandbox mode: test SMS logged for ${u.phone}. Switch SMS mode to Live or Auto to send via NestSMS.`,
+          status: st,
+        });
+      }
+      if (!out.sent) return res.json({ ok: false, message: `NestSMS error: ${out.error || 'Failed to send SMS'}` });
+      res.json({ ok: true, message: `NestSMS delivered a test SMS to ${u.phone}.` });
     } catch (e) { res.json({ ok: false, message: e.message }); }
   } else throw notFound('Unknown test');
 }));

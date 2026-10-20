@@ -100,8 +100,16 @@ export default function Cart() {
           <h4 style={{ margin: '20px 0 8px' }}>{t('offer')}</h4>
           <div className="card flat col" style={{ gap: 8 }}>
             <Radio on={offer.type === 'none'} label={t('none')} onClick={() => setOffer({ type: 'none' })} />
-            {active.map((c) => <Radio key={c.id} on={offer.type === 'coupon' && offer.id === c.id} label={c.title} hint={`until ${new Date(c.expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`} onClick={() => setOffer({ type: 'coupon', id: c.id })} />)}
-            {cart.promo && <Radio on={offer.type === 'promo'} label={`Promo ${cart.promo.code}`} hint={`${cart.promo.pct}% off`} onClick={() => setOffer({ type: 'promo' })} />}
+            {active.map((c) => (
+              <Radio
+                key={c.id}
+                on={offer.type === 'coupon' && offer.id === c.id}
+                label={c.title}
+                hint={`${c.min_spend ? `min ${rs(c.min_spend)} · ` : ''}until ${new Date(c.expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`}
+                onClick={() => setOffer({ type: 'coupon', id: c.id })}
+              />
+            ))}
+            {cart.promo && <Radio on={offer.type === 'promo'} label={`Promo ${cart.promo.code}`} hint={`${cart.promo.pct}% off${cart.promo.min_total ? ` · min ${rs(cart.promo.min_total)}` : ''}`} onClick={() => setOffer({ type: 'promo' })} />}
             {activePass && <Radio on={offer.type === 'pass'} label={t('pass')} hint={`${activePass.remaining} cups left`} onClick={() => setOffer({ type: 'pass' })} />}
           </div>
           <div style={{ marginTop: 8 }}><PromoBox /></div>
@@ -120,7 +128,13 @@ export default function Cart() {
           {offer.type !== 'pass' && (
             <>
               <h4 style={{ margin: '20px 0 8px' }}>{t('pay_with')}</h4>
-              <div className="row wrap">{['cash', 'fonepay'].map((m) => <button key={m} className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>{PAY_LABEL[m]}</button>)}</div>
+              <div className="row wrap">
+                {['cash', 'fonepay', 'esewa', 'khalti'].map((m) => (
+                  <button key={m} className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>
+                    {PAY_LABEL[m]}
+                  </button>
+                ))}
+              </div>
             </>
           )}
           <div style={{ marginTop: 16 }}><Field label="Note for the barista (optional)"><input maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} /></Field></div>
@@ -136,8 +150,8 @@ export default function Cart() {
       )}
 
       {payment && (
-        <Modal title="Pay with Fonepay" onClose={() => { cart.clear(); router.push(`/order/${payment.order.id}`); }}>
-          <p>Scan to pay for order <strong>{payment.order.pickup_code}</strong>. Your order goes to the barista as soon as Fonepay confirms.</p>
+        <Modal title={`Pay with ${PAY_LABEL[payment.payment?.provider || method] || 'QR'}`} onClose={() => { cart.clear(); router.push(`/order/${payment.order.id}`); }}>
+          <p>Scan to pay for order <strong>{payment.order.pickup_code}</strong>. Your order goes to the barista as soon as payment is confirmed.</p>
           <FonepayQr payment={payment.payment} amount={payment.order.total} onDone={() => { cart.clear(); router.push(`/order/${payment.order.id}`); }} />
           <button className="btn ghost block" onClick={() => { cart.clear(); router.push(`/order/${payment.order.id}`); }}>I will pay from my orders</button>
         </Modal>

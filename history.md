@@ -17,6 +17,24 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.6.6 (2026-10-20)
+
+### Added
+- **eSewa and Khalti Dynamic QR Payment Gateways**:
+  - Full eSewa (`esewa`) and Khalti (`khalti`) online payment gateways implemented alongside Fonepay (`fonepay`) across Cart checkout, 10-cup Pass purchases, Kiosk ordering, Station POS counter, Owner Studio connection tests, and Owner Finance settlement reconciliation.
+  - Unified Dynamic QR payment sheet with live 3-second polling (`GET /payments/:id`), callback/webhook verification (`/payments/esewa/callback`, `/payments/khalti/callback`, `/payments/webhook/:provider`), and sandbox test buttons.
+- **NestSMS Gateway Integration (`nestsms`)**:
+  - Configurable NestSMS API gateway (`https://api.nestsms.com/api/v1/sms/send`) in Owner Settings -> Integrations with API key, Sender ID, and live connection test button (`POST /owner/integrations/test/nestsms`).
+  - SMS OTP phone verification (`/auth/otp/send`, `/auth/otp/verify`, `/me/verify-phone/send`, `/me/verify-phone/confirm`) and optional "Order is ready" SMS alert (`sms_order_ready`).
+- **Welcome Offers & Referrals in Marketing + Anti-Loss Guardrails**:
+  - Moved "Welcome offers and referrals" out of Settings -> Rules into a dedicated **Welcome & referrals** tab under the **Marketing** section in Owner and Manager dashboards.
+  - Enforced 6 non-breachable anti-loss guardrails: single-cup base-price cap (`single_cup = true`, `kind = 'drink'`), non-stacking with Offer of the Day or Limited Drops, minimum spend floor (`min_spend >= free_max / max_discount`), permanent SHA-256 `claimed_phones` registry blocking account-deletion and re-registration loops, qualifying full-price paid order requirement (`total >= referral_min_spend`, `discount === 0`, `payment_method !== 'pass'`) before referral rewards unlock, and optional NestSMS phone OTP verification requirement.
+
+### Fixed
+- **Fonepay Dynamic QR Gateway Fixes**:
+  - Compact 24-character alphanumeric `prn` (`cleanPrn`) to prevent Fonepay 25-character PRN truncation errors.
+  - Strict `paymentStatus` verification (fixing truthy `fonepayTraceId` false-positive bug), exact paid amount verification against invoice amount, and sanitized ASCII `remarks1`/`remarks2`.
+
 ## v1.6.5 (2026-10-20)
 
 ### Changed

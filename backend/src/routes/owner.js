@@ -5,7 +5,7 @@ import { query, tx } from '../lib/db.js';
 import { wrap, bad, notFound, normalizePhone } from '../lib/http.js';
 import { authenticate, requireRole } from '../lib/auth.js';
 import { audit, notify } from '../lib/notify.js';
-import { DEFAULT_SETTINGS, getSettings } from '../lib/settings.js';
+import { DEFAULT_SETTINGS, getSettings, validateSettingValue } from '../lib/settings.js';
 import { reconciliation, range } from '../lib/reports.js';
 import { statement } from '../lib/partners.js';
 import { recomputeProductCosts } from '../lib/costing.js';
@@ -475,7 +475,9 @@ owner.patch('/drops/:id', wrap(async (req, res) => {
 /* ---- settings ---- */
 owner.get('/settings', wrap(async (_req, res) => res.json(await getSettings())));
 owner.put('/settings', wrap(async (req, res) => {
-  const entries = Object.entries(z.record(z.number()).parse(req.body)).filter(([k]) => k in DEFAULT_SETTINGS);
+  const entries = Object.entries(z.record(z.number()).parse(req.body))
+    .filter(([k]) => k in DEFAULT_SETTINGS)
+    .map(([k, v]) => [k, validateSettingValue(k, v)]);
   for (const [k, v] of entries) {
     await query(`INSERT INTO settings(key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=now()`, [k, JSON.stringify(v)]);
   }
@@ -498,7 +500,7 @@ owner.get('/audit', wrap(async (req, res) => {
 }));
 owner.get('/reconciliation', wrap(async (req, res) => res.json(await reconciliation(req.query.from, req.query.to))));
 owner.post('/settlements', wrap(async (req, res) => {
-  const b = z.object({ provider: z.enum(['fonepay']), day: z.string().regex(/^\d{4}-\d\d-\d\d$/), amount: z.number().int().min(0), note: z.string().optional() }).parse(req.body);
+  const b = z.object({ provider: z.enum(['fonepay', 'esewa', 'khalti']), day: z.string().regex(/^\d{4}-\d\d-\d\d$/), amount: z.number().int().min(0), note: z.string().optional() }).parse(req.body);
   const { rows } = await query(
     `INSERT INTO settlements(provider, day, amount, note, entered_by) VALUES ($1,$2,$3,$4,$5)
      ON CONFLICT (provider, day) DO UPDATE SET amount=$3, note=$4, entered_by=$5 RETURNING *`, [b.provider, b.day, b.amount, b.note, req.user.id],

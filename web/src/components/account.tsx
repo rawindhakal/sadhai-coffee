@@ -102,7 +102,11 @@ export function PassTab() {
       {buy && !pay && (
         <Modal title="Buy a 10-cup pass" onClose={() => setBuy(false)}>
           <p className="muted">Pay {rs(cfg.data?.pass.price)} with:</p>
-          <div className="col" style={{ marginTop: 12 }}><button className="btn primary block" disabled={busy} onClick={() => purchase('fonepay')}>Pay with Fonepay QR</button></div>
+          <div className="col" style={{ marginTop: 12, gap: 10 }}>
+            <button className="btn primary block" disabled={busy} onClick={() => purchase('fonepay')}>Pay with Fonepay QR</button>
+            <button className="btn block" style={{ background: '#41A124', color: '#fff', borderColor: '#41A124' }} disabled={busy} onClick={() => purchase('esewa')}>Pay with eSewa QR</button>
+            <button className="btn block" style={{ background: '#5C2D91', color: '#fff', borderColor: '#5C2D91' }} disabled={busy} onClick={() => purchase('khalti')}>Pay with Khalti QR</button>
+          </div>
           <p className="small muted" style={{ marginTop: 12 }}>Prefer cash? Buy it at any station counter. A new pass never starts until you use its first cup.</p>
         </Modal>
       )}
@@ -116,31 +120,137 @@ export function CouponsTab() {
   if (!data.length) return <Empty>No coupons yet.</Empty>;
   return <div className="col">{data.map((c) => (
     <div key={c.id} className="card flat row between" style={{ opacity: c.status === 'active' ? 1 : 0.55 }}>
-      <div><strong>{c.title}</strong><div className="small muted">{c.status === 'active' ? `Valid until ${fmtDate(c.expires_at)}` : c.status === 'used' ? 'Used' : 'Expired'}</div></div>
-      <span className={`chip ${c.status === 'active' ? 'marigold' : ''}`}>{c.kind === 'pct' ? `${c.pct}% off` : 'Free cup'}</span>
+      <div>
+        <strong>{c.title}</strong>
+        <div className="small muted">
+          {c.status === 'active' ? `Valid until ${fmtDate(c.expires_at)}` : c.status === 'used' ? 'Used' : 'Expired'}
+          {c.min_spend ? ` · Min order ${rs(c.min_spend)}` : ''}
+          {(c.max_discount || c.free_max) ? ` · Up to ${rs(c.max_discount || c.free_max)} off 1 drink` : ''}
+        </div>
+      </div>
+      <span className={`chip ${c.status === 'active' ? 'marigold' : ''}`}>{c.pct && c.pct < 100 ? `${c.pct}% off` : 'Free cup'}</span>
     </div>
   ))}</div>;
 }
 
 export function ReferralTab() {
-  const { data } = useData<any>('/referrals');
+  const { data, reload } = useData<any>('/referrals');
   const toast = useToast();
   if (!data) return <Loading />;
   const link = typeof window !== 'undefined' ? `${location.origin}/register?ref=${data.code}` : '';
+  const rewardLabel = (data.reward_pct ?? 50) >= 100
+    ? `a free cup (up to ${rs(data.cup_max || 180)})`
+    : `${data.reward_pct ?? 50}% off a cup (up to ${rs(data.cup_max || 180)})`;
+
   return (
     <>
       <div className="card center">
         <h3>Give a cup. Get a cup.</h3>
-        <p className="muted" style={{ margin: '8px 0' }}>Share your code. When your friend finishes their first cup, you both get one.</p>
-        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 40, letterSpacing: '0.02em', color: 'var(--cherry)' }}>{data.code}</div>
-        <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
-          <button className="btn primary" onClick={() => { navigator.clipboard?.writeText(link); toast('Link copied'); }}>Copy invite link</button>
-          {typeof navigator !== 'undefined' && (navigator as any).share && <button className="btn ghost" onClick={() => (navigator as any).share({ title: 'Sadhai Coffee', text: `Your first Americano is free. Use my code ${data.code}.`, url: link })}>Share</button>}
-        </div>
-        <p className="small muted" style={{ marginTop: 12 }}>One free cup per friend, up to {data.cap} a month. {data.rewarded_this_month} used this month.</p>
+        {!data.enabled ? (
+          <p className="muted" style={{ margin: '8px 0' }}>The referral program is currently paused. Existing referral rewards in your Coupons wallet remain valid until their expiry date.</p>
+        ) : (
+          <>
+            <p className="muted" style={{ margin: '8px 0' }}>
+              Share your code. When your friend completes their first full-price paid order of at least <strong>{rs(data.min_spend || 180)}</strong>, you both unlock <strong>{rewardLabel}</strong>.
+            </p>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 40, letterSpacing: '0.02em', color: 'var(--cherry)' }}>{data.code}</div>
+            <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
+              <button className="btn primary" onClick={() => { navigator.clipboard?.writeText(link); toast('Invite link copied'); }}>Copy invite link</button>
+              <button className="btn ghost" onClick={() => { navigator.clipboard?.writeText(data.code); toast('Code copied'); }}>Copy code</button>
+              {typeof navigator !== 'undefined' && (navigator as any).share && (
+                <button className="btn ghost" onClick={() => (navigator as any).share({ title: 'Sadhai Coffee', text: `Join Sadhai Coffee with my code ${data.code} and get ${rewardLabel}!`, url: link })}>Share</button>
+              )}
+            </div>
+            <p className="small muted" style={{ marginTop: 12 }}>
+              Up to {data.cap} rewards a month ({data.rewarded_this_month} earned this month · {data.rewarded_lifetime || 0} lifetime). Valid on 1 drink base price, min order {rs(data.min_spend || 180)}.
+            </p>
+          </>
+        )}
       </div>
-      {data.friends.length > 0 && <div className="col" style={{ marginTop: 16 }}>{data.friends.map((f: any, i: number) => <div key={i} className="card flat row between"><span>{f.name}</span><span className={`chip ${f.status === 'rewarded' ? 'hill' : ''}`}>{f.status === 'rewarded' ? 'First cup done' : 'Waiting for first cup'}</span></div>)}</div>}
+      {data.require_verified_phone && !data.phone_verified && (
+        <div style={{ marginTop: 12 }}>
+          <PhoneVerifyBanner onVerified={reload} />
+        </div>
+      )}
+      {data.friends.length > 0 && (
+        <div className="col" style={{ marginTop: 16 }}>
+          {data.friends.map((f: any, i: number) => (
+            <div key={i} className="card flat row between">
+              <span><strong>{f.name}</strong></span>
+              <span className={`chip ${f.status === 'rewarded' ? 'hill' : ''}`}>
+                {f.status === 'rewarded' ? 'Qualifying order completed' : `Waiting for 1st paid order (≥ ${rs(data.min_spend || 180)})`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </>
+  );
+}
+
+function PhoneVerifyBanner({ onVerified }: { onVerified?: () => void }) {
+  const { user, setUser } = useAuth();
+  const toast = useToast();
+  const [sent, setSent] = useState(false);
+  const [code, setCode] = useState('');
+  const [devCode, setDevCode] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if ((user as any)?.phone_verified) return null;
+
+  async function sendOtp() {
+    setBusy(true);
+    try {
+      const r = await api('/me/verify-phone/send', { method: 'POST', body: {} });
+      setSent(true);
+      if (r.dev_code) setDevCode(r.dev_code);
+      toast('Verification code sent via SMS');
+    } catch (e: any) {
+      toast(e.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmOtp() {
+    setBusy(true);
+    try {
+      const r = await api('/me/verify-phone/confirm', { method: 'POST', body: { code } });
+      if (r.user) setUser({ ...user!, ...r.user });
+      toast('Phone number verified!');
+      onVerified?.();
+    } catch (e: any) {
+      toast(e.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card flat col" style={{ gap: 8, borderColor: 'var(--marigold)' }}>
+      <div className="row between wrap">
+        <div>
+          <strong>Verify your mobile number ({user?.phone})</strong>
+          <p className="small muted">Verify with a 6-digit SMS code to unlock welcome &amp; referral coupons.</p>
+        </div>
+        {!sent && <button type="button" className="btn sm primary" disabled={busy} onClick={sendOtp}>{busy ? 'Sending…' : 'Send SMS code'}</button>}
+      </div>
+      {sent && (
+        <div className="row wrap" style={{ gap: 8 }}>
+          <input
+            inputMode="numeric"
+            maxLength={6}
+            placeholder="6-digit OTP code"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+            style={{ width: 160 }}
+          />
+          <button type="button" className="btn sm primary" disabled={busy || code.length < 4} onClick={confirmOtp}>Verify</button>
+          <button type="button" className="btn sm ghost" disabled={busy} onClick={sendOtp}>Resend</button>
+          {devCode && <span className="chip marigold">Sandbox OTP: {devCode}</span>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -188,7 +298,8 @@ export function Profile() {
   return (
     <form className="card col" onSubmit={save} style={{ gap: 16 }}>
       <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-      <Field label="Mobile number"><input value={user!.phone} disabled /></Field>
+      <Field label="Mobile number" hint={(user as any)?.phone_verified ? '✓ Verified via SMS' : 'Unverified'}><input value={user!.phone} disabled /></Field>
+      {!(user as any)?.phone_verified && <PhoneVerifyBanner />}
       <Field label="Language"><select value={lang} onChange={(e) => setLang(e.target.value as any)}><option value="en">English</option><option value="ne">नेपाली</option></select></Field>
       <h4>Change password</h4>
       <Field label="Current password"><input type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" /></Field>

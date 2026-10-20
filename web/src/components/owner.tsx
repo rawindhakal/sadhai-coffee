@@ -908,10 +908,10 @@ export function FinanceTab() {
         <Stat label="Related-party passes" value={ov.data.pass.related_party} delta="Keep this at zero" tone={ov.data.pass.related_party ? 'bad' : 'good'} />
       </div>}
       <div className="card tablewrap">
-        <div className="row between wrap" style={{ marginBottom: 8 }}><h3>Fonepay sales against Fonepay settlements</h3><div className="row"><RangePicker days={days} setDays={setDays} /><button className="btn sm" onClick={() => setS({ provider: 'fonepay', day: sinceDays(2), amount: '' })}>Enter settlement</button></div></div>
+        <div className="row between wrap" style={{ marginBottom: 8 }}><h3>Online QR sales against bank settlements (Fonepay, eSewa &amp; Khalti)</h3><div className="row"><RangePicker days={days} setDays={setDays} /><button className="btn sm" onClick={() => setS({ provider: 'fonepay', day: sinceDays(2), amount: '' })}>Enter settlement</button></div></div>
         <p className="small muted" style={{ marginBottom: 8 }}>Reconcile every month. A difference is usually a provider fee or a refund; anything else needs an explanation.</p>
         {!rec.data ? <Loading /> : !rec.data.length ? <Empty>Nothing to reconcile in this period.</Empty> : <table><thead><tr><th>Day</th><th>Provider</th><th className="num">App says</th><th className="num">Provider paid</th><th className="num">Difference</th></tr></thead>
-          <tbody>{rec.data.map((r, i) => <tr key={i}><td>{fmtDate(r.day)}</td><td>{r.provider}</td><td className="num">{rs(r.app_amount)}</td><td className="num">{r.settled == null ? <span className="chip marigold">Not entered</span> : rs(r.settled)}</td><td className="num" style={{ color: r.diff ? 'var(--cherry)' : undefined, fontWeight: r.diff ? 700 : 400 }}>{r.settled == null ? '–' : r.diff ? rs(r.diff) : 'Matches'}</td></tr>)}</tbody></table>}
+          <tbody>{rec.data.map((r, i) => <tr key={i}><td>{fmtDate(r.day)}</td><td style={{ textTransform: 'capitalize' }}>{r.provider}</td><td className="num">{rs(r.app_amount)}</td><td className="num">{r.settled == null ? <span className="chip marigold">Not entered</span> : rs(r.settled)}</td><td className="num" style={{ color: r.diff ? 'var(--cherry)' : undefined, fontWeight: r.diff ? 700 : 400 }}>{r.settled == null ? '–' : r.diff ? rs(r.diff) : 'Matches'}</td></tr>)}</tbody></table>}
       </div>
       <div className="card tablewrap">
         <div className="row between"><h3 style={{ marginBottom: 8 }}>Pass register</h3><button className="btn sm" onClick={csv}>Export orders (CSV)</button></div>
@@ -921,7 +921,13 @@ export function FinanceTab() {
       {s && (
         <Modal title="Provider settlement" onClose={() => setS(null)}>
           <div className="col">
-            <Field label="Provider"><select value={s.provider} onChange={(e) => setS({ ...s, provider: e.target.value })}><option value="fonepay">Fonepay</option></select></Field>
+            <Field label="Provider">
+              <select value={s.provider} onChange={(e) => setS({ ...s, provider: e.target.value })}>
+                <option value="fonepay">Fonepay</option>
+                <option value="esewa">eSewa</option>
+                <option value="khalti">Khalti</option>
+              </select>
+            </Field>
             <Field label="Sales day"><input type="date" value={s.day} onChange={(e) => setS({ ...s, day: e.target.value })} /></Field>
             <Field label="Amount credited to the bank (Rs)"><input type="number" value={s.amount} onChange={(e) => setS({ ...s, amount: e.target.value })} /></Field>
             <button className="btn primary" disabled={s.amount === ''} onClick={enter}>Save</button>

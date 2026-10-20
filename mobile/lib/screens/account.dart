@@ -169,6 +169,8 @@ class _PassPanelState extends State<PassPanel> {
       Text('Pay ${rs(_price ?? 900)} with', style: display(22)),
       const SizedBox(height: 12),
       Padding(padding: const EdgeInsets.only(bottom: 8), child: FilledButton(onPressed: () => Navigator.pop(c, 'fonepay'), child: const Center(child: Text('Fonepay QR')))),
+      Padding(padding: const EdgeInsets.only(bottom: 8), child: OutlinedButton(onPressed: () => Navigator.pop(c, 'esewa'), child: const Center(child: Text('eSewa QR')))),
+      Padding(padding: const EdgeInsets.only(bottom: 8), child: OutlinedButton(onPressed: () => Navigator.pop(c, 'khalti'), child: const Center(child: Text('Khalti QR')))),
       const Text('Prefer cash? Buy it at any station counter.', style: TextStyle(color: Brand.inkMuted)),
     ]))));
     if (m == null || !mounted) return;
@@ -226,24 +228,88 @@ class OrdersScreen extends StatelessWidget {
   }
 }
 
-class AccountScreen extends StatelessWidget {
+class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key, required this.onSignOut});
   final VoidCallback onSignOut;
   @override
+  State<AccountScreen> createState() => _AccountScreenState();
+}
+
+class _AccountScreenState extends State<AccountScreen> {
+  bool _otpSent = false, _otpBusy = false;
+  final _otpCtl = TextEditingController();
+  String? _devOtp;
+
+  @override
+  void dispose() { _otpCtl.dispose(); super.dispose(); }
+
+  Future<void> _sendOtp() async {
+    setState(() => _otpBusy = true);
+    try {
+      final r = await Api.instance.post('/me/verify-phone/send');
+      if (!mounted) return;
+      setState(() { _otpSent = true; _devOtp = r['dev_code'] as String?; });
+      toast(context, 'Verification code sent via SMS');
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, bad: true);
+    } finally {
+      if (mounted) setState(() => _otpBusy = false);
+    }
+  }
+
+  Future<void> _confirmOtp() async {
+    setState(() => _otpBusy = true);
+    try {
+      final r = await Api.instance.post('/me/verify-phone/confirm', {'code': _otpCtl.text.trim()});
+      Api.instance.user = {...Api.instance.user!, ...Map<String, dynamic>.from(r as Map)};
+      if (!mounted) return;
+      setState(() { _otpSent = false; _devOtp = null; _otpCtl.clear(); });
+      toast(context, 'Phone number verified');
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, bad: true);
+    } finally {
+      if (mounted) setState(() => _otpBusy = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final u = Api.instance.user!;
+    final verified = u['phone_verified'] == true;
     return ListView(padding: const EdgeInsets.all(20), children: [
       Text('Hello, ${(u['name'] as String).split(' ').first}', style: display(30)),
-      Text(u['phone'], style: const TextStyle(color: Brand.inkMuted)),
+      Row(children: [
+        Text(u['phone'], style: const TextStyle(color: Brand.inkMuted)),
+        const SizedBox(width: 8),
+        Chip2(verified ? 'Verified' : 'Unverified', bg: verified ? Brand.hill : Brand.surfaceSunk, fg: verified ? Brand.onCherry : Brand.ink),
+      ]),
+      if (!verified) Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Verify your phone number', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          const Text('Verify via SMS OTP to unlock welcome offers and referral rewards.', style: TextStyle(color: Brand.inkMuted, fontSize: 13)),
+          if (_devOtp != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text('Sandbox code: $_devOtp', style: const TextStyle(color: Brand.cherry, fontWeight: FontWeight.w700, fontSize: 13))),
+          const SizedBox(height: 10),
+          if (!_otpSent)
+            OutlinedButton(onPressed: _otpBusy ? null : _sendOtp, child: Text(_otpBusy ? 'Sending…' : 'Send SMS code'))
+          else
+            Row(children: [
+              Expanded(child: TextField(controller: _otpCtl, keyboardType: TextInputType.number, maxLength: 6, decoration: const InputDecoration(hintText: '6-digit code', counterText: '', isDense: true))),
+              const SizedBox(width: 8),
+              FilledButton(onPressed: _otpBusy ? null : _confirmOtp, child: const Text('Verify')),
+            ]),
+        ]))),
+      ),
       const SizedBox(height: 16),
       for (final t in [
         ('Coupons', Icons.sell_outlined, const CouponsScreen()),
         ('Give a cup. Get a cup.', Icons.card_giftcard, const ReferralScreen()),
         ('Inbox', Icons.notifications_none, const InboxScreen()),
-        ('Profile and password', Icons.manage_accounts_outlined, ProfileScreen(onSignOut: onSignOut)),
-      ]) Padding(padding: const EdgeInsets.only(bottom: 10), child: Card(child: ListTile(leading: Icon(t.$2, color: Brand.cherry), title: Text(t.$1, style: const TextStyle(fontWeight: FontWeight.w600)), trailing: const Icon(Icons.chevron_right), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => t.$3))))),
+        ('Profile and password', Icons.manage_accounts_outlined, ProfileScreen(onSignOut: widget.onSignOut)),
+      ]) Padding(padding: const EdgeInsets.only(bottom: 10), child: Card(child: ListTile(leading: Icon(t.$2, color: Brand.cherry), title: Text(t.$1, style: const TextStyle(fontWeight: FontWeight.w600)), trailing: const Icon(Icons.chevron_right), onTap: () async { await Navigator.push(context, MaterialPageRoute(builder: (_) => t.$3)); if (mounted) setState(() {}); }))),
       const SizedBox(height: 8),
-      OutlinedButton(onPressed: () async { await PushService.disable(remember: false); await Api.instance.logout(); onSignOut(); }, child: const Text('Sign out')),
+      OutlinedButton(onPressed: () async { await PushService.disable(remember: false); await Api.instance.logout(); widget.onSignOut(); }, child: const Text('Sign out')),
     ]);
   }
 }
@@ -259,7 +325,12 @@ class CouponsScreen extends StatelessWidget {
           return ListView(padding: const EdgeInsets.all(20), children: [
             for (final c in list) Opacity(opacity: c['status'] == 'active' ? 1 : 0.55, child: Padding(padding: const EdgeInsets.only(bottom: 10), child: Card(child: ListTile(
               title: Text(c['title'], style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(c['status'] == 'active' ? 'Valid until ${_d(c['expires_at'])}' : c['status'] == 'used' ? 'Used' : 'Expired'),
+              subtitle: Text([
+                c['status'] == 'active' ? 'Valid until ${_d(c['expires_at'])}' : c['status'] == 'used' ? 'Used' : 'Expired',
+                if ((c['min_spend'] ?? 0) > 0) 'Min spend Rs ${c['min_spend']}',
+                if ((c['max_discount'] ?? 0) > 0) 'Up to Rs ${c['max_discount']}',
+                if (c['single_cup'] != false) '1 drink base price',
+              ].join(' · ')),
               trailing: Chip2(c['kind'] == 'pct' ? '${c['pct']}% off' : 'Free cup', bg: c['status'] == 'active' ? Brand.marigold : Brand.surfaceSunk),
             )))),
           ]);
@@ -274,11 +345,13 @@ class ReferralScreen extends StatelessWidget {
         appBar: AppBar(title: const Text('Give a cup')),
         body: _Loader(path: '/referrals', builder: (context, d, _) {
           final data = d as Map;
+          final minSpend = data['min_spend'] ?? 150;
+          final freeMax = data['free_max'] ?? 220;
           return ListView(padding: const EdgeInsets.all(20), children: [
             Card(child: Padding(padding: const EdgeInsets.all(24), child: Column(children: [
               Text('Give a cup. Get a cup.', style: display(24)),
               const SizedBox(height: 6),
-              const Text('Share your code. When your friend finishes their first cup, you both get one.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted)),
+              Text('Share your code. When your friend completes their first paid order of Rs $minSpend or more, you both get a free drink coupon (up to Rs $freeMax).', textAlign: TextAlign.center, style: const TextStyle(color: Brand.inkMuted)),
               const SizedBox(height: 12),
               QrImageView(data: 'sadhai://invite/${data['code']}', size: 140, eyeStyle: const QrEyeStyle(color: Brand.ink, eyeShape: QrEyeShape.square), dataModuleStyle: const QrDataModuleStyle(color: Brand.ink, dataModuleShape: QrDataModuleShape.square)),
               Text(data['code'], style: display(38, color: Brand.cherry)),
@@ -287,7 +360,7 @@ class ReferralScreen extends StatelessWidget {
               const SizedBox(height: 8),
               Text('One free cup per friend, up to ${data['cap']} a month. ${data['rewarded_this_month']} used this month.', textAlign: TextAlign.center, style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
             ]))),
-            for (final f in (data['friends'] as List)) Padding(padding: const EdgeInsets.only(top: 10), child: Card(child: ListTile(title: Text(f['name']), trailing: Chip2(f['status'] == 'rewarded' ? 'First cup done' : 'Waiting', bg: f['status'] == 'rewarded' ? Brand.hill : Brand.surfaceSunk, fg: f['status'] == 'rewarded' ? Brand.onCherry : Brand.ink)))),
+            for (final f in (data['friends'] as List)) Padding(padding: const EdgeInsets.only(top: 10), child: Card(child: ListTile(title: Text(f['name']), trailing: Chip2(f['status'] == 'rewarded' ? 'Rewarded' : 'Awaiting paid order', bg: f['status'] == 'rewarded' ? Brand.hill : Brand.surfaceSunk, fg: f['status'] == 'rewarded' ? Brand.onCherry : Brand.ink)))),
           ]);
         }),
       );

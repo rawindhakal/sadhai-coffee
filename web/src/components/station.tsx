@@ -221,9 +221,17 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
             </div>
           </div>
         )}
-        {offer !== 'pass' && <div className="row wrap">{['cash', 'fonepay'].map((m) => <button key={m} className={`btn sm ${method === m ? 'primary' : 'ghost'}`} onClick={() => setMethod(m)}>{m === 'cash' ? 'Cash' : 'Fonepay QR'}</button>)}</div>}
+        {offer !== 'pass' && (
+          <div className="row wrap">
+            {(['cash', 'fonepay', 'esewa', 'khalti'] as const).map((m) => (
+              <button key={m} className={`btn sm ${method === m ? 'primary' : 'ghost'}`} onClick={() => setMethod(m)}>
+                {m === 'cash' ? 'Cash' : m === 'fonepay' ? 'Fonepay QR' : m === 'esewa' ? 'eSewa QR' : 'Khalti QR'}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="row between"><strong>Total</strong><strong style={{ fontSize: 24 }}>{rs(total)}</strong></div>
-        <p className="small muted">{method === 'cash' && offer !== 'pass' ? 'Collect cash now.' : method === 'fonepay' && offer !== 'pass' ? 'A QR appears for the customer to scan. The order goes to the bar only after Fonepay confirms.' : 'Pays from the pass.'}</p>
+        <p className="small muted">{method === 'cash' && offer !== 'pass' ? 'Collect cash now.' : offer !== 'pass' ? `A ${method.toUpperCase()} QR appears for the customer to scan. The order goes to the bar once paid.` : 'Pays from the pass.'}</p>
         <button className="btn primary lg" disabled={!cart.length || busy} onClick={place}>{busy ? 'Placing…' : 'Take order'}</button>
       </div>
       {qrPay && (

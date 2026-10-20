@@ -92,7 +92,12 @@ class _OffersScreenState extends State<OffersScreen> {
         const SizedBox(height: 8),
         for (final c in _coupons) Card(margin: const EdgeInsets.only(bottom: 8), child: ListTile(
           title: Text(c['title'], style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: Text('Valid until ${DateFormat('d MMM yyyy').format(DateTime.parse(c['expires_at']).toLocal())} · Applied at checkout'),
+          subtitle: Text([
+            'Valid until ${DateFormat('d MMM yyyy').format(DateTime.parse(c['expires_at']).toLocal())}',
+            if ((c['min_spend'] ?? 0) > 0) 'Min spend Rs ${c['min_spend']}',
+            if ((c['max_discount'] ?? 0) > 0) 'Up to Rs ${c['max_discount']}',
+            '1 drink base price · Applied at checkout',
+          ].join(' · ')),
           trailing: Chip2(c['kind'] == 'pct' ? '${c['pct']}% off' : 'Free cup', bg: Brand.marigold),
         )),
       ],
@@ -145,7 +150,7 @@ class PromoBoxState extends State<PromoBox> {
         const SizedBox(width: 10),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('${promo['code']} · ${promo['pct']}% off', style: const TextStyle(fontWeight: FontWeight.w700)),
-          Text('${promo['title']}${(promo['min_total'] ?? 0) > 0 ? ' · min Rs ${promo['min_total']}' : ''}. Applied at checkout.', style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
+          Text('${promo['title']}${(promo['min_total'] ?? 0) > 0 ? ' · min Rs ${promo['min_total']}' : ''}${(promo['max_discount'] ?? 0) > 0 ? ' · max Rs ${promo['max_discount']} off' : ''}. Applied at checkout.', style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
         ])),
         TextButton(onPressed: () => context.read<CartState>().setPromo(null), child: const Text('Remove')),
       ]) else Row(children: [

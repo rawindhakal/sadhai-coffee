@@ -751,3 +751,52 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS released_at timestamptz;
 CREATE INDEX IF NOT EXISTS orders_scheduled_idx ON orders(scheduled_for) WHERE scheduled_for IS NOT NULL AND released_at IS NULL;
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('customer','station','manager','owner','partner'));
+
+-- ---- v1.6.6: Multi-gateway QR (Fonepay, eSewa, Khalti), NestSMS & Anti-abuse Marketing ----
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at timestamptz;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_ip_hash text;
+
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS min_spend int NOT NULL DEFAULT 0;
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS max_discount int;
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS single_cup boolean NOT NULL DEFAULT true;
+
+ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS max_discount int;
+ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS drinks_only boolean NOT NULL DEFAULT true;
+
+ALTER TABLE referrals ADD COLUMN IF NOT EXISTS qualifying_order_id uuid REFERENCES orders(id);
+ALTER TABLE referrals ADD COLUMN IF NOT EXISTS qualifying_amount int;
+
+-- Permanent hash registry of phones that have registered, preventing delete-and-recreate welcome/referral abuse
+CREATE TABLE IF NOT EXISTS claimed_phones (
+  phone_hash text PRIMARY KEY,
+  first_user_id uuid,
+  welcome_issued boolean NOT NULL DEFAULT false,
+  referral_used boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- NestSMS OTP verification table
+CREATE TABLE IF NOT EXISTS phone_verifications (
+  phone text PRIMARY KEY,
+  code_hash text NOT NULL,
+  attempts int NOT NULL DEFAULT 0,
+  sent_count int NOT NULL DEFAULT 1,
+  window_started_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  verified_at timestamptz
+);
+
+-- NestSMS delivery log
+CREATE TABLE IF NOT EXISTS sms_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  phone text NOT NULL,
+  kind text NOT NULL DEFAULT 'transactional',
+  message text NOT NULL,
+  status text NOT NULL DEFAULT 'sent',
+  provider_response jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sms_log_created_idx ON sms_log(created_at DESC);
+

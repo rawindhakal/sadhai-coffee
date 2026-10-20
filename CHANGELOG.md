@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.6.6] - 2026-10-20
+
+### Added
+- **eSewa & Khalti Dynamic QR Payment Gateways**:
+  - Implemented eSewa (`esewa`) and Khalti (`khalti`) online payment gateways with the same Dynamic QR, live status polling (`GET /payments/:id`), callback/webhook verification, and sandbox test flow as Fonepay across Web, Mobile, Kiosk, Station POS, Pass purchases, and Owner Settlements.
+- **NestSMS Gateway (`nestsms`)**:
+  - Integrated NestSMS (`https://api.nestsms.com/api/v1/sms/send`) for 6-digit SMS OTP phone verification, optional order-ready SMS notifications, and Owner Studio integration diagnostics.
+- **Marketing -> Welcome & Referrals Console + Anti-Loss Engine**:
+  - Relocated Welcome offers and referrals from Settings -> Rules into the **Marketing** section for Owners and Managers, with live KPIs, referral ledger, active coupon audit, and one-click coupon revocation.
+  - Enforced 6 non-breachable anti-loss protections: single-drink base-price cap (excluding add-ons/food/merch), non-stacking with daily offers/drops, minimum spend floors, permanent SHA-256 `claimed_phones` anti-re-signup registry, qualifying full-price paid order requirement for referrals, and optional SMS OTP phone verification.
+
+### Fixed
+- **Fonepay Dynamic QR**:
+  - Fixed 36-char UUID `prn` truncation by generating compact 24-char alphanumeric PRNs, fixed truthy `fonepayTraceId` status check bug, added exact amount verification, and sanitized `remarks1`/`remarks2`.
+
+---
+
 ## [1.6.5] - 2026-10-20
 
 ### Changed

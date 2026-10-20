@@ -16,7 +16,6 @@ type F = { key: string; label: string; unit?: string; hint?: string; toggle?: bo
 const RULES: { title: string; note?: string; fields: F[] }[] = [
   { title: 'Drink prices', note: 'One price for every drink of a kind, at every station. Changing one updates every drink in that group straight away.', fields: [{ key: 'price_hot', label: 'Hot coffee', unit: 'Rs' }, { key: 'price_flavored', label: 'Flavored drinks', unit: 'Rs' }, { key: 'price_iced', label: 'Iced drinks', unit: 'Rs' }] },
   { title: '10-cup pass', fields: [{ key: 'pass_price', label: 'Price of a pass', unit: 'Rs' }, { key: 'pass_cups', label: 'Cups in a pass' }, { key: 'pass_valid_days', label: 'Days it lasts once started' }, { key: 'pass_use_by_days', label: 'Days an unstarted pass can wait' }] },
-  { title: 'Welcome offers and referrals', fields: [{ key: 'first_cup_days', label: 'Free first cup lasts (days)' }, { key: 'first_cup_max', label: 'Free cup covers up to', unit: 'Rs' }, { key: 'ladder_count', label: 'Coupons after the first cup' }, { key: 'ladder_pct', label: 'Coupon percent off', unit: '%' }, { key: 'ladder_days', label: 'Coupons last (days)' }, { key: 'referral_cap_month', label: 'Referral cups per month' }, { key: 'referral_cup_max', label: 'Referral cup covers up to', unit: 'Rs' }, { key: 'offer_payback_max_days', label: 'Longest allowed payback (days)' }] },
   { title: 'Pickup later', note: 'Customers can choose a pickup time later today. A closed or paused station never takes orders.', fields: [{ key: 'preorder_enabled', label: 'Let customers choose a pickup time', toggle: true }, { key: 'preorder_min_minutes', label: 'Earliest pickup, from now (minutes)' }, { key: 'preorder_prep_minutes', label: 'Start making it this many minutes before pickup' }] },
   { title: 'Partner cafes', fields: [{ key: 'partner_share_pct', label: 'Default share of net sales a partner keeps', unit: '%' }] },
   { title: 'Costing and stock', fields: [{ key: 'target_food_cost_pct', label: 'Target food cost', unit: '%', hint: 'Items above this are flagged on Recipes and costing.' }, { key: 'variance_alert_value', label: 'Alert when a stock count is off by', unit: 'Rs' }] },
@@ -51,7 +50,8 @@ export function RulesPanel() {
 }
 
 const GROUPS: Record<string, { title: string; note: string }> = {
-  payments: { title: 'Payments', note: 'Fonepay is the only online payment. Keys are stored encrypted and are never shown again after saving. Start in Sandbox mode, then switch to Live when Fonepay approves your merchant account.' },
+  payments: { title: 'Online payment gateways (Fonepay, eSewa & Khalti)', note: 'Supports Fonepay Dynamic QR, eSewa Dynamic QR / ePay v2, and Khalti Dynamic QR / ePay v2. Keys are encrypted at rest and never shown again after saving. Start in Sandbox mode, then switch to Live once your merchant accounts are approved.' },
+  sms: { title: 'SMS gateway (NestSMS)', note: 'Connect NestSMS (api.nestsms.com) for phone OTP verification and optional Order-Ready SMS alerts. In Sandbox mode or when keys are not yet set, OTPs and SMS messages are logged safely without failing.' },
   push: { title: 'Push notifications', note: 'Firebase sends to Android and iPhone. Browser push uses a key pair. With neither, push runs in test mode.' },
   app: { title: 'Addresses and app versions', note: 'Where customers reach you and which app versions may still run.' },
   company: { title: 'Company details', note: 'Shown on the privacy policy, terms and support pages.' },
@@ -74,7 +74,11 @@ export function IntegrationsPanel() {
     if (has && !confirm('Replacing the browser push keys stops push on every browser that turned it on. Replace them?')) return;
     try { await api('/owner/integrations/vapid', { method: 'POST', body: { replace: !!has } }); reload(); toast('New browser push keys saved'); } catch (e: any) { toast(e.message, true); }
   }
-  const tests: Record<string, [string, string][]> = { payments: [['fonepay', 'Check Fonepay keys']], push: [['fcm', 'Check Firebase key'], ['push', 'Send me a test push']] };
+  const tests: Record<string, [string, string][]> = {
+    payments: [['fonepay', 'Check Fonepay'], ['esewa', 'Check eSewa'], ['khalti', 'Check Khalti']],
+    sms: [['nestsms', 'Send test SMS (NestSMS)']],
+    push: [['fcm', 'Check Firebase key'], ['push', 'Send me a test push']],
+  };
   return (
     <div className="col" style={{ gap: 16 }}>
       {Object.entries(GROUPS).map(([g, meta]) => (

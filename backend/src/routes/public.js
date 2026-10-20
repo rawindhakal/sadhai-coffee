@@ -26,8 +26,29 @@ pub.get('/config', wrap(async (_req, res) => {
     pass: { price: s.pass_price, cups: s.pass_cups, valid_days: s.pass_valid_days },
     pricing: { hot: s.price_hot, flavored: s.price_flavored, iced: s.price_iced },
     partner_share_pct: s.partner_share_pct,
-    payment_methods: ['cash', 'fonepay'],
-    referral: { cap_month: s.referral_cap_month }, pass_use_by_days: s.pass_use_by_days, pass_valid_days: s.pass_valid_days,
+    payment_methods: ['cash', 'fonepay', 'esewa', 'khalti'],
+    referral: {
+      enabled: !!Number(s.referral_enabled),
+      cap_month: s.referral_cap_month,
+      lifetime_cap: s.referral_lifetime_cap,
+      min_spend: s.referral_min_spend,
+      cup_max: s.referral_cup_max,
+      reward_pct: s.referral_reward_pct,
+      require_verified_phone: !!Number(s.offer_require_verified_phone),
+    },
+    welcome: {
+      enabled: !!Number(s.welcome_enabled),
+      trigger: Number(s.welcome_trigger ?? 1) === 1 ? 'after_first_paid_order' : 'on_signup',
+      first_cup_discount_pct: s.first_cup_discount_pct,
+      first_cup_free_max: s.first_cup_free_max,
+      first_cup_min_spend: s.first_cup_min_spend,
+      ladder_enabled: !!Number(s.ladder_enabled),
+      ladder_pct: s.ladder_pct,
+      ladder_cups: s.ladder_cups,
+      ladder_max_discount: s.ladder_max_discount,
+      ladder_min_spend: s.ladder_min_spend,
+    },
+    pass_use_by_days: s.pass_use_by_days, pass_valid_days: s.pass_valid_days,
     vapid_public_key: vapidPublicKey(),
     site: { company: rt('company_name'), address: rt('company_address'), support_email: rt('support_email'), privacy_email: rt('privacy_email') },
   });
@@ -66,7 +87,7 @@ pub.get('/drops/active', wrap(async (_req, res) => {
   res.json(rows.map((d) => ({ ...d, remaining: Math.max(0, d.cap - d.sold), live: new Date(d.starts_at) <= new Date() && d.sold < d.cap })));
 }));
 
-// Centralized offers: returns active daily offers, limited drops, and pass info
+// Centralized offers: returns active daily offers, limited drops, pass info, and welcome/referral rules
 pub.get('/offers', wrap(async (req, res) => {
   const stationId = req.query.station_id || null;
   const [offersRes, dropsRes, configRes] = await Promise.all([
@@ -105,6 +126,25 @@ pub.get('/offers', wrap(async (req, res) => {
       price: configRes.pass_price,
       cups: configRes.pass_cups,
       valid_days: configRes.pass_valid_days,
+    },
+    welcome: {
+      enabled: !!Number(configRes.welcome_enabled),
+      trigger: Number(configRes.welcome_trigger ?? 1) === 1 ? 'after_first_paid_order' : 'on_signup',
+      first_cup_discount_pct: configRes.first_cup_discount_pct,
+      first_cup_free_max: configRes.first_cup_free_max,
+      first_cup_min_spend: configRes.first_cup_min_spend,
+      ladder_enabled: !!Number(configRes.ladder_enabled),
+      ladder_pct: configRes.ladder_pct,
+      ladder_cups: configRes.ladder_cups,
+      ladder_max_discount: configRes.ladder_max_discount,
+      ladder_min_spend: configRes.ladder_min_spend,
+    },
+    referral: {
+      enabled: !!Number(configRes.referral_enabled),
+      min_spend: configRes.referral_min_spend,
+      cup_max: configRes.referral_cup_max,
+      reward_pct: configRes.referral_reward_pct,
+      cap_month: configRes.referral_cap_month,
     },
   });
 }));
