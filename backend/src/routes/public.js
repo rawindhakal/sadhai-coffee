@@ -73,7 +73,7 @@ pub.get('/offers', wrap(async (req, res) => {
     query(
       `SELECT d.id, d.title, d.title_ne, d.blurb, d.scope, d.pct, d.offer_price, d.product_id, d.category_id, d.station_id,
               d.starts_at, d.ends_at, d.max_uses, d.used,
-              p.name AS product_name, p.list_price AS original_price,
+              p.name AS product_name, p.price AS original_price,
               c.name AS category_name, s.name AS station_name
          FROM daily_offers d
          LEFT JOIN products p ON p.id = d.product_id
