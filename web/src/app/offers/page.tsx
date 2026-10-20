@@ -13,16 +13,17 @@ export default function Offers() {
   const cart = useCart();
   const toast = useToast();
   const home = useData<any>(cart.station ? `/stations/${cart.station.id}/home` : null, [cart.station?.id]);
+  const central = useData<any>(!cart.station ? '/offers' : null);
   const coupons = useData<any[]>(user ? '/coupons' : null, [user?.id]);
-  const d = home.data;
-  const products = d?.categories.flatMap((c: any) => c.products) || [];
+  const d = home.data || central.data;
+  const products = home.data?.categories?.flatMap((c: any) => c.products) || [];
   const active = (coupons.data || []).filter((c) => c.status === 'active');
 
   return (
     <CustomerShell>
       <h2>Offers</h2>
-      <div className="sectionhead"><h3>Offer of the day</h3>{cart.station && <span className="small muted">{cart.station.name}</span>}</div>
-      {!cart.station ? <Empty><Link href="/order">Choose a station</Link> to see today’s offers.</Empty> : !d ? <Loading /> : !d.offers.length ? <Empty>No special offer at this station today.</Empty> : (
+      <div className="sectionhead"><h3>Offer of the day</h3>{cart.station ? <span className="small muted">{cart.station.name}</span> : <span className="small muted">Network-wide</span>}</div>
+      {!d ? <Loading /> : !d.offers?.length ? <Empty>No special offer today.</Empty> : (
         <div className="col">{d.offers.map((o: any) => {
           const p = products.find((x: any) => x.id === o.product_id);
           return (

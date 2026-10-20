@@ -506,6 +506,79 @@ owner.post('/settlements', wrap(async (req, res) => {
   await audit(req.user.id, 'settlement.enter', 'settlement', rows[0].id, b);
   res.status(201).json(rows[0]);
 }));
+owner.get('/reports/passes', wrap(async (req, res) => {
+  const from = req.query.from || '2020-01-01';
+  const to = req.query.to ? `${req.query.to} 23:59:59` : '2099-12-31 23:59:59';
+  const s = await getSettings();
+
+  const [kpiRes, byStationRes, breakageRes, listRes] = await Promise.all([
+    query(
+      `SELECT
+        (SELECT count(*)::int FROM passes WHERE status IN ('active','used','expired') AND purchased_at >= $1 AND purchased_at <= $2) AS passes_sold,
+        (SELECT COALESCE(sum(price_paid), 0)::int FROM passes WHERE status IN ('active','used','expired') AND purchased_at >= $1 AND purchased_at <= $2) AS total_revenue,
+        (SELECT COALESCE(sum(u.cups), 0)::int FROM order_pass_uses u JOIN orders o ON o.id=u.order_id WHERE o.status NOT IN ('cancelled','awaiting_payment') AND o.created_at >= $1 AND o.created_at <= $2) AS redeemed_cups,
+        (SELECT count(*)::int FROM passes WHERE status='active' AND expires_at > now()) AS active_passes,
+        (SELECT COALESCE(sum(total_cups - used_cups), 0)::int FROM passes WHERE status='active' AND expires_at > now()) AS outstanding_cups,
+        (SELECT count(*)::int FROM passes WHERE related_party AND purchased_at >= $1 AND purchased_at <= $2) AS related_party_count,
+        (SELECT count(*)::int FROM passes WHERE status='used' AND purchased_at >= $1 AND purchased_at <= $2) AS completed_passes`,
+      [from, to],
+    ),
+    query(
+      `SELECT s.id, s.name,
+              COALESCE(sum(u.cups), 0)::int AS redeemed_cups,
+              count(DISTINCT o.id)::int AS orders_count
+         FROM stations s
+         LEFT JOIN orders o ON o.station_id = s.id AND o.status NOT IN ('cancelled','awaiting_payment') AND o.created_at >= $1 AND o.created_at <= $2
+         LEFT JOIN order_pass_uses u ON u.order_id = o.id
+        WHERE s.active
+        GROUP BY s.id, s.name
+        ORDER BY redeemed_cups DESC`,
+      [from, to],
+    ),
+    query(
+      `SELECT count(*)::int AS expired_count,
+              COALESCE(sum(total_cups - used_cups), 0)::int AS breakage_cups,
+              COALESCE(sum((total_cups - used_cups) * (price_paid / total_cups)), 0)::int AS breakage_value
+         FROM passes
+        WHERE status = 'expired' OR (status = 'active' AND expires_at < now())`,
+    ),
+    query(
+      `SELECT p.id, p.code, p.status, p.total_cups, p.used_cups,
+              GREATEST(0, p.total_cups - p.used_cups) AS remaining,
+              p.price_paid, p.purchased_at, p.activated_at, p.expires_at, p.related_party,
+              u.name AS customer_name, u.phone AS customer_phone
+         FROM passes p
+         JOIN users u ON u.id = p.user_id
+        WHERE p.status <> 'pending'
+        ORDER BY p.purchased_at DESC
+        LIMIT 300`,
+    ),
+  ]);
+
+  const kpi = kpiRes.rows[0];
+  const brk = breakageRes.rows[0];
+  const unitPrice = s.pass_price / s.pass_cups;
+  const liabilityValue = Math.round(kpi.outstanding_cups * unitPrice);
+
+  res.json({
+    kpi: {
+      ...kpi,
+      liability_value: liabilityValue,
+      breakage_cups: brk.breakage_cups,
+      breakage_value: brk.breakage_value,
+      expired_count: brk.expired_count,
+      pass_price: s.pass_price,
+      pass_cups: s.pass_cups,
+      redemption_pct: kpi.passes_sold ? Math.round((kpi.redeemed_cups / (kpi.passes_sold * s.pass_cups)) * 100) : null,
+    },
+    by_station: byStationRes.rows.map((st) => ({
+      ...st,
+      est_reimbursement: Math.round(st.redeemed_cups * unitPrice),
+    })),
+    register: listRes.rows,
+  });
+}));
+
 owner.get('/passes', wrap(async (_req, res) => {
   const { rows } = await query(
     `SELECT p.id, p.status, p.total_cups, p.used_cups, p.price_paid, p.purchased_at, p.expires_at, p.related_party, u.name, u.phone

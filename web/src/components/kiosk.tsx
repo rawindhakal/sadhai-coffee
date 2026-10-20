@@ -1,6 +1,7 @@
 'use client';
 import { Logo } from './logo';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FonepayQr } from './fonepay';
@@ -18,6 +19,17 @@ const T: Record<string, [string, string]> = {
   passopt: ['Use my 10-cup pass', 'मेरो १०-कप पास प्रयोग गर्ने'], scan: ['Pay online with a Fonepay QR', 'Fonepay QR बाट अहिले तिर्ने'], place: ['Place order', 'अर्डर गर्नुहोस्'],
   done: ['Your number', 'तपाईंको नम्बर'], again: ['New order', 'नयाँ अर्डर'], total: ['Total', 'जम्मा'], back: ['Back', 'पछाडि'], cart: ['View order', 'अर्डर हेर्नुहोस्'],
 };
+
+function StationQrCanvas({ stationId, size = 160 }: { stationId: string; size?: number }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const url = typeof window !== 'undefined' ? `${window.location.origin}/order?station=${stationId}` : `https://sadhaicoffee.com/order?station=${stationId}`;
+  useEffect(() => {
+    if (canvas.current) {
+      QRCode.toCanvas(canvas.current, url, { width: size, margin: 1, color: { dark: '#1c1917', light: '#ffffff' } }).catch(() => {});
+    }
+  }, [url, size]);
+  return <canvas ref={canvas} style={{ borderRadius: 12 }} aria-label="Scan to order on phone" />;
+}
 
 export function Kiosk() {
   const { user, ready, login, logout } = useAuth();
@@ -97,7 +109,7 @@ export function Kiosk() {
 
   return (
     <div className="k-full">
-      <KioskTop name={home.station.name} lang={lang} setLang={setLang} onExit={() => router.push('/station')} onSignOut={() => logout()} user={staff} showBack={screen !== 'idle' && screen !== 'done'} onHome={reset} />
+      <KioskTop name={home.station.name} stationId={stationId} lang={lang} setLang={setLang} onExit={() => router.push('/station')} onSignOut={() => logout()} user={staff} showBack={screen !== 'idle' && screen !== 'done'} onHome={reset} />
 
       {screen === 'idle' && (
         <button className="k-idle" onClick={() => { setScreen('who'); last.current = Date.now(); }} aria-label={t('touch')}>
@@ -106,7 +118,33 @@ export function Kiosk() {
             <h1>{lang === 'ne' ? 'सधैं राम्रो कफी।' : 'Good coffee, every day.'}</h1>
             <p className="k-sub">{lang === 'ne' ? 'पहाडमा फलेको, ९० सेकेन्डमा तयार।' : 'Grown in the hills. Ready in 90 seconds.'}</p>
             {offers[0] && <div className="k-offer"><strong>{offers[0].title}</strong><span>{offers[0].blurb}</span></div>}
-            <span className="k-touch">{t('touch')}</span>
+            <div className="row wrap" style={{ gap: 20, alignItems: 'center', marginTop: 8 }}>
+              <span className="k-touch">{t('touch')}</span>
+              {stationId && (
+                <div
+                  className="card flat row"
+                  style={{
+                    background: 'var(--surface-raised)',
+                    padding: '12px 18px',
+                    borderRadius: 22,
+                    border: '2px solid var(--hairline)',
+                    gap: 14,
+                    alignItems: 'center',
+                    cursor: 'default',
+                    boxShadow: 'var(--shadow-card)',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ background: '#fff', padding: 6, borderRadius: 12, display: 'flex' }}>
+                    <StationQrCanvas stationId={stationId} size={110} />
+                  </div>
+                  <div style={{ textAlign: 'left' }}>
+                    <strong style={{ fontSize: 18, display: 'block', color: 'var(--ink)' }}>Order on your phone</strong>
+                    <span className="small muted" style={{ display: 'block', marginTop: 2 }}>Skip the line · Scan with camera</span>
+                  </div>
+                </div>
+              )}
+            </div>
             <p className="small" style={{ opacity: 0.8 }}>Prices in NPR. VAT and service included.</p>
           </div>
         </button>
@@ -155,10 +193,11 @@ export function Kiosk() {
   );
 }
 
-function KioskTop({ name, lang, setLang, onExit, onSignOut, user, showBack, onHome }: any) {
+function KioskTop({ name, stationId, lang, setLang, onExit, onSignOut, user, showBack, onHome }: any) {
   const [taps, setTaps] = useState(0);
   const [pw, setPw] = useState('');
   const [open, setOpen] = useState(false);
+  const [showQr, setShowQr] = useState(false);
   const [err, setErr] = useState('');
   const { login } = useAuth();
   useEffect(() => { if (!taps) return; const t = setTimeout(() => setTaps(0), 2500); return () => clearTimeout(t); }, [taps]);
@@ -167,8 +206,21 @@ function KioskTop({ name, lang, setLang, onExit, onSignOut, user, showBack, onHo
     <header className="k-top">
       <Logo size={40} as="button" onClick={() => { const n = taps + 1; setTaps(n); if (n >= 5) { setOpen(true); setTaps(0); } }} />
       <span className="k-station">{name}</span><div className="grow" />
+      {stationId && <button className="btn ghost sm" style={{ fontSize: 16 }} onClick={() => setShowQr(true)}>📱 Scan on phone</button>}
       {showBack && <button className="btn ghost" onClick={onHome}>Start over</button>}
       <button className="btn ghost" onClick={() => setLang(lang === 'en' ? 'ne' : 'en')}>{lang === 'en' ? 'नेपाली' : 'English'}</button>
+      {showQr && stationId && (
+        <div className="modal-bg" onClick={() => setShowQr(false)}>
+          <div className="modal center col" style={{ alignItems: 'center', maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ fontSize: 24 }}>Order on your phone</h3>
+            <p className="muted small" style={{ marginTop: 4 }}>Scan with your phone camera to order ahead from {name}</p>
+            <div style={{ background: '#fff', padding: 12, borderRadius: 16, margin: '16px 0' }}>
+              <StationQrCanvas stationId={stationId} size={220} />
+            </div>
+            <button className="btn primary block" onClick={() => setShowQr(false)}>Done</button>
+          </div>
+        </div>
+      )}
       {open && (
         <div className="modal-bg" onClick={() => setOpen(false)}><div className="modal" onClick={(e) => e.stopPropagation()}>
           <h3>Staff only</h3><p className="muted small">Enter your password to leave kiosk mode.</p>
@@ -192,26 +244,180 @@ function SetUp({ onLogin }: { onLogin: (p: string, pw: string) => Promise<any> }
   );
 }
 
-/** Name and phone, with a big keypad so it works on a kiosk with no physical keyboard. */
+/** Name and phone, with on-screen QWERTY keyboard for name and numeric keypad for phone. */
 function Who({ t, guest, setGuest, onNext, privacy }: any) {
+  const [field, setField] = useState<'name' | 'phone'>('name');
+  const [caps, setCaps] = useState(true);
+
   const digits = guest.phone.replace(/\D/g, '');
   const okPhone = /^(977)?9[78]\d{8}$/.test(digits);
   const okName = guest.name.trim().length >= 2;
-  const press = (k: string) => setGuest({ ...guest, phone: k === '⌫' ? guest.phone.slice(0, -1) : (guest.phone + k).slice(0, 10) });
+
+  const pressPhone = (k: string) =>
+    setGuest({
+      ...guest,
+      phone: k === '⌫' ? guest.phone.slice(0, -1) : (guest.phone + k).slice(0, 10),
+    });
+
+  const pressName = (char: string) => {
+    if (char === '⌫') {
+      setGuest({ ...guest, name: guest.name.slice(0, -1) });
+    } else if (char === 'space') {
+      if (guest.name.length && !guest.name.endsWith(' ')) {
+        setGuest({ ...guest, name: (guest.name + ' ').slice(0, 40) });
+      }
+    } else {
+      const nextChar = caps ? char.toUpperCase() : char.toLowerCase();
+      setGuest({ ...guest, name: (guest.name + nextChar).slice(0, 40) });
+      if (caps && guest.name.length === 0) setCaps(false);
+    }
+  };
+
+  const Q_ROW1 = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'];
+  const Q_ROW2 = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'];
+  const Q_ROW3 = ['Z', 'X', 'C', 'V', 'B', 'N', 'M'];
+
   return (
     <div className="k-card wide">
       <h2>{t('who')}</h2>
       <div className="k-form">
         <div className="col">
           <label className="k-label" htmlFor="kn">{t('name')}</label>
-          <input id="kn" className="k-input" autoFocus autoComplete="off" maxLength={40} value={guest.name} onChange={(e) => setGuest({ ...guest, name: e.target.value })} />
+          <input
+            id="kn"
+            className={`k-input ${field === 'name' ? 'active' : ''}`}
+            readOnly
+            autoComplete="off"
+            maxLength={40}
+            value={guest.name}
+            placeholder="Tap to type your name"
+            onClick={() => setField('name')}
+            aria-label="Your name"
+          />
           <label className="k-label" htmlFor="kp">{t('phone')}</label>
-          <input id="kp" className="k-input" inputMode="none" readOnly value={guest.phone} placeholder="98XXXXXXXX" aria-label="Mobile number, use the keypad" />
-          <label className="row small" style={{ alignItems: 'flex-start', gap: 12, marginTop: 8 }}><input type="checkbox" style={{ width: 28, minHeight: 28, flex: '0 0 auto' }} checked={guest.consent} onChange={(e) => setGuest({ ...guest, consent: e.target.checked })} /><span>{t('consent')} {privacy && <Link href="/privacy" target="_blank">Privacy policy</Link>}</span></label>
+          <input
+            id="kp"
+            className={`k-input ${field === 'phone' ? 'active' : ''}`}
+            readOnly
+            value={guest.phone}
+            placeholder="98XXXXXXXX"
+            onClick={() => setField('phone')}
+            aria-label="Mobile number"
+          />
+          <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
+            <button
+              type="button"
+              className={`btn sm ${field === 'name' ? 'primary' : 'ghost'}`}
+              onClick={() => setField('name')}
+            >
+              ⌨ Type Name (QWERTY)
+            </button>
+            <button
+              type="button"
+              className={`btn sm ${field === 'phone' ? 'primary' : 'ghost'}`}
+              onClick={() => setField('phone')}
+            >
+              🔢 Type Phone (123)
+            </button>
+          </div>
+          <label className="row small" style={{ alignItems: 'flex-start', gap: 12, marginTop: 12 }}>
+            <input
+              type="checkbox"
+              style={{ width: 28, minHeight: 28, flex: '0 0 auto' }}
+              checked={guest.consent}
+              onChange={(e) => setGuest({ ...guest, consent: e.target.checked })}
+            />
+            <span>{t('consent')} {privacy && <Link href="/privacy" target="_blank">Privacy policy</Link>}</span>
+          </label>
         </div>
-        <div className="k-keypad" role="group" aria-label="Number pad">{['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'].map((k) => <button key={k} className="k-key" onClick={() => (k === 'C' ? setGuest({ ...guest, phone: '' }) : press(k))} aria-label={k === '⌫' ? 'Delete' : k === 'C' ? 'Clear' : k}>{k}</button>)}</div>
+
+        <div>
+          {field === 'name' ? (
+            <div className="k-qwerty" role="group" aria-label="QWERTY Keyboard">
+              <div className="k-qrow">
+                {Q_ROW1.map((k) => (
+                  <button key={k} type="button" className="k-qkey" onClick={() => pressName(k)}>
+                    {caps ? k : k.toLowerCase()}
+                  </button>
+                ))}
+              </div>
+              <div className="k-qrow">
+                {Q_ROW2.map((k) => (
+                  <button key={k} type="button" className="k-qkey" onClick={() => pressName(k)}>
+                    {caps ? k : k.toLowerCase()}
+                  </button>
+                ))}
+              </div>
+              <div className="k-qrow">
+                <button
+                  type="button"
+                  className={`k-qkey wide ${caps ? 'on' : ''}`}
+                  onClick={() => setCaps(!caps)}
+                  aria-label="Shift / Caps Lock"
+                >
+                  ⇧ Shift
+                </button>
+                {Q_ROW3.map((k) => (
+                  <button key={k} type="button" className="k-qkey" onClick={() => pressName(k)}>
+                    {caps ? k : k.toLowerCase()}
+                  </button>
+                ))}
+                <button type="button" className="k-qkey wide" onClick={() => pressName('⌫')} aria-label="Delete">
+                  ⌫
+                </button>
+              </div>
+              <div className="k-qrow">
+                <button
+                  type="button"
+                  className="k-qkey wide"
+                  onClick={() => setGuest({ ...guest, name: '' })}
+                  aria-label="Clear name"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  className="k-qkey space"
+                  onClick={() => pressName('space')}
+                  aria-label="Space bar"
+                >
+                  Space
+                </button>
+                <button
+                  type="button"
+                  className="k-qkey wide on"
+                  onClick={() => setField('phone')}
+                  aria-label="Next: Phone number"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="k-keypad" role="group" aria-label="Number pad">
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'].map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className="k-key"
+                  onClick={() => (k === 'C' ? setGuest({ ...guest, phone: '' }) : pressPhone(k))}
+                  aria-label={k === '⌫' ? 'Delete' : k === 'C' ? 'Clear' : k}
+                >
+                  {k}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-      <button className="btn primary lg block" style={{ marginTop: 20 }} disabled={!okName || !okPhone || !guest.consent} onClick={onNext}>{t('next')}</button>
+      <button
+        className="btn primary lg block"
+        style={{ marginTop: 20 }}
+        disabled={!okName || !okPhone || !guest.consent}
+        onClick={onNext}
+      >
+        {t('next')}
+      </button>
     </div>
   );
 }

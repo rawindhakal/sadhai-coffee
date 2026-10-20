@@ -61,6 +61,8 @@ export default function Cart() {
     setBusy(true); setError(null);
     try {
       const out = await api('/orders', { method: 'POST', body: payload });
+      passes.reload();
+      coupons.reload();
       if (out.payment) { setPayment(out); return; }
       cart.clear(); router.push(`/order/${out.order.id}`);
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }

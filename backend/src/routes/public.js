@@ -66,6 +66,49 @@ pub.get('/drops/active', wrap(async (_req, res) => {
   res.json(rows.map((d) => ({ ...d, remaining: Math.max(0, d.cap - d.sold), live: new Date(d.starts_at) <= new Date() && d.sold < d.cap })));
 }));
 
+// Centralized offers: returns active daily offers, limited drops, and pass info
+pub.get('/offers', wrap(async (req, res) => {
+  const stationId = req.query.station_id || null;
+  const [offersRes, dropsRes, configRes] = await Promise.all([
+    query(
+      `SELECT d.id, d.title, d.title_ne, d.blurb, d.scope, d.pct, d.offer_price, d.product_id, d.category_id, d.station_id,
+              d.starts_at, d.ends_at, d.max_uses, d.used,
+              p.name AS product_name, p.list_price AS original_price,
+              c.name AS category_name, s.name AS station_name
+         FROM daily_offers d
+         LEFT JOIN products p ON p.id = d.product_id
+         LEFT JOIN categories c ON c.id = d.category_id
+         LEFT JOIN stations s ON s.id = d.station_id
+        WHERE d.active AND d.starts_at <= now() AND d.ends_at >= now()
+          AND (d.max_uses IS NULL OR d.used < d.max_uses)
+          AND ($1::uuid IS NULL OR d.station_id IS NULL OR d.station_id = $1)
+        ORDER BY d.created_at DESC`,
+      [stationId],
+    ),
+    query(
+      `SELECT d.*, p.name AS product_name FROM drops d JOIN products p ON p.id=d.product_id
+        WHERE d.active AND d.starts_at <= now() AND d.ends_at >= now() AND d.sold < d.cap ORDER BY d.starts_at`,
+    ),
+    getSettings(),
+  ]);
+
+  res.json({
+    offers: offersRes.rows.map((o) => ({
+      ...o,
+      remaining: o.max_uses == null ? null : Math.max(0, o.max_uses - o.used),
+    })),
+    drops: dropsRes.rows.map((d) => ({
+      ...d,
+      remaining: Math.max(0, d.cap - d.sold),
+    })),
+    pass: {
+      price: configRes.pass_price,
+      cups: configRes.pass_cups,
+      valid_days: configRes.pass_valid_days,
+    },
+  });
+}));
+
 // Is this station taking orders, and what pickup times can a customer choose? Small, so the cart can poll it.
 pub.get('/stations/:id/pickup-times', wrap(async (req, res) => {
   const { rows } = await query(

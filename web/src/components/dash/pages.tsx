@@ -1,7 +1,7 @@
 'use client';
 import { Empty, Loading, useData } from '../ui';
 import { PartnerStatementCard, AccountabilityTab, CashTab, InventoryTab, OffersTab, PromosTab, ReviewsTab, StaffTab, StationMenuTab } from '../admin';
-import { AuditTab, DropsTab, FinanceTab, GrowthTab, SettingsTab, StationsTab, TeamTab } from '../owner';
+import { AuditTab, DropsTab, FinanceTab, GrowthTab, PassesReportTab, SettingsTab, StationsTab, TeamTab } from '../owner';
 import { MenuStudio } from '../menu-studio';
 import { StationWorkspace } from '../station';
 import { CostingSection } from '../recipes';
@@ -46,6 +46,7 @@ function Body({ section, role }: { section: string; role: 'owner' | 'manager' | 
     case 'enquiries': return <EnquiriesSection />;
     case 'accountability': return <AccountabilityTab stationId={sid} isOwner={isOwner} />;
     case 'finance': return <FinanceTab />;
+    case 'passes_report': return <P><PassesReportTab /></P>;
     case 'cash': return <P><CashTab stationId={sid} /></P>;
     case 'statement': return <PartnerStatement />;
     case 'rules': return <SettingsHub />;
@@ -62,7 +63,7 @@ const OWNER: Section[] = [
   { key: 'inventory', label: 'Inventory', icon: 'box', group: 'Costing and stock', keywords: 'stock central purchase transfer warehouse count loss' }, { key: 'recipes', label: 'Recipes and costing', icon: 'coin', group: 'Costing and stock', keywords: 'recipe cost margin food cost wastage' }, { key: 'stock', label: 'Station stock', icon: 'store', group: 'Costing and stock', keywords: 'restock station inventory' },
   { key: 'offers', label: 'Offer of the day', icon: 'tag', group: 'Marketing' }, { key: 'promos', label: 'Promo codes', icon: 'ticket', group: 'Marketing' }, { key: 'push', label: 'Push notifications', icon: 'bell', group: 'Marketing', keywords: 'message notification send campaign' }, { key: 'drops', label: 'Limited drops', icon: 'flame', group: 'Marketing' },
   { key: 'stations', label: 'Stations', icon: 'store', group: 'Network', keywords: 'partner cafe' }, { key: 'team', label: 'Users & Managers', icon: 'user', group: 'Network', keywords: 'users managers staff team accounts roles' }, { key: 'staff', label: 'Staff and pay', icon: 'users', group: 'Network', keywords: 'roster shift duty auto assign payroll salary attendance hourly leave' }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Network', keywords: 'scorecard partner statement' },
-  { key: 'finance', label: 'Finance', icon: 'wallet', group: 'Money', keywords: 'reconcile settlements passes' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Money' },
+  { key: 'finance', label: 'Finance', icon: 'wallet', group: 'Money', keywords: 'reconcile settlements' }, { key: 'passes_report', label: 'Passes Report', icon: 'ticket', group: 'Money', keywords: 'passes wallet liability breakage redemptions' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Money' },
   { key: 'rules', label: 'Settings and keys', icon: 'cog', group: 'Admin', keywords: 'settings pass price api key payment firebase push integration' }, { key: 'site', label: 'Home page and pictures', icon: 'image', group: 'Admin', keywords: 'hero images website partners investors content' }, { key: 'enquiries', label: 'Enquiries', icon: 'mail', group: 'Admin', keywords: 'partner investor leads' }, { key: 'audit', label: 'Audit log', icon: 'clock', group: 'Admin' },
 ];
 const MANAGER: Section[] = [
@@ -70,7 +71,7 @@ const MANAGER: Section[] = [
   { key: 'orders', label: 'Orders', icon: 'receipt', group: 'Operate' }, { key: 'run', label: 'Run station', icon: 'cup', group: 'Operate' }, { key: 'stock', label: 'Stock and deliveries', icon: 'box', group: 'Operate' },
   { key: 'recipes', label: 'Recipes and costing', icon: 'coin', group: 'Operate' }, { key: 'menu', label: 'Menu', icon: 'list', group: 'Operate' }, { key: 'reviews', label: 'Ratings', icon: 'star', group: 'Operate' },
   { key: 'offers', label: 'Offer of the day', icon: 'tag', group: 'Marketing' }, { key: 'promos', label: 'Promo codes', icon: 'ticket', group: 'Marketing' }, { key: 'push', label: 'Push notifications', icon: 'bell', group: 'Marketing' },
-  { key: 'staff', label: 'Staff and roster', icon: 'users', group: 'Team', keywords: 'roster shift duty auto assign attendance leave' }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Team' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Team' },
+  { key: 'staff', label: 'Staff and roster', icon: 'users', group: 'Team', keywords: 'roster shift duty auto assign attendance leave' }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Team' }, { key: 'passes_report', label: 'Passes Report', icon: 'ticket', group: 'Team', keywords: 'passes redemptions' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Team' },
 ];
 
 export function OwnerDashboard() {

@@ -383,6 +383,7 @@ function ModernFooter() {
             <a href="#pass">10-cup pass</a>
             <a href="#stations">Find a counter</a>
             <Link href="/order">Order ahead</Link>
+            <Link href="/changelog">Changelog & Updates</Link>
           </div>
 
           <div className="col small" style={{ gap: 8 }}>
@@ -413,7 +414,7 @@ function ModernFooter() {
           }}
         >
           <span>All prices in NPR. VAT and service included. © Sadhai Coffee</span>
-          <span>Version {APP_VERSION}</span>
+          <Link href="/changelog" style={{ color: 'inherit' }}>Version {APP_VERSION} (Changelog)</Link>
         </div>
       </div>
     </footer>

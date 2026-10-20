@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.6.3] - 2026-10-20
+
+### Added
+- **Dedicated Passes & Wallet Report**:
+  - Added dedicated `/owner/reports/passes` backend analytics endpoint and `PassesReportTab` in owner and manager dashboards.
+  - KPI cards tracking passes sold, revenue, cups redeemed, redemption rates, outstanding NPR liabilities, and breakage income from expired cups.
+  - Station redemptions breakdown with order counts, cups fulfilled, and estimated outlet reimbursement credit.
+  - Complete searchable pass ledger with customer details, pass codes, status filters, related-party toggles, and one-click CSV export.
+- **Kiosk Station QR Code ("Order on Phone")**:
+  - Station-specific QR code on the kiosk idle attract screen and top navigation bar (`/order?station=<id>`), allowing customers to scan and order on their phone.
+- **Kiosk On-Screen Touch Keyboards**:
+  - Touch QWERTY virtual keyboard with Shift/Caps, Backspace, Space, and Next keys for typing customer names without physical hardware keyboards.
+  - Large numeric touch keypad for entering 10-digit mobile numbers.
+- **Centralized Public Offers Route (`/offers`)**:
+  - Synchronized public endpoint returning active daily offers, limited drops, and pass configurations centrally.
+- **Web Changelog Page (`/changelog`)**:
+  - Public product release history page with version timeline, feature highlights, and GitHub repository links.
+
+### Changed
+- **10-Cup Passes Stacked Wallet UI (Mobile & Web)**:
+  - Multi-pass stacking into an organized digital wallet showing total available cups at a glance, the currently active pass on top with full code and cup indicators, and queued passes stacked underneath with one-tap switching.
+- **Harmonized Offers & Coupons**:
+  - Harmonized My Coupons display across web and mobile showing clear expiration dates, discount badges, and checkout auto-application instructions.
+
+### Fixed
+- **Live Pass Updating After Checkout**:
+  - Added `passEpoch` signal in mobile `CartState` and instant cache reloading on web, guaranteeing pass balances and coupons refresh immediately after placing an order or purchasing a pass.
+- **Android Pickup Time Window**:
+  - Fixed pickup time window not displaying on Android by binding station load events and guaranteeing the pickup window section ("As soon as possible" / "Later today") renders consistently for all active stations.
+
+---
+
 ## [1.6.2] - 2026-10-20
 
 ### Changed

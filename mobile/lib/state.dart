@@ -85,4 +85,10 @@ class CartState extends ChangeNotifier {
 
   void clear() { lines.clear(); _changed(); }
   List<Json> get payloadItems => [for (final l in lines) {'product_id': l.product['id'], 'qty': l.qty, 'option_ids': l.optionIds}];
+
+  int passEpoch = 0;
+  void invalidatePasses() {
+    passEpoch++;
+    notifyListeners();
+  }
 }

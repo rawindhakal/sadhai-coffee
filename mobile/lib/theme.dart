@@ -10,6 +10,7 @@ class Brand {
   static const inkMuted = Color(0xFF6B5A4D);
   static const hairline = Color(0xFFD9C8AE);
   static const cherry = Color(0xFFA81F2A);
+  static const cherryLight = Color(0x1FA81F2A);
   static const onCherry = Color(0xFFFFF8EE);
   static const hill = Color(0xFF2F5D46);
   static const marigold = Color(0xFFF2A81D);

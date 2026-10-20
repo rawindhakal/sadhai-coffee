@@ -17,15 +17,29 @@ class OffersScreen extends StatefulWidget {
 
 class _OffersScreenState extends State<OffersScreen> {
   Json? _home;
+  List _centralOffers = [];
+  List _centralDrops = [];
   List _coupons = [];
   String? _stationId;
+  int _lastEpoch = 0;
 
   Future<void> _load() async {
     final id = context.read<CartState>().station?['id'];
     try {
-      if (id != null) { final h = await Api.instance.get('/stations/$id/home'); if (mounted) setState(() => _home = Map<String, dynamic>.from(h)); }
+      if (id != null) {
+        final h = await Api.instance.get('/stations/$id/home');
+        if (mounted) { setState(() => _home = Map<String, dynamic>.from(h)); }
+      } else {
+        final off = await Api.instance.get('/offers') as Map;
+        if (mounted) {
+          setState(() {
+            _centralOffers = (off['offers'] as List? ?? []).cast<Map>();
+            _centralDrops = (off['drops'] as List? ?? []).cast<Map>();
+          });
+        }
+      }
       final c = await Api.instance.get('/coupons') as List;
-      if (mounted) setState(() => _coupons = c.where((x) => x['status'] == 'active').toList());
+      if (mounted) { setState(() => _coupons = c.where((x) => x['status'] == 'active').toList()); }
     } catch (_) {}
   }
 
@@ -33,18 +47,23 @@ class _OffersScreenState extends State<OffersScreen> {
   Widget build(BuildContext context) {
     final cart = context.watch<CartState>();
     final id = cart.station?['id'];
-    if (id != _stationId) { _stationId = id; WidgetsBinding.instance.addPostFrameCallback((_) => _load()); }
-    final offers = (_home?['offers'] as List? ?? []).cast<Map>();
-    final drops = (_home?['drops'] as List? ?? []).cast<Map>();
+    final epoch = cart.passEpoch;
+    if (id != _stationId || epoch != _lastEpoch) {
+      _stationId = id;
+      _lastEpoch = epoch;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    }
+    final offers = (_home?['offers'] as List? ?? _centralOffers).cast<Map>();
+    final drops = (_home?['drops'] as List? ?? _centralDrops).cast<Map>();
     final products = [for (final c in (_home?['categories'] as List? ?? [])) ...(c['products'] as List).cast<Map>()];
     return RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(16), children: [
       Text('Offers', style: display(30)),
       const SizedBox(height: 8),
       Text('Offer of the day${cart.station != null ? ' · ${cart.station!['name']}' : ''}', style: display(20)),
       const SizedBox(height: 8),
-      if (cart.station == null) const Text('Choose a station on Home to see today’s offers.', style: TextStyle(color: Brand.inkMuted)),
+      if (cart.station == null && offers.isEmpty) const Text('Choose a station on Home to see today’s outlet offers.', style: TextStyle(color: Brand.inkMuted)),
       if (cart.station != null && offers.isEmpty) const Text('No special offer at this station today.', style: TextStyle(color: Brand.inkMuted)),
-      for (final o in offers) Padding(padding: const EdgeInsets.only(bottom: 10), child: DealCard(o: o, products: products, onSee: () {}, onAdd: (p) { final l = CartLine.quick(p!); if (l != null) { cart.add(l); toast(context, '${p['name']} added'); } })),
+      for (final o in offers) Padding(padding: const EdgeInsets.only(bottom: 10), child: DealCard(o: o, products: products, onSee: () {}, onAdd: (p) { if (p != null) { final l = CartLine.quick(p); if (l != null) { cart.add(l); toast(context, '${p['name']} added'); } } })),
       if (drops.isNotEmpty) ...[
         const SizedBox(height: 16),
         Text('This month’s drop', style: display(20)),
@@ -58,10 +77,20 @@ class _OffersScreenState extends State<OffersScreen> {
         ]))),
       ],
       const SizedBox(height: 20),
-      Text('My coupons', style: display(20)),
+      Row(children: [
+        Text('My coupons', style: display(20)),
+        if (_coupons.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          Chip2('${_coupons.length} active', bg: Brand.marigold),
+        ],
+      ]),
       const SizedBox(height: 8),
-      if (_coupons.isEmpty) const Text('No active coupons.', style: TextStyle(color: Brand.inkMuted)),
-      for (final c in _coupons) Card(margin: const EdgeInsets.only(bottom: 8), child: ListTile(title: Text(c['title'], style: const TextStyle(fontWeight: FontWeight.w700)), subtitle: Text('Valid until ${DateFormat('d MMM').format(DateTime.parse(c['expires_at']).toLocal())}'), trailing: Chip2(c['kind'] == 'pct' ? '${c['pct']}% off' : 'Free cup', bg: Brand.marigold))),
+      if (_coupons.isEmpty) const Text('No active coupons. Your first Americano is free when you sign up, and earn more with Give a cup.', style: TextStyle(color: Brand.inkMuted)),
+      for (final c in _coupons) Card(margin: const EdgeInsets.only(bottom: 8), child: ListTile(
+        title: Text(c['title'], style: const TextStyle(fontWeight: FontWeight.w700)),
+        subtitle: Text('Valid until ${DateFormat('d MMM yyyy').format(DateTime.parse(c['expires_at']).toLocal())} · Applied at checkout'),
+        trailing: Chip2(c['kind'] == 'pct' ? '${c['pct']}% off' : 'Free cup', bg: Brand.marigold),
+      )),
       const SizedBox(height: 16),
       const PassPanel(),
       const SizedBox(height: 12),

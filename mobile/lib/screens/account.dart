@@ -52,8 +52,12 @@ class _PassPanelState extends State<PassPanel> {
   bool _loaded = false;
   Map<String, dynamic>? _pass;
   num? get _price => _pass?['price'] as num?;
+  int _lastEpoch = 0;
+  int _activePassIdx = 0;
+
   @override
   void initState() { super.initState(); _load(); }
+
   Future<void> _load() async {
     try {
       final p = await Api.instance.get('/passes') as List;
@@ -64,34 +68,91 @@ class _PassPanelState extends State<PassPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final epoch = context.watch<CartState>().passEpoch;
+    if (epoch != _lastEpoch) {
+      _lastEpoch = epoch;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    }
+
     if (!_loaded) return const SizedBox.shrink();
     final live = _passes.where((p) => p['status'] == 'active' && (p['remaining'] as int) > 0).toList()..sort((a, b) => (a['queue_position'] as int).compareTo(b['queue_position'] as int));
     final past = _passes.where((p) => !live.contains(p)).toList();
     final total = live.fold<int>(0, (a, p) => a + (p['remaining'] as int));
+
+    if (_activePassIdx >= live.length) _activePassIdx = 0;
+    final curPass = live.isNotEmpty ? live[_activePassIdx] : null;
+
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('10-cup passes', style: display(20)),
+      Row(children: [
+        Text('10-cup passes', style: display(20)),
+        if (live.length > 1) ...[
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: Brand.cherryLight, borderRadius: BorderRadius.circular(12)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.account_balance_wallet, size: 16, color: Brand.cherry),
+              const SizedBox(width: 4),
+              Text('$total cups in wallet', style: const TextStyle(color: Brand.cherry, fontWeight: FontWeight.w700, fontSize: 13)),
+            ]),
+          ),
+        ],
+      ]),
       const SizedBox(height: 4),
       const Text('Buy as many as you like. They are used one after another, and each starts its 30 days with your first cup.', style: TextStyle(color: Brand.inkMuted, fontSize: 14)),
-      if (live.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text('$total cups across ${live.length} pass${live.length > 1 ? 'es' : ''}', style: const TextStyle(fontWeight: FontWeight.w700))),
+      if (live.isNotEmpty && live.length == 1) Padding(padding: const EdgeInsets.only(top: 8), child: Text('$total cups available in your pass', style: const TextStyle(fontWeight: FontWeight.w700))),
+      if (live.length > 1) ...[
+        const SizedBox(height: 12),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            for (var i = 0; i < live.length; i++)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: Text(i == 0 ? 'Using now (${live[i]['remaining']} left)' : 'Up next · #${live[i]['queue_position']} (${live[i]['remaining']} left)'),
+                  selected: _activePassIdx == i,
+                  selectedColor: Brand.cherry,
+                  showCheckmark: false,
+                  labelStyle: TextStyle(color: _activePassIdx == i ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600, fontSize: 13),
+                  onSelected: (_) => setState(() => _activePassIdx = i),
+                ),
+              ),
+          ]),
+        ),
+      ],
       const SizedBox(height: 10),
-      for (final p in live) Padding(padding: const EdgeInsets.only(bottom: 10), child: Container(
+      if (curPass != null) Container(
         padding: const EdgeInsets.all(20), width: double.infinity,
         decoration: BoxDecoration(color: Brand.cherry, borderRadius: BorderRadius.circular(Brand.radiusLg), boxShadow: const [BoxShadow(color: Color(0x24000000), blurRadius: 24, offset: Offset(0, 8))]),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Chip2(p['state'] == 'using' ? 'Using now' : 'Up next · #${p['queue_position']}', bg: Brand.surface, fg: Brand.ink),
+            Chip2(curPass['state'] == 'using' ? 'Using now' : 'Up next · #${curPass['queue_position']}', bg: Brand.surface, fg: Brand.ink),
             const Spacer(),
-            InkWell(onTap: () { Clipboard.setData(ClipboardData(text: p['code'])); toast(context, 'Pass code copied'); }, child: Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(border: Border.all(color: Brand.onCherry, width: 2), borderRadius: BorderRadius.circular(10)), child: Text(p['code'], style: const TextStyle(color: Brand.onCherry, fontWeight: FontWeight.w700, letterSpacing: 1)))),
+            InkWell(onTap: () { Clipboard.setData(ClipboardData(text: curPass['code'])); toast(context, 'Pass code copied'); }, child: Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(border: Border.all(color: Brand.onCherry, width: 2), borderRadius: BorderRadius.circular(10)), child: Text(curPass['code'], style: const TextStyle(color: Brand.onCherry, fontWeight: FontWeight.w700, letterSpacing: 1)))),
           ]),
           const SizedBox(height: 8),
-          Text('${p['remaining']} of ${p['total_cups']} cups left', style: display(28, color: Brand.onCherry)),
+          Text('${curPass['remaining']} of ${curPass['total_cups']} cups left', style: display(28, color: Brand.onCherry)),
           const SizedBox(height: 10),
-          Wrap(spacing: 6, runSpacing: 6, children: [for (var i = 0; i < (p['total_cups'] as int); i++) Container(width: 18, height: 18, decoration: BoxDecoration(shape: BoxShape.circle, color: i < p['used_cups'] ? Colors.transparent : Brand.onCherry, border: Border.all(color: Brand.onCherry, width: 2)))]),
+          Wrap(spacing: 6, runSpacing: 6, children: [for (var i = 0; i < (curPass['total_cups'] as int); i++) Container(width: 18, height: 18, decoration: BoxDecoration(shape: BoxShape.circle, color: i < curPass['used_cups'] ? Colors.transparent : Brand.onCherry, border: Border.all(color: Brand.onCherry, width: 2)))]),
           const SizedBox(height: 10),
-          Text(p['starts_on_first_use'] == true ? 'Starts with your first cup. Use it by ${_d(p['expires_at'])}.' : 'Valid until ${_d(p['expires_at'])}.', style: const TextStyle(color: Brand.onCherry)),
+          Text(curPass['starts_on_first_use'] == true ? 'Starts with your first cup. Use it by ${_d(curPass['expires_at'])}.' : 'Valid until ${_d(curPass['expires_at'])}.', style: const TextStyle(color: Brand.onCherry)),
           const Text('Show the code at any counter, or choose the pass at checkout.', style: TextStyle(color: Brand.onCherry, fontSize: 13)),
         ]),
-      )),
+      ),
+      if (live.length > 1 && _activePassIdx == 0) ...[
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(color: Brand.surfaceSunk, borderRadius: BorderRadius.circular(Brand.radiusMd), border: Border.all(color: Brand.hairline)),
+          child: Row(children: [
+            const Icon(Icons.layers_outlined, size: 20, color: Brand.inkMuted),
+            const SizedBox(width: 8),
+            Expanded(child: Text('${live.length - 1} more pass${live.length > 2 ? 'es' : ''} queued in wallet (${total - (curPass!['remaining'] as int)} cups)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+            TextButton(style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 30)), onPressed: () => setState(() => _activePassIdx = 1), child: const Text('View next')),
+          ]),
+        ),
+      ],
       if (live.isEmpty) Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('${_pass?['cups'] ?? 10} cups. One pass. ${rs(_pass?['price'] ?? 900)}.', style: display(20)),
         const SizedBox(height: 4),
@@ -116,7 +177,10 @@ class _PassPanelState extends State<PassPanel> {
       final pay = out['payment'] as Map;
       if (!mounted) return;
       final r = await showFonepay(context, pay, (pay['amount'] ?? _price ?? 900) as num);
-      if (mounted && r == 'paid') toast(context, 'Pass ${out['pass']['code']} is ready');
+      if (mounted && r == 'paid') {
+        toast(context, 'Pass ${out['pass']['code']} is ready');
+        context.read<CartState>().invalidatePasses();
+      }
       if (mounted && r == 'failed') toast(context, 'The payment did not go through', bad: true);
       await _load();
     } on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); }

@@ -31,6 +31,8 @@ class _CartScreenState extends State<CartScreen> {
   Json? _times; // pickup window and whether the station is taking orders
   bool _later = false;
   String? _at;
+  String? _loadedStationId;
+  int _lastEpoch = 0;
 
   @override
   void initState() { super.initState(); _loadOffers(); _loadTimes(); }
@@ -38,7 +40,10 @@ class _CartScreenState extends State<CartScreen> {
   Future<void> _loadTimes() async {
     final st = context.read<CartState>().station;
     if (st == null) return;
-    try { final t = await Api.instance.get('/stations/${st['id']}/pickup-times'); if (mounted) setState(() { _times = Map<String, dynamic>.from(t); if (t['preorder'] == null) _later = false; }); } catch (_) {}
+    try {
+      final t = await Api.instance.get('/stations/${st['id']}/pickup-times');
+      if (mounted) setState(() { _times = Map<String, dynamic>.from(t); if (t['preorder'] == null) _later = false; });
+    } catch (_) {}
   }
 
   List<String> get _slots {
@@ -87,6 +92,7 @@ class _CartScreenState extends State<CartScreen> {
       final pay = out['payment'] as Map?;
       if (!mounted) return;
       cart.clear();
+      cart.invalidatePasses();
       if (pay != null) await showFonepay(context, pay, order['total'] as num);
       if (!mounted) return;
       _askPush();
@@ -125,6 +131,21 @@ class _CartScreenState extends State<CartScreen> {
   @override
   Widget build(BuildContext context) {
     final cart = context.watch<CartState>();
+
+    // Reload times and offers when station or pass state changes
+    final stId = cart.station?['id'] as String?;
+    final epoch = cart.passEpoch;
+    if (stId != _loadedStationId || _times == null || epoch != _lastEpoch) {
+      _loadedStationId = stId;
+      _lastEpoch = epoch;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _loadOffers();
+          _loadTimes();
+        }
+      });
+    }
+
     // re-quote whenever the cart contents change
     final sig = '${cart.station?['id']}|${cart.lines.map((l) => '${l.key}x${l.qty}').join(',')}';
     if (sig != _sig) { _sig = sig; WidgetsBinding.instance.addPostFrameCallback((_) => _requote(cart)); }
@@ -161,16 +182,19 @@ class _CartScreenState extends State<CartScreen> {
         if (_pass != null) _opt(_offerType == 'pass', '10-cup pass', () { setState(() { _offerType = 'pass'; _offerId = null; }); _requote(cart); }, hint: '${_pass!['remaining']} cups left${(_pass!['count'] as int) > 1 ? ' · ${_pass!['count']} passes' : ''}'),
       ]))),
       if (_times != null && _times!['can_order'] == false) Container(margin: const EdgeInsets.only(top: 16), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Brand.surfaceSunk, borderRadius: BorderRadius.circular(Brand.radiusMd), border: Border.all(color: Brand.cherry)), child: Text(_times!['open_now'] == true ? 'This station is not taking orders for a moment.' : 'This station is closed. It opens at ${(_times!['opens'] as String).substring(0, 5)}.', style: const TextStyle(fontWeight: FontWeight.w700))),
+      const SizedBox(height: 16),
+      Text('Pickup time', style: display(18)),
+      const SizedBox(height: 8),
       if (_times != null && _times!['preorder'] != null) ...[
-        const SizedBox(height: 16),
-        Text('Pickup time', style: display(18)),
-        const SizedBox(height: 8),
         Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
           ChoiceChip(label: const Text('As soon as possible'), selected: !_later, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: !_later ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { setState(() => _later = false); _requote(cart); }),
           ChoiceChip(label: const Text('Later today'), selected: _later, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _later ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { final s = _slots; setState(() { _later = true; _at ??= s.firstWhere((x) => DateTime.parse(x).isAfter(DateTime.now().add(const Duration(minutes: 29))), orElse: () => s.first); }); _requote(cart); }),
           if (_later && _at != null) DropdownButton<String>(value: _slots.contains(_at) ? _at : null, items: [for (final s in _slots) DropdownMenuItem(value: s, child: Text(_fmt(s)))], onChanged: (v) { setState(() => _at = v); _requote(cart); }),
         ]),
         Padding(padding: const EdgeInsets.only(top: 4), child: Text(_later && _at != null ? 'We start making it a few minutes before ${_fmt(_at!)}. Once you place it, it cannot be cancelled.' : 'Ready in about 90 seconds once the barista starts.', style: const TextStyle(color: Brand.inkMuted, fontSize: 13))),
+      ] else ...[
+        ChoiceChip(label: const Text('As soon as possible'), selected: true, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: const TextStyle(color: Brand.onCherry, fontWeight: FontWeight.w600), onSelected: (_) {}),
+        const Padding(padding: EdgeInsets.only(top: 4), child: Text('Ready in about 90 seconds once the barista starts.', style: TextStyle(color: Brand.inkMuted, fontSize: 13))),
       ],
       if (_offerType != 'pass') ...[
         const SizedBox(height: 16),

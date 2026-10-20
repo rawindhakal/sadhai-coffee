@@ -12,3 +12,6 @@ mobile/android/*.jks
 mobile/.dart_tool/
 mobile/build/
 web/.next/
+web/tsconfig.tsbuildinfo
+*.apk
+web/public/downloads/

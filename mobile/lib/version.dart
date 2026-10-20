@@ -1,9 +1,9 @@
 // Keep in sync with /VERSION and pubspec.yaml. scripts/release.mjs updates all three.
-const appVersion = '1.6.0';
-const appBuild = 8;
+const appVersion = '1.6.3';
+const appBuild = 9;
 
 /// Where legal pages live. Override: --dart-define=WEB_URL=https://sadhaicoffee.com
-const webUrl = String.fromEnvironment('WEB_URL', defaultValue: 'http://localhost:3000');
+const webUrl = String.fromEnvironment('WEB_URL', defaultValue: 'https://sadhaicoffee.com');
 
 /// True when [a] is older than [b], comparing dotted numeric versions.
 bool versionLess(String a, String b) {

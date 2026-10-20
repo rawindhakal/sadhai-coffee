@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { api, fmtDate, fmtDateTime, rs, BASE, store } from '@/lib/api';
-import { Empty, Field, Loading, Modal, Stat, useData, useToast } from './ui';
+import { Empty, Field, Loading, Modal, Stat, Status, useData, useToast } from './ui';
 import { RangePicker, sinceDays } from './admin';
 import { Icon } from './icons';
 import { useAuth } from '@/lib/auth';
@@ -987,4 +987,196 @@ export function AuditTab() {
   const { data } = useData<any[]>('/owner/audit?limit=150');
   if (!data) return <Loading />;
   return <div className="card tablewrap" style={{ padding: 0 }}><table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead><tbody>{data.map((a) => <tr key={a.id}><td>{fmtDateTime(a.created_at)}</td><td>{a.actor || 'System'}</td><td>{a.action}</td><td className="small muted">{a.meta ? JSON.stringify(a.meta).slice(0, 90) : ''}</td></tr>)}</tbody></table></div>;
+}
+
+export function PassesReportTab() {
+  const [days, setDays] = useState(30);
+  const rep = useData<any>(`/owner/reports/passes?from=${sinceDays(days)}`, [days]);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<'all' | 'active' | 'used' | 'expired'>('all');
+  const toast = useToast();
+
+  const data = rep.data;
+  if (!data) return <Loading />;
+
+  const kpi = data.kpi;
+  const list: any[] = data.register || [];
+  const filtered = list.filter((p) => {
+    if (filter !== 'all' && p.status !== filter) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return (p.code && p.code.toLowerCase().includes(q)) ||
+             (p.customer_name && p.customer_name.toLowerCase().includes(q)) ||
+             (p.customer_phone && p.customer_phone.includes(q));
+    }
+    return true;
+  });
+
+  function exportCsv() {
+    const header = ['Code', 'Customer', 'Phone', 'Status', 'Total Cups', 'Used Cups', 'Remaining', 'Price Paid', 'Purchased At', 'Activated At', 'Expires At', 'Related Party'];
+    const rows = filtered.map((p) => [
+      p.code,
+      `"${(p.customer_name || '').replace(/"/g, '""')}"`,
+      p.customer_phone || '',
+      p.status,
+      p.total_cups,
+      p.used_cups,
+      p.remaining,
+      p.price_paid,
+      p.purchased_at || '',
+      p.activated_at || '',
+      p.expires_at || '',
+      p.related_party ? 'YES' : 'NO'
+    ]);
+    const csvContent = [header.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `sadhai-passes-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast('Passes CSV exported');
+  }
+
+  return (
+    <div className="col" style={{ gap: 20 }}>
+      <div className="row between wrap">
+        <div>
+          <h2>Passes & Wallet Report</h2>
+          <p className="muted small">10-cup prepaid passes sales, network redemptions, unredeemed liabilities, and breakage profit.</p>
+        </div>
+        <div className="row wrap" style={{ gap: 8 }}>
+          <RangePicker days={days} setDays={setDays} />
+          <button className="btn sm" onClick={exportCsv}>Export CSV</button>
+        </div>
+      </div>
+
+      <div className="grid g4">
+        <Stat label={`Passes Sold (${days}d)`} value={kpi.passes_sold} delta={`${rs(kpi.total_revenue)} revenue`} />
+        <Stat label="Cups Redeemed" value={kpi.redeemed_cups} delta={`${kpi.redemption_pct ?? 0}% redemption rate`} tone="good" />
+        <Stat label="Outstanding Liability" value={`${kpi.outstanding_cups} cups`} delta={`${rs(kpi.liability_value)} owed`} tone="bad" />
+        <Stat label="Breakage Profit" value={`${kpi.breakage_cups} cups`} delta={`${rs(kpi.breakage_value)} expired cups income`} tone="good" />
+      </div>
+
+      <div className="grid g3">
+        <Stat label="Active Passes in Wallets" value={kpi.active_passes} delta="Currently usable across outlets" />
+        <Stat label="Fully Completed Passes" value={kpi.completed_passes} delta="100% of cups consumed" />
+        <Stat label="Related-Party Passes" value={kpi.related_party_count} delta="Keep at zero for tax integrity" tone={kpi.related_party_count ? 'bad' : 'good'} />
+      </div>
+
+      <div className="card tablewrap">
+        <h3>Redemptions by Station ({days} days)</h3>
+        <p className="muted small" style={{ marginBottom: 12 }}>Which stations fulfilled the most prepaid pass cups, and their estimated reimbursement credit.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Station</th>
+              <th className="num">Cups Redeemed</th>
+              <th className="num">Orders</th>
+              <th className="num">Est. Reimbursement</th>
+              <th style={{ width: 140 }}>Share of Redemptions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(data.by_station || []).map((st: any) => {
+              const pct = kpi.redeemed_cups ? Math.round((st.redeemed_cups / kpi.redeemed_cups) * 100) : 0;
+              return (
+                <tr key={st.id}>
+                  <td><strong>{st.name}</strong></td>
+                  <td className="num">{st.redeemed_cups} cups</td>
+                  <td className="num">{st.orders_count}</td>
+                  <td className="num">{rs(st.est_reimbursement)}</td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div className="bar" style={{ flex: 1, margin: 0, height: 8 }}><i style={{ width: `${pct}%`, background: 'var(--cherry)' }} /></div>
+                      <span className="small muted" style={{ minWidth: 32 }}>{pct}%</span>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card tablewrap">
+        <div className="row between wrap" style={{ marginBottom: 12 }}>
+          <div>
+            <h3>Pass Register Ledger</h3>
+            <p className="muted small">Complete list of customer passes with real-time status and usage.</p>
+          </div>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <input
+              placeholder="Search code, name, phone…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ width: 220, minHeight: 38, fontSize: 14 }}
+            />
+            <select value={filter} onChange={(e: any) => setFilter(e.target.value)} style={{ width: 120, minHeight: 38, fontSize: 14 }}>
+              <option value="all">All statuses</option>
+              <option value="active">Active</option>
+              <option value="used">Used up</option>
+              <option value="expired">Expired</option>
+            </select>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Pass Code</th>
+              <th>Purchased</th>
+              <th>Valid Until</th>
+              <th className="num">Cups Left</th>
+              <th>Status</th>
+              <th>Related Party</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.slice(0, 100).map((p: any) => (
+              <tr key={p.id}>
+                <td>
+                  <strong>{p.customer_name || 'Guest'}</strong>
+                  <div className="small muted">{p.customer_phone || ''}</div>
+                </td>
+                <td>
+                  <button
+                    className="btn sm"
+                    style={{ background: 'transparent', border: '1px solid var(--hairline)', padding: '2px 8px', fontSize: 13, fontWeight: 700 }}
+                    onClick={() => { navigator.clipboard?.writeText(p.code); toast('Pass code copied'); }}
+                  >
+                    {p.code}
+                  </button>
+                </td>
+                <td className="small">{fmtDate(p.purchased_at)} · {rs(p.price_paid)}</td>
+                <td className="small muted">{p.expires_at ? fmtDate(p.expires_at) : 'On first cup'}</td>
+                <td className="num">
+                  <strong>{p.remaining}</strong> / {p.total_cups}
+                </td>
+                <td>
+                  <Status s={p.status} />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    style={{ width: 20, minHeight: 20 }}
+                    checked={p.related_party}
+                    aria-label="Related party"
+                    onChange={async (e) => {
+                      await api(`/owner/passes/${p.id}`, { method: 'PATCH', body: { related_party: e.target.checked } });
+                      rep.reload();
+                    }}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length > 100 && <p className="small muted center" style={{ marginTop: 12 }}>Showing first 100 of {filtered.length} passes. Export CSV to view all.</p>}
+        {!filtered.length && <Empty>No passes found matching your filter.</Empty>}
+      </div>
+    </div>
+  );
 }

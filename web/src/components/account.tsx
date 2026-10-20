@@ -53,24 +53,44 @@ export function PassTab() {
       setPay({ ...out.payment, code: out.pass.code });
     } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
   }
+  const [activeIdx, setActiveIdx] = useState(0);
   const total = live.reduce((a, p) => a + p.remaining, 0);
+  const curPass = live[activeIdx] || live[0];
+
   return (
     <>
       <div className="card">
         <div className="row between wrap"><div><h3>10 cups. One pass. {rs(cfg.data?.pass.price)}.</h3><p className="muted small">Buy as many as you like. They are used one after another, and each starts its {cfg.data?.pass.valid_days} days with your first cup.</p></div>
           <button className="btn primary" onClick={() => setBuy(true)}>{live.length ? 'Buy another pass' : 'Buy a pass'}</button></div>
-        {live.length > 0 && <p style={{ marginTop: 12 }}><strong>{total} cups</strong> across {live.length} pass{live.length > 1 ? 'es' : ''}</p>}
+        {live.length > 0 && <p style={{ marginTop: 12 }}><strong>{total} cups</strong> in your wallet across {live.length} pass{live.length > 1 ? 'es' : ''}</p>}
       </div>
-      <div className="col" style={{ marginTop: 16 }}>
-        {live.map((p) => (
-          <div key={p.id} className="pass" style={{ opacity: p.state === 'using' ? 1 : 0.92 }}>
-            <div className="row between wrap"><span className="chip" style={{ background: 'var(--surface)', color: 'var(--ink)' }}>{STATE_LABEL[p.state]?.[0] || p.state}{p.queue_position > 1 ? ` · #${p.queue_position}` : ''}</span>
-              <button className="btn sm" style={{ background: 'transparent', color: 'inherit', borderColor: 'currentColor', border: '2px solid' }} onClick={() => { navigator.clipboard?.writeText(p.code); toast('Pass code copied'); }} aria-label={`Copy pass code ${p.code}`}>{p.code}</button></div>
-            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 44, lineHeight: 1.05, marginTop: 8 }}>{p.remaining}<span style={{ fontSize: 18 }}> of {p.total_cups} cups left</span></div>
-            <div className="row" style={{ gap: 6, margin: '12px 0', flexWrap: 'wrap' }}>{Array.from({ length: p.total_cups }).map((_, i) => <span key={i} style={{ width: 16, height: 16, borderRadius: 99, background: i < p.used_cups ? 'transparent' : 'var(--on-cherry)', border: '2px solid var(--on-cherry)' }} />)}</div>
-            <p className="small">{p.starts_on_first_use ? `Starts with your first cup. Use it by ${fmtDate(p.expires_at)}.` : `Valid until ${fmtDate(p.expires_at)}.`} Show the code at any counter, or choose “10-cup pass” at checkout.</p>
+
+      {live.length > 1 && (
+        <div className="row wrap" style={{ gap: 8, marginTop: 16 }}>
+          {live.map((p, i) => (
+            <button key={p.id} className={`btn sm ${activeIdx === i ? 'primary' : 'ghost'}`} onClick={() => setActiveIdx(i)}>
+              {i === 0 ? 'Using now' : `Pass #${p.queue_position}`} ({p.remaining} cups left)
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="col" style={{ marginTop: 12 }}>
+        {curPass && (
+          <div key={curPass.id} className="pass" style={{ opacity: curPass.state === 'using' ? 1 : 0.95 }}>
+            <div className="row between wrap"><span className="chip" style={{ background: 'var(--surface)', color: 'var(--ink)' }}>{STATE_LABEL[curPass.state]?.[0] || curPass.state}{curPass.queue_position > 1 ? ` · #${curPass.queue_position}` : ''}</span>
+              <button className="btn sm" style={{ background: 'transparent', color: 'inherit', borderColor: 'currentColor', border: '2px solid' }} onClick={() => { navigator.clipboard?.writeText(curPass.code); toast('Pass code copied'); }} aria-label={`Copy pass code ${curPass.code}`}>{curPass.code}</button></div>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 44, lineHeight: 1.05, marginTop: 8 }}>{curPass.remaining}<span style={{ fontSize: 18 }}> of {curPass.total_cups} cups left</span></div>
+            <div className="row" style={{ gap: 6, margin: '12px 0', flexWrap: 'wrap' }}>{Array.from({ length: curPass.total_cups }).map((_, i) => <span key={i} style={{ width: 16, height: 16, borderRadius: 99, background: i < curPass.used_cups ? 'transparent' : 'var(--on-cherry)', border: '2px solid var(--on-cherry)' }} />)}</div>
+            <p className="small">{curPass.starts_on_first_use ? `Starts with your first cup. Use it by ${fmtDate(curPass.expires_at)}.` : `Valid until ${fmtDate(curPass.expires_at)}.`} Show the code at any counter, or choose “10-cup pass” at checkout.</p>
           </div>
-        ))}
+        )}
+        {live.length > 1 && activeIdx === 0 && (
+          <div className="card flat row between wrap" style={{ background: 'var(--surface-sunk)', marginTop: 4 }}>
+            <span><strong style={{ marginRight: 8 }}>Wallet queue:</strong>{live.length - 1} more pass{live.length > 2 ? 'es' : ''} queued ({total - live[0].remaining} cups)</span>
+            <button className="btn sm ghost" onClick={() => setActiveIdx(1)}>View next pass</button>
+          </div>
+        )}
         {!live.length && <Empty>No active pass yet.</Empty>}
       </div>
       {past.length > 0 && <><h3 style={{ margin: '24px 0 8px' }}>Past passes</h3><div className="col">{past.map((p) => <div key={p.id} className="card flat row between"><span><strong>{p.code}</strong> <span className="muted small">{rs(p.price_paid)} · {fmtDate(p.purchased_at)}</span></span><Status s={p.status} /></div>)}</div></>}
