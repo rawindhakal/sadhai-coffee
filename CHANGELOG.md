@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.6.5] - 2026-10-20
+
+### Changed
+- Offer of the day restored on Home and Offers (mobile and web).
+- Retired automatic signup coupons (free first cup, 30% off ladder); existing ones cleared.
+- Coupon code box on Offers and at checkout (mobile and web).
+
+---
+
 ## [1.6.4] - 2026-10-20
 
 ### Added

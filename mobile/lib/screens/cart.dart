@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
+import 'offers.dart' show PromoBox;
 import '../push.dart';
 import 'customer.dart';
 import 'fonepay.dart';
@@ -190,6 +191,8 @@ class _CartScreenState extends State<CartScreen> {
         if (cart.promo != null) _opt(_offerType == 'promo', 'Promo ${cart.promo!['code']}', () { setState(() { _offerType = 'promo'; _offerId = null; }); _requote(cart); }, hint: '${cart.promo!['pct']}% off'),
         if (_pass != null) _opt(_offerType == 'pass', '10-cup pass', () { setState(() { _offerType = 'pass'; _offerId = null; }); _requote(cart); }, hint: '${_pass!['remaining']} cups left${(_pass!['count'] as int) > 1 ? ' · ${_pass!['count']} passes' : ''}'),
       ]))),
+      const SizedBox(height: 8),
+      const PromoBox(),
       if (_times != null && _times!['can_order'] == false) Container(margin: const EdgeInsets.only(top: 16), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Brand.surfaceSunk, borderRadius: BorderRadius.circular(Brand.radiusMd), border: Border.all(color: Brand.cherry)), child: Text(_times!['open_now'] == true ? 'This station is not taking orders for a moment.' : 'This station is closed. It opens at ${(_times!['opens'] as String).substring(0, 5)}.', style: const TextStyle(fontWeight: FontWeight.w700))),
       const SizedBox(height: 16),
       Text('Pickup time', style: display(18)),

@@ -93,7 +93,7 @@ function Home() {
   const inbox = useData<any>(user ? '/notifications' : null, [user?.id]);
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<string>('all');
-  const merchRef = useRef<HTMLDivElement>(null), allRef = useRef<HTMLDivElement>(null), dropRef = useRef<HTMLDivElement>(null);
+  const dealsRef = useRef<HTMLDivElement>(null), merchRef = useRef<HTMLDivElement>(null), allRef = useRef<HTMLDivElement>(null), dropRef = useRef<HTMLDivElement>(null);
   const jump = (r: React.RefObject<HTMLDivElement>) => r.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   const d = home.data;
@@ -115,9 +115,11 @@ function Home() {
   if (home.error || !d) return <><ErrorNote error={home.error} /><button className="btn" onClick={() => cart.setStation(null)}>Choose another station</button></>;
   const st = d.station;
 
-  // Hero: a live drop beats the brand line.
+  // Hero: a live drop beats the first offer of the day, which beats the brand line.
   const hero = drop
     ? { kicker: `Drop · ${drop.partner || 'Limited'}`, title: lang === 'ne' && drop.name_ne ? drop.name_ne : drop.name, sub: `${rs(drop.price)} · ${drop.remaining.toLocaleString()} cups left`, badge: `${drop.remaining}`, cta: 'Add to cart', act: () => addNow(dropProduct) }
+    : d.offers[0]
+      ? { kicker: 'Offer of the day', title: lang === 'ne' && d.offers[0].title_ne ? d.offers[0].title_ne : d.offers[0].title, sub: d.offers[0].blurb || '', badge: d.offers[0].offer_price != null ? rs(d.offers[0].offer_price) : `${d.offers[0].pct}%`, cta: d.offers[0].product_id ? 'Add to cart' : 'See the menu', act: () => (d.offers[0].product_id ? addNow(products.find((p) => p.id === d.offers[0].product_id)) : jump(allRef)) }
       : { kicker: 'Sadhai Coffee', title: t('tagline'), sub: t('support'), badge: '90s', cta: t('order_ahead'), act: () => jump(allRef) };
 
   return (
@@ -143,10 +145,11 @@ function Home() {
         <>
           {/* offers on rounded icons */}
           <nav className="circles" aria-label="Offers">
+            <button className="circle gold" onClick={() => jump(dealsRef)}><span className="dot"><Icon name="tag" size={26} />{d.offers.length > 0 && <b className="pip">{d.offers.length}</b>}</span><span>Today</span></button>
             {firstCup && <Link href="/offers" className="circle hot"><span className="dot"><Icon name="cup" size={26} /></span><span>Free first cup</span></Link>}
             {drop && <button className="circle hot" onClick={() => jump(dropRef)}><span className="dot"><Icon name="flame" size={26} /></span><span>Drop</span></button>}
             <Link href="/offers" className="circle"><span className="dot"><Icon name="ticket" size={26} />{livePass && <b className="pip">{livePass.remaining}</b>}</span><span>{livePass ? 'My pass' : '10-cup pass'}</span></Link>
-            <Link href="/offers" className="circle"><span className="dot"><Icon name="tag" size={26} />{activeCoupons.length > 0 && <b className="pip">{activeCoupons.length}</b>}</span><span>Coupons</span></Link>
+            <Link href="/offers" className="circle"><span className="dot"><Icon name="tag" size={26} /></span><span>Promo code</span></Link>
             <Link href="/account?tab=friends" className="circle"><span className="dot"><Icon name="gift" size={26} /></span><span>Give a cup</span></Link>
             {merchCat && <button className="circle" onClick={() => jump(merchRef)}><span className="dot"><Icon name="bag" size={26} /></span><span>Merch</span></button>}
           </nav>
@@ -179,6 +182,21 @@ function Home() {
               </button>
             ))}
           </div>
+
+          {/* offer of the day */}
+          <div ref={dealsRef} className="sectionhead"><h3>Offer of the day</h3>{d.offers.length > 0 && <span className="small muted">Set by your station</span>}</div>
+          {!d.offers.length ? <Empty>No special offer today.</Empty> : (
+            <div className="col">{d.offers.map((o: any) => {
+              const p = products.find((x) => x.id === o.product_id);
+              return (
+                <div key={o.id} className="dealcard">
+                  <div className="pct">{o.offer_price != null ? <span style={{ fontSize: 18 }}>{rs(o.offer_price)}</span> : <>{o.pct}%<span style={{ fontSize: 11 }}>OFF</span></>}</div>
+                  <div className="grow"><strong>{lang === 'ne' && o.title_ne ? o.title_ne : o.title}</strong><p className="small muted">{o.blurb}</p><p className="small"><Icon name="clock" size={14} /> until {fmtTime(o.ends_at)}{o.remaining != null ? ` · ${o.remaining} left` : ''}</p></div>
+                  {p && p.available ? <button className="btn primary sm" onClick={() => addNow(p)}>Add</button> : o.scope !== 'product' ? <button className="btn sm" onClick={() => { if (o.category_id) setCat(o.category_id); jump(allRef); }}>See items</button> : null}
+                </div>
+              );
+            })}</div>
+          )}
 
           {/* merch */}
           {merchCat && (

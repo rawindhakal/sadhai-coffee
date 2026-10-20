@@ -21,8 +21,8 @@ function Form() {
   }
   return (
     <form className="card col" style={{ maxWidth: 440, margin: '32px auto', gap: 16 }} onSubmit={submit}>
-      <h2>Your first Americano is free</h2>
-      <p className="muted">Create an account, then order ahead in the app. One per customer. Valid 14 days.</p>
+      <h2>Create your account</h2>
+      <p className="muted">Create an account, then order ahead in the app.</p>
       <Field label="Name"><input value={f.name} onChange={set('name')} autoComplete="name" required minLength={2} /></Field>
       <Field label="Mobile number"><input inputMode="tel" placeholder="98XXXXXXXX" value={f.phone} onChange={set('phone')} autoComplete="tel" required /></Field>
       <Field label="Password" hint="At least 6 characters"><input type="password" value={f.password} onChange={set('password')} autoComplete="new-password" required minLength={6} /></Field>

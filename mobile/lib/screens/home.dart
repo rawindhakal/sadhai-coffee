@@ -176,7 +176,7 @@ class _StoreFrontState extends State<StoreFront> {
   String _q = '';
   String _cat = 'all';
   final _search = TextEditingController();
-  final _merchKey = GlobalKey(), _allKey = GlobalKey(), _heroKey = GlobalKey();
+  final _dealsKey = GlobalKey(), _merchKey = GlobalKey(), _allKey = GlobalKey(), _heroKey = GlobalKey();
 
   @override
   void initState() { super.initState(); _load(); }
@@ -217,6 +217,7 @@ class _StoreFrontState extends State<StoreFront> {
     final cats = (h['categories'] as List).cast<Map>();
     final merch = cats.where((c) => c['name'] == 'Merch').firstOrNull;
     final shop = cats.where((c) => c['name'] != 'Merch').toList();
+    final offers = (h['offers'] as List).cast<Map>();
     final drops = (h['drops'] as List).cast<Map>();
     final drop = drops.firstOrNull;
     final best = (h['best_sellers'] as List).cast<Map>();
@@ -225,11 +226,14 @@ class _StoreFrontState extends State<StoreFront> {
     final results = _q.trim().isEmpty ? null : _products.where((p) => '${p['name']} ${p['name_ne'] ?? ''} ${p['description'] ?? ''} ${p['origin'] ?? ''}'.toLowerCase().contains(_q.trim().toLowerCase())).toList();
     final listed = _cat == 'all' ? [for (final c in shop) ...(c['products'] as List)] : (cats.firstWhere((c) => c['id'] == _cat, orElse: () => {'products': []})['products'] as List);
 
-    // Hero: live drop > brand line.
+    // Hero: live drop > first offer of the day > brand line.
     final dropProduct = drop == null ? null : _products.cast<Map?>().firstWhere((p) => p!['id'] == drop['product_id'], orElse: () => null);
+    final offerProduct = offers.isEmpty ? null : _products.cast<Map?>().firstWhere((p) => p!['id'] == offers.first['product_id'], orElse: () => null);
     final hero = drop != null
         ? (kicker: 'Drop · ${drop['partner'] ?? 'Limited'}', title: drop['name'] as String, sub: '${rs(drop['price'])} · ${NumberFormat.decimalPattern().format(drop['remaining'])} cups left', badge: '${drop['remaining']}', cta: 'Add to cart', act: () => _addNow(dropProduct))
-        : (kicker: 'Sadhai Coffee', title: 'Good coffee, every day.', sub: 'Grown in the hills. Ready in 90 seconds.', badge: '90s', cta: 'Order ahead', act: () => _jump(_allKey));
+        : offers.isNotEmpty
+            ? (kicker: 'Offer of the day', title: offers.first['title'] as String, sub: (offers.first['blurb'] ?? '') as String, badge: offers.first['offer_price'] != null ? rs(offers.first['offer_price']) : '${offers.first['pct']}%', cta: offerProduct != null ? 'Add to cart' : 'See the menu', act: () => offerProduct != null ? _addNow(offerProduct) : _jump(_allKey))
+            : (kicker: 'Sadhai Coffee', title: 'Good coffee, every day.', sub: 'Grown in the hills. Ready in 90 seconds.', badge: '90s', cta: 'Order ahead', act: () => _jump(_allKey));
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -267,10 +271,11 @@ class _StoreFrontState extends State<StoreFront> {
         ] else ...[
           // offers on rounded icons
           SizedBox(height: 108, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.only(top: 10, right: 8), children: [
+            _Circle(icon: Icons.local_offer_outlined, label: 'Today', style: _CircleStyle.gold, pip: offers.isEmpty ? null : '${offers.length}', onTap: () => _jump(_dealsKey)),
             if (firstCup != null) _Circle(icon: Icons.coffee_outlined, label: 'Free first cup', style: _CircleStyle.hot, onTap: () => widget.goTab(1)),
             if (drop != null) _Circle(icon: Icons.local_fire_department_outlined, label: 'Drop', style: _CircleStyle.hot, onTap: () => _jump(_heroKey)),
             _Circle(icon: Icons.confirmation_number_outlined, label: livePass != null ? 'My pass' : '10-cup pass', pip: livePass != null ? '${livePass['remaining']}' : null, onTap: () => widget.goTab(1)),
-            _Circle(icon: Icons.sell_outlined, label: 'Coupons', pip: _coupons.isEmpty ? null : '${_coupons.length}', onTap: () => widget.goTab(1)),
+            _Circle(icon: Icons.sell_outlined, label: 'Promo code', onTap: () => widget.goTab(1)),
             _Circle(icon: Icons.card_giftcard, label: 'Give a cup', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReferralScreen()))),
             if (merch != null) _Circle(icon: Icons.shopping_bag_outlined, label: 'Merch', onTap: () => _jump(_merchKey)),
           ])),
@@ -308,6 +313,11 @@ class _StoreFrontState extends State<StoreFront> {
               onTap: () { if (c['name'] == 'Merch') { _jump(_merchKey); } else { setState(() => _cat = _cat == c['id'] ? 'all' : c['id']); WidgetsBinding.instance.addPostFrameCallback((_) => _jump(_allKey)); } },
             ),
           ]),
+
+          // offer of the day
+          _Head('Offer of the day', offers.isEmpty ? null : 'Set by your station', _dealsKey),
+          if (offers.isEmpty) const Text('No special offer today.', style: TextStyle(color: Brand.inkMuted)),
+          for (final o in offers) Padding(padding: const EdgeInsets.only(bottom: 10), child: DealCard(o: o, products: _products, onAdd: _addNow, onSee: () { if (o['category_id'] != null) setState(() => _cat = o['category_id']); _jump(_allKey); })),
 
           // merch
           if (merch != null) ...[

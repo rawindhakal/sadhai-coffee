@@ -700,18 +700,9 @@ export async function buyPass(user, method, { stationId = null, soldBy = null } 
 
 /* ---------------------------------------------------------- user ladder */
 
-export async function issueSignupLadder(userId, db = { query }) {
-  const s = await getSettings(db);
-  await db.query(
-    `INSERT INTO coupons(user_id, kind, title, free_max, expires_at) VALUES ($1,'first_cup','Your first cup is free',$2, now() + ($3 || ' days')::interval)`,
-    [userId, s.first_cup_max, String(s.first_cup_days)],
-  );
-  for (let i = 1; i <= s.ladder_count; i++) {
-    await db.query(
-      `INSERT INTO coupons(user_id, kind, title, pct, expires_at) VALUES ($1,'pct',$2,$3, now() + ($4 || ' days')::interval)`,
-      [userId, `${s.ladder_pct}% off · cup ${i + 1}`, s.ladder_pct, String(s.ladder_days)],
-    );
-  }
+/** Retired: new customers no longer get an automatic free first cup or 30%-off ladder. Discounts now come from promo codes. */
+export async function issueSignupLadder(_userId, _db = { query }) {
+  return;
 }
 
 /** Moves scheduled orders onto the station queue shortly before their pickup time. Run every 30 seconds. */

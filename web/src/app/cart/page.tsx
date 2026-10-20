@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { api, rs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { PromoBox } from '@/components/promo-box';
 import { useCart } from '@/lib/cart';
 import { useI18n } from '@/lib/i18n';
 import { Empty, ErrorNote, Field, Modal, useData } from '@/components/ui';
@@ -93,7 +94,7 @@ export default function Cart() {
       </div>
 
       {!user ? (
-        <div className="card col" style={{ marginTop: 16 }}><h3>Sign in to order</h3><p className="muted">Your cart is saved. Your first Americano is free when you join.</p><div className="row"><Link className="btn primary" href="/login">Sign in</Link><Link className="btn ghost" href="/register">Create an account</Link></div></div>
+        <div className="card col" style={{ marginTop: 16 }}><h3>Sign in to order</h3><p className="muted">Your cart is saved. Sign in or join to place your order.</p><div className="row"><Link className="btn primary" href="/login">Sign in</Link><Link className="btn ghost" href="/register">Create an account</Link></div></div>
       ) : (
         <>
           <h4 style={{ margin: '20px 0 8px' }}>{t('offer')}</h4>
@@ -103,6 +104,7 @@ export default function Cart() {
             {cart.promo && <Radio on={offer.type === 'promo'} label={`Promo ${cart.promo.code}`} hint={`${cart.promo.pct}% off`} onClick={() => setOffer({ type: 'promo' })} />}
             {activePass && <Radio on={offer.type === 'pass'} label={t('pass')} hint={`${activePass.remaining} cups left`} onClick={() => setOffer({ type: 'pass' })} />}
           </div>
+          <div style={{ marginTop: 8 }}><PromoBox /></div>
           {closed && <div className="card flat" role="alert" style={{ marginTop: 16, borderColor: 'var(--cherry)' }}><strong>{times.data.open_now ? 'This station is not taking orders for a moment.' : `This station is closed. It opens at ${String(times.data.opens).slice(0, 5)}.`}</strong> <button className="btn sm" style={{ marginLeft: 8 }} onClick={() => router.push('/order')}>Choose another station</button></div>}
           {!closed && w && (
             <>

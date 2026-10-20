@@ -283,7 +283,7 @@ class ReferralScreen extends StatelessWidget {
               QrImageView(data: 'sadhai://invite/${data['code']}', size: 140, eyeStyle: const QrEyeStyle(color: Brand.ink, eyeShape: QrEyeShape.square), dataModuleStyle: const QrDataModuleStyle(color: Brand.ink, dataModuleShape: QrDataModuleShape.square)),
               Text(data['code'], style: display(38, color: Brand.cherry)),
               const SizedBox(height: 8),
-              FilledButton(onPressed: () { Clipboard.setData(ClipboardData(text: 'Your first Americano is free at Sadhai Coffee. Use my code ${data['code']}.')); toast(context, 'Invite copied'); }, child: const Text('Copy invite')),
+              FilledButton(onPressed: () { Clipboard.setData(ClipboardData(text: 'Join me at Sadhai Coffee. Use my code ${data['code']}.')); toast(context, 'Invite copied'); }, child: const Text('Copy invite')),
               const SizedBox(height: 8),
               Text('One free cup per friend, up to ${data['cap']} a month. ${data['rewarded_this_month']} used this month.', textAlign: TextAlign.center, style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
             ]))),

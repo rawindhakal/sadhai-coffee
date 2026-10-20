@@ -157,7 +157,7 @@ function ModernHero({ stations, site, pricing }: { stations: any[] | null; site:
           <p className="nh-lead">{sub} {lang === 'ne' ? '' : 'Nepali Arabica from Gulmi, Syangja and Kaski, roasted weekly in Nepal.'}</p>
           <div className="nh-hero-actions">
             <Link className="btn primary lg" href="/order">{h?.primary_cta || t('order_ahead')}<Icon name="chevr" size={20} /></Link>
-            <Link className="btn lg" style={{ background: 'var(--surface-raised)' }} href="/register">{h?.secondary_cta || 'Get a free first cup'}</Link>
+            <Link className="btn lg" style={{ background: 'var(--surface-raised)' }} href="/register">{h?.secondary_cta || 'Create an account'}</Link>
           </div>
           <div className="nh-trust-strip">
             <div className="nh-trust-item"><span className="nh-trust-num">{rs(pricing.hot)}</span><span className="nh-trust-lbl">Any hot coffee</span></div>

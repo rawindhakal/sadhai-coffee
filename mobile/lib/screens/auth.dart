@@ -76,7 +76,7 @@ class _AuthScreenState extends State<AuthScreen> {
           const SizedBox(height: 20),
           FilledButton(onPressed: _busy ? null : _submit, child: Text(_busy ? 'One moment…' : _register ? 'Create account' : 'Sign in')),
           const SizedBox(height: 8),
-          TextButton(onPressed: () => setState(() { _register = !_register; _error = null; }), child: Text(_register ? 'I already have an account' : 'New here? Your first Americano is free')),
+          TextButton(onPressed: () => setState(() { _register = !_register; _error = null; }), child: Text(_register ? 'I already have an account' : 'New here? Create an account')),
         ]),
       ),
     );

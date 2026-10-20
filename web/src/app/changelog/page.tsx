@@ -21,9 +21,24 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
-    version: '1.6.4',
+    version: '1.6.5',
     date: '20 October 2026',
     badge: 'Latest',
+    highlight: 'Offer of the Day Restored, Coupon Code at Checkout, Automatic Coupons Retired',
+    changes: [
+      {
+        category: 'Changed',
+        items: [
+          { title: 'Offer of the day restored', desc: 'Back on Home and the Offers tab on web and mobile.' },
+          { title: 'Automatic coupons retired', desc: 'Free first cup and the 30% off ladder are no longer issued; existing ones were cleared.' },
+          { title: 'Coupon code box', desc: 'Enter a coupon code on the Offers tab or at checkout on web and mobile.' },
+        ],
+      },
+    ],
+  },
+  {
+    version: '1.6.4',
+    date: '20 October 2026',
     highlight: 'Promo Code on Offers, Offer of the Day Removed, Home Polish',
     changes: [
       {

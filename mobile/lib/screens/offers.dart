@@ -6,6 +6,7 @@ import '../state.dart';
 import '../theme.dart';
 import 'account.dart';
 import 'customer.dart';
+import 'home.dart' show DealCard;
 
 /// Everything that saves the customer money, in one place.
 class OffersScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class OffersScreen extends StatefulWidget {
 
 class _OffersScreenState extends State<OffersScreen> {
   Json? _home;
+  List _centralOffers = [];
   List _centralDrops = [];
   List _coupons = [];
   String? _stationId;
@@ -31,6 +33,7 @@ class _OffersScreenState extends State<OffersScreen> {
         final off = await Api.instance.get('/offers') as Map;
         if (mounted) {
           setState(() {
+            _centralOffers = (off['offers'] as List? ?? []).cast<Map>();
             _centralDrops = (off['drops'] as List? ?? []).cast<Map>();
           });
         }
@@ -50,13 +53,21 @@ class _OffersScreenState extends State<OffersScreen> {
       _lastEpoch = epoch;
       WidgetsBinding.instance.addPostFrameCallback((_) => _load());
     }
+    final offers = (_home?['offers'] as List? ?? _centralOffers).cast<Map>();
     final drops = (_home?['drops'] as List? ?? _centralDrops).cast<Map>();
+    final products = [for (final c in (_home?['categories'] as List? ?? [])) ...(c['products'] as List).cast<Map>()];
     return RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(16), children: [
       Text('Offers', style: display(30)),
-      const SizedBox(height: 16),
-      Text('Promo code', style: display(20)),
       const SizedBox(height: 8),
-      const _PromoBox(),
+      Text('Offer of the day${cart.station != null ? ' · ${cart.station!['name']}' : ''}', style: display(20)),
+      const SizedBox(height: 8),
+      if (cart.station == null && offers.isEmpty) const Text('Choose a station on Home to see today’s outlet offers.', style: TextStyle(color: Brand.inkMuted)),
+      if (cart.station != null && offers.isEmpty) const Text('No special offer at this station today.', style: TextStyle(color: Brand.inkMuted)),
+      for (final o in offers) Padding(padding: const EdgeInsets.only(bottom: 10), child: DealCard(o: o, products: products, onSee: () {}, onAdd: (p) { if (p != null) { final l = CartLine.quick(p); if (l != null) { cart.add(l); toast(context, '${p['name']} added'); } } })),
+      const SizedBox(height: 16),
+      Text('Coupon code', style: display(20)),
+      const SizedBox(height: 8),
+      const PromoBox(),
       if (drops.isNotEmpty) ...[
         const SizedBox(height: 16),
         Text('This month’s drop', style: display(20)),
@@ -69,21 +80,22 @@ class _OffersScreenState extends State<OffersScreen> {
           Text('${NumberFormat.decimalPattern().format(d['sold'])} of ${NumberFormat.decimalPattern().format(d['cap'])} cups sold. Then gone.', style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
         ]))),
       ],
-      const SizedBox(height: 20),
-      Row(children: [
-        Text('My coupons', style: display(20)),
-        if (_coupons.isNotEmpty) ...[
-          const SizedBox(width: 8),
-          Chip2('${_coupons.length} active', bg: Brand.marigold),
-        ],
-      ]),
-      const SizedBox(height: 8),
-      if (_coupons.isEmpty) const Text('No active coupons. Your first Americano is free when you sign up, and earn more with Give a cup.', style: TextStyle(color: Brand.inkMuted)),
-      for (final c in _coupons) Card(margin: const EdgeInsets.only(bottom: 8), child: ListTile(
-        title: Text(c['title'], style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Text('Valid until ${DateFormat('d MMM yyyy').format(DateTime.parse(c['expires_at']).toLocal())} · Applied at checkout'),
-        trailing: Chip2(c['kind'] == 'pct' ? '${c['pct']}% off' : 'Free cup', bg: Brand.marigold),
-      )),
+      if (_coupons.isNotEmpty) ...[
+        const SizedBox(height: 20),
+        Row(children: [
+          Text('My coupons', style: display(20)),
+          if (_coupons.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            Chip2('${_coupons.length} active', bg: Brand.marigold),
+          ],
+        ]),
+        const SizedBox(height: 8),
+        for (final c in _coupons) Card(margin: const EdgeInsets.only(bottom: 8), child: ListTile(
+          title: Text(c['title'], style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text('Valid until ${DateFormat('d MMM yyyy').format(DateTime.parse(c['expires_at']).toLocal())} · Applied at checkout'),
+          trailing: Chip2(c['kind'] == 'pct' ? '${c['pct']}% off' : 'Free cup', bg: Brand.marigold),
+        )),
+      ],
       const SizedBox(height: 16),
       const PassPanel(),
       const SizedBox(height: 12),
@@ -93,13 +105,13 @@ class _OffersScreenState extends State<OffersScreen> {
 }
 
 /// Enter a promo code once; it is then offered at checkout.
-class _PromoBox extends StatefulWidget {
-  const _PromoBox();
+class PromoBox extends StatefulWidget {
+  const PromoBox({super.key});
   @override
-  State<_PromoBox> createState() => _PromoBoxState();
+  State<PromoBox> createState() => PromoBoxState();
 }
 
-class _PromoBoxState extends State<_PromoBox> {
+class PromoBoxState extends State<PromoBox> {
   final _code = TextEditingController();
   bool _busy = false;
   String? _error;

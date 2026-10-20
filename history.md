@@ -17,6 +17,14 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.6.5 (2026-10-20)
+
+### Changed
+- **Offer of the day is back** on Home and the Offers tab (mobile and web).
+- **Automatic coupons retired**: new customers no longer get "Your first cup is free" or the "30% off · cup 2/3/4" coupons (they came from the signup ladder settings in `issueSignupLadder`). Existing ones were cleared. "My coupons" now only shows when a customer has referral cups.
+- **Coupon code** box on the Offers tab and at checkout (mobile and web). The Home shortcut now says "Promo code".
+- Removed "first Americano is free" wording from sign-up, cart and sharing text.
+
 ## v1.6.4 (2026-10-20)
 
 ### Added
