@@ -103,9 +103,15 @@ export function PassTab() {
         <Modal title="Buy a 10-cup pass" onClose={() => setBuy(false)}>
           <p className="muted">Pay {rs(cfg.data?.pass.price)} with:</p>
           <div className="col" style={{ marginTop: 12, gap: 10 }}>
-            <button className="btn primary block" disabled={busy} onClick={() => purchase('fonepay')}>Pay with Fonepay QR</button>
-            <button className="btn block" style={{ background: '#41A124', color: '#fff', borderColor: '#41A124' }} disabled={busy} onClick={() => purchase('esewa')}>Pay with eSewa QR</button>
-            <button className="btn block" style={{ background: '#5C2D91', color: '#fff', borderColor: '#5C2D91' }} disabled={busy} onClick={() => purchase('khalti')}>Pay with Khalti QR</button>
+            {(!cfg.data?.payment_methods || cfg.data.payment_methods.includes('fonepay')) && (
+              <button className="btn primary block" disabled={busy} onClick={() => purchase('fonepay')}>Pay with Fonepay</button>
+            )}
+            {(!cfg.data?.payment_methods || cfg.data.payment_methods.includes('esewa')) && (
+              <button className="btn block" style={{ background: '#41A124', color: '#fff', borderColor: '#41A124' }} disabled={busy} onClick={() => purchase('esewa')}>Pay with eSewa</button>
+            )}
+            {(!cfg.data?.payment_methods || cfg.data.payment_methods.includes('khalti')) && (
+              <button className="btn block" style={{ background: '#5C2D91', color: '#fff', borderColor: '#5C2D91' }} disabled={busy} onClick={() => purchase('khalti')}>Pay with Khalti</button>
+            )}
           </div>
           <p className="small muted" style={{ marginTop: 12 }}>Prefer cash? Buy it at any station counter. A new pass never starts until you use its first cup.</p>
         </Modal>
@@ -190,6 +196,7 @@ export function ReferralTab() {
 
 function PhoneVerifyBanner({ onVerified }: { onVerified?: () => void }) {
   const { user, setUser } = useAuth();
+  const cfg = useData<any>('/config');
   const toast = useToast();
   const [sent, setSent] = useState(false);
   const [code, setCode] = useState('');
@@ -197,6 +204,7 @@ function PhoneVerifyBanner({ onVerified }: { onVerified?: () => void }) {
   const [busy, setBusy] = useState(false);
 
   if ((user as any)?.phone_verified) return null;
+  if (cfg.data?.sms && (cfg.data.sms.enabled === false || cfg.data.sms.otp_enabled === false)) return null;
 
   async function sendOtp() {
     setBusy(true);

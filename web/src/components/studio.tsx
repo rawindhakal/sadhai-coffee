@@ -6,6 +6,7 @@ import { Seg, Skeleton } from './dash/kit';
 import { useDash } from './dash/shell';
 import { Icon } from './icons';
 import { HeroScene } from './hero';
+import { FonepayQr } from './fonepay';
 import { productArt } from '@/lib/art';
 import { STEP_ART, STORY_ART, PEOPLE_ART, HERO_DEFAULTS } from '@/lib/site-content';
 
@@ -50,66 +51,769 @@ export function RulesPanel() {
 }
 
 const GROUPS: Record<string, { title: string; note: string }> = {
-  payments: { title: 'Online payment gateways (Fonepay, eSewa & Khalti)', note: 'Supports Fonepay Dynamic QR, eSewa Dynamic QR / ePay v2, and Khalti Dynamic QR / ePay v2. Keys are encrypted at rest and never shown again after saving. Start in Sandbox mode, then switch to Live once your merchant accounts are approved.' },
-  sms: { title: 'SMS gateway (NestSMS)', note: 'Connect NestSMS (api.nestsms.com) for phone OTP verification and optional Order-Ready SMS alerts. In Sandbox mode or when keys are not yet set, OTPs and SMS messages are logged safely without failing.' },
+  payments: { title: 'Global Payment & Counter Settings', note: 'Master controls for Cash at counter and default gateway behavior.' },
+  fonepay: { title: 'Fonepay Dynamic QR & Web PG (fonepay_flutter)', note: 'Supports Fonepay Third-Party Dynamic QR and Fonepay Web/Flutter PG (HMAC-SHA512 signed merchantRequest). Keys are encrypted at rest.' },
+  esewa: { title: 'eSewa ePay v2 & QR Gateway (developer.esewa.com.np)', note: 'Official eSewa ePay v2 integration with HMAC-SHA256 signed checkout form, callback verification, and status lookup API.' },
+  khalti: { title: 'Khalti KPG-2 ePayment & QR Gateway (docs.khalti.com)', note: 'Official Khalti KPG-2 (/epayment/initiate/ & /epayment/lookup/) with pidx payment URL and QR checkout.' },
+  sms: { title: 'NestSMS & Phone Verification Gateway', note: 'Connect NestSMS (api.nestsms.com) for phone OTP verification, Order-Ready alerts, and Welcome/Referral SMS rewards.' },
   push: { title: 'Push notifications', note: 'Firebase sends to Android and iPhone. Browser push uses a key pair. With neither, push runs in test mode.' },
   app: { title: 'Addresses and app versions', note: 'Where customers reach you and which app versions may still run.' },
   company: { title: 'Company details', note: 'Shown on the privacy policy, terms and support pages.' },
 };
+
+const GATEWAY_CARDS: {
+  id: 'fonepay' | 'esewa' | 'khalti' | 'cash';
+  name: string;
+  subtitle: string;
+  color: string;
+  bg: string;
+  badge: string;
+  docsUrl?: string;
+  enableKey: string;
+  modeKey?: string;
+}[] = [
+  {
+    id: 'fonepay',
+    name: 'Fonepay',
+    subtitle: 'Dynamic QR + Web / Flutter PG (HMAC-SHA512)',
+    color: '#D71920',
+    bg: 'rgba(215, 25, 32, 0.08)',
+    badge: 'QR + PG',
+    docsUrl: 'https://github.com/iamnabink/fonepay_flutter',
+    enableKey: 'fonepay_enabled',
+    modeKey: 'fonepay_mode',
+  },
+  {
+    id: 'esewa',
+    name: 'eSewa',
+    subtitle: 'ePay v2 Signed Form + QR + Status Lookup',
+    color: '#41A124',
+    bg: 'rgba(65, 161, 36, 0.08)',
+    badge: 'ePay v2 + QR',
+    docsUrl: 'https://developer.esewa.com.np/',
+    enableKey: 'esewa_enabled',
+    modeKey: 'esewa_mode',
+  },
+  {
+    id: 'khalti',
+    name: 'Khalti',
+    subtitle: 'KPG-2 ePayment Initiate + Lookup + QR',
+    color: '#5C2D91',
+    bg: 'rgba(92, 45, 145, 0.08)',
+    badge: 'KPG-2 + QR',
+    docsUrl: 'https://docs.khalti.com/',
+    enableKey: 'khalti_enabled',
+    modeKey: 'khalti_mode',
+  },
+  {
+    id: 'cash',
+    name: 'Cash at Counter',
+    subtitle: 'Pay in person at station pickup or POS',
+    color: '#2B6E46',
+    bg: 'rgba(43, 110, 70, 0.08)',
+    badge: 'Counter POS',
+    enableKey: 'cash_enabled',
+  },
+];
+
 export function IntegrationsPanel() {
   const { data, reload, error } = useData<any[]>('/owner/integrations');
+  const ov = useData<any>('/owner/integrations/overview');
   const toast = useToast();
+  const [gwTab, setGwTab] = useState<'overview' | 'fonepay' | 'esewa' | 'khalti' | 'sms' | 'other'>('overview');
   const [edit, setEdit] = useState<Record<string, string | null>>({});
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const [result, setResult] = useState<{ title: string; ok?: boolean; message: string } | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [testPhone, setTestPhone] = useState('');
+  const [result, setResult] = useState<{ title: string; ok?: boolean; message: string; qr_message?: string; pay_url?: string; provider?: string; mode?: string } | null>(null);
+
   if (!data) return <><ErrorNote error={error} /><Skeleton h={80} n={4} /></>;
+
+  const itemMap = Object.fromEntries(data.map((i) => [i.key, i]));
+  const valOf = (key: string) => (key in edit ? edit[key] : itemMap[key]?.value ?? '');
   const dirty = (g: string) => data.filter((i) => i.group === g && i.key in edit).length;
+
   async function save(g: string) {
     const values = Object.fromEntries(data.filter((i) => i.group === g && i.key in edit).map((i) => [i.key, edit[i.key]]));
-    try { await api('/owner/integrations', { method: 'PUT', body: { values } }); setEdit((e) => Object.fromEntries(Object.entries(e).filter(([k]) => !(k in values)))); setOpen({}); reload(); toast('Saved'); } catch (e: any) { toast(e.message, true); }
+    try {
+      await api('/owner/integrations', { method: 'PUT', body: { values } });
+      setEdit((e) => Object.fromEntries(Object.entries(e).filter(([k]) => !(k in values))));
+      setOpen({});
+      reload();
+      ov.reload();
+      toast('Gateway configuration saved');
+    } catch (e: any) {
+      toast(e.message, true);
+    }
   }
-  async function test(name: string, title: string) { try { const r = await api(`/owner/integrations/test/${name}`, { method: 'POST', body: {} }); setResult({ title, ok: r.ok, message: r.message }); } catch (e: any) { setResult({ title, ok: false, message: e.message }); } }
+
+  async function quickSave(values: Record<string, string | null>, msg = 'Updated') {
+    const firstKey = Object.keys(values)[0];
+    setBusyKey(firstKey);
+    try {
+      await api('/owner/integrations', { method: 'PUT', body: { values } });
+      reload();
+      ov.reload();
+      toast(msg);
+    } catch (e: any) {
+      toast(e.message, true);
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function test(name: string, title: string, extraBody: Record<string, any> = {}) {
+    setBusyKey(`test_${name}`);
+    try {
+      const r = await api(`/owner/integrations/test/${name}`, { method: 'POST', body: extraBody });
+      setResult({
+        title,
+        ok: r.ok,
+        message: r.message,
+        qr_message: r.qr_message,
+        pay_url: r.pay_url,
+        provider: name,
+        mode: r.mode,
+      });
+      ov.reload();
+    } catch (e: any) {
+      setResult({ title, ok: false, message: e.message });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   async function vapid() {
     const has = data.find((i) => i.key === 'vapid_public_key')?.is_set;
     if (has && !confirm('Replacing the browser push keys stops push on every browser that turned it on. Replace them?')) return;
-    try { await api('/owner/integrations/vapid', { method: 'POST', body: { replace: !!has } }); reload(); toast('New browser push keys saved'); } catch (e: any) { toast(e.message, true); }
+    try {
+      await api('/owner/integrations/vapid', { method: 'POST', body: { replace: !!has } });
+      reload();
+      toast('New browser push keys saved');
+    } catch (e: any) {
+      toast(e.message, true);
+    }
   }
-  const tests: Record<string, [string, string][]> = {
-    payments: [['fonepay', 'Check Fonepay'], ['esewa', 'Check eSewa'], ['khalti', 'Check Khalti']],
-    sms: [['nestsms', 'Send test SMS (NestSMS)']],
-    push: [['fcm', 'Check Firebase key'], ['push', 'Send me a test push']],
-  };
+
+  function copyText(label: string, text?: string) {
+    if (!text) return;
+    navigator.clipboard?.writeText(text);
+    toast(`${label} copied`);
+  }
+
+  function applyPreset(provider: 'fonepay' | 'esewa' | 'khalti', targetMode: 'sandbox' | 'live') {
+    if (provider === 'fonepay') {
+      setEdit({
+        ...edit,
+        fonepay_mode: targetMode,
+        fonepay_qr_url: targetMode === 'live'
+          ? 'https://merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty'
+          : 'https://dev-merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty',
+        fonepay_pg_url: targetMode === 'live'
+          ? 'https://clientapi.fonepay.com/api/merchantRequest'
+          : 'https://dev-clientapi.fonepay.com/api/merchantRequest',
+      });
+      toast(`Loaded Fonepay ${targetMode.toUpperCase()} endpoint presets — click Save below to apply`);
+    } else if (provider === 'esewa') {
+      setEdit({
+        ...edit,
+        esewa_mode: targetMode,
+        ...(targetMode === 'sandbox' ? { esewa_merchant_code: 'EPAYTEST' } : {}),
+        esewa_url: targetMode === 'live'
+          ? 'https://epay.esewa.com.np/api/epay/main/v2/form'
+          : 'https://rc-epay.esewa.com.np/api/epay/main/v2/form',
+        esewa_status_url: targetMode === 'live'
+          ? 'https://epay.esewa.com.np/api/epay/transaction/status/'
+          : 'https://rc.esewa.com.np/api/epay/transaction/status/',
+      });
+      toast(`Loaded eSewa ${targetMode.toUpperCase()} presets — click Save below to apply`);
+    } else if (provider === 'khalti') {
+      setEdit({
+        ...edit,
+        khalti_mode: targetMode,
+        khalti_url: targetMode === 'live'
+          ? 'https://khalti.com/api/v2'
+          : 'https://dev.khalti.com/api/v2',
+      });
+      toast(`Loaded Khalti ${targetMode.toUpperCase()} presets — click Save below to apply`);
+    }
+  }
+
+  function renderGroupFields(g: string) {
+    const items = data!.filter((i) => i.group === g);
+    return (
+      <div className="col" style={{ gap: 14 }}>
+        {items.map((i) => (
+          <div key={i.key} className="grid" style={{ gridTemplateColumns: 'minmax(220px, 1fr) 2fr', gap: 14, alignItems: 'start', padding: '10px 0', borderBottom: '1px solid var(--line)' }}>
+            <div>
+              <strong>{i.label}</strong>
+              {i.help && <p className="small muted" style={{ marginTop: 2 }}>{i.help}</p>}
+              <span className={`chip ${i.source === 'dashboard' ? 'hill' : ''}`} style={{ marginTop: 6 }}>
+                {i.source === 'dashboard' ? 'Saved in dashboard' : i.source === 'server environment' ? 'Server env' : 'Default'}
+              </span>
+            </div>
+            <div>
+              {i.secret ? (
+                open[i.key] || !i.is_set ? (
+                  <div className="row">
+                    {i.type === 'json' ? (
+                      <textarea rows={4} placeholder="Paste JSON key here" value={(edit[i.key] as string) ?? ''} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label} />
+                    ) : (
+                      <input type="password" autoComplete="off" placeholder="Paste secret key" value={(edit[i.key] as string) ?? ''} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label} />
+                    )}
+                    {i.is_set && (
+                      <button className="btn ghost sm" onClick={() => { setOpen({ ...open, [i.key]: false }); const { [i.key]: _x, ...rest } = edit; setEdit(rest); }}>
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="row between wrap">
+                    <code style={{ background: 'var(--surface-sunk)', padding: '8px 12px', borderRadius: 8 }}>{i.masked}</code>
+                    <span className="row">
+                      <button className="btn sm" onClick={() => setOpen({ ...open, [i.key]: true })}>Change key</button>
+                      <button className="btn sm ghost" onClick={() => setEdit({ ...edit, [i.key]: null })}>{i.key in edit ? 'Will be removed' : 'Remove'}</button>
+                    </span>
+                  </div>
+                )
+              ) : i.type === 'enum' ? (
+                <select value={(edit[i.key] as string) ?? i.value} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label}>
+                  {i.options.map((o: string) => <option key={o} value={o}>{o.toUpperCase()}</option>)}
+                </select>
+              ) : i.type === 'bool' ? (
+                <label className="row" style={{ cursor: 'pointer', gap: 10 }}>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    style={{ width: 22, minHeight: 22 }}
+                    checked={((edit[i.key] as string) ?? i.value) === '1'}
+                    onChange={(e) => setEdit({ ...edit, [i.key]: e.target.checked ? '1' : '0' })}
+                  />
+                  <strong>{((edit[i.key] as string) ?? i.value) === '1' ? 'Enabled (ON)' : 'Disabled (OFF)'}</strong>
+                </label>
+              ) : (
+                <input value={(edit[i.key] as string) ?? i.value ?? ''} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label} />
+              )}
+              {i.updated_at && <p className="small muted" style={{ marginTop: 4 }}>Last changed {fmtDateTime(i.updated_at)}{i.updated_by ? ` by ${i.updated_by}` : ''}</p>}
+            </div>
+          </div>
+        ))}
+        <div className="row" style={{ marginTop: 8 }}>
+          <button className="btn primary" disabled={!dirty(g)} onClick={() => save(g)}>
+            {dirty(g) ? `Save ${dirty(g)} change${dirty(g) > 1 ? 's' : ''}` : 'All changes saved'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const stats30 = ov.data?.stats_30d || {};
+  const smsStats = ov.data?.sms_stats_30d || { sent: 0, dry_run: 0, failed: 0 };
+  const callbacks = ov.data?.callbacks || {};
+
   return (
     <div className="col" style={{ gap: 16 }}>
-      {Object.entries(GROUPS).map(([g, meta]) => (
-        <div key={g} className="panel">
-          <div className="ph"><div><h3>{meta.title}</h3><p className="small muted" style={{ maxWidth: 680 }}>{meta.note}</p></div>
-            <div className="row wrap">{(tests[g] || []).map(([n, l]) => <button key={n} className="btn sm" onClick={() => test(n, l)}>{l}</button>)}{g === 'push' && <button className="btn sm ghost" onClick={vapid}>Generate browser keys</button>}</div></div>
-          <div className="col" style={{ gap: 14 }}>
-            {data.filter((i) => i.group === g).map((i) => (
-              <div key={i.key} className="grid" style={{ gridTemplateColumns: 'minmax(200px, 1fr) 2fr', gap: 12, alignItems: 'start' }}>
-                <div><strong>{i.label}</strong>{i.help && <p className="small muted">{i.help}</p>}<span className={`chip ${i.source === 'dashboard' ? 'hill' : ''}`} style={{ marginTop: 4 }}>{i.source === 'dashboard' ? 'Saved here' : i.source === 'server environment' ? 'Server setting' : 'Default'}</span></div>
-                <div>
-                  {i.secret ? (
-                    open[i.key] || !i.is_set ? (
-                      <div className="row">{i.type === 'json' ? <textarea rows={4} placeholder="Paste here" value={(edit[i.key] as string) ?? ''} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label} /> : <input type="password" autoComplete="off" placeholder="Paste the key" value={(edit[i.key] as string) ?? ''} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label} />}{i.is_set && <button className="btn ghost sm" onClick={() => { setOpen({ ...open, [i.key]: false }); const { [i.key]: _x, ...rest } = edit; setEdit(rest); }}>Cancel</button>}</div>
-                    ) : (
-                      <div className="row between wrap"><code style={{ background: 'var(--surface-sunk)', padding: '8px 12px', borderRadius: 8 }}>{i.masked}</code><span className="row"><button className="btn sm" onClick={() => setOpen({ ...open, [i.key]: true })}>Change</button><button className="btn sm ghost" onClick={() => setEdit({ ...edit, [i.key]: null })}>{i.key in edit ? 'Will be removed' : 'Remove'}</button></span></div>
-                    )
-                  ) : i.type === 'enum' ? (
-                    <select value={(edit[i.key] as string) ?? i.value} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label}>{i.options.map((o: string) => <option key={o}>{o}</option>)}</select>
-                  ) : i.type === 'bool' ? (
-                    <label className="row"><input type="checkbox" style={{ width: 22, minHeight: 22 }} checked={((edit[i.key] as string) ?? i.value) === '1'} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.checked ? '1' : '0' })} />{((edit[i.key] as string) ?? i.value) === '1' ? 'On' : 'Off'}</label>
-                  ) : <input value={(edit[i.key] as string) ?? i.value ?? ''} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label} />}
-                  {i.updated_at && <p className="small muted" style={{ marginTop: 4 }}>Last changed {fmtDateTime(i.updated_at)}{i.updated_by ? ` by ${i.updated_by}` : ''}</p>}
-                </div>
-              </div>
-            ))}
+      {/* Top Gateway Dashboard Header & Navigation */}
+      <div className="panel" style={{ background: 'linear-gradient(135deg, var(--surface-raised) 0%, var(--surface) 100%)', borderWidth: 2 }}>
+        <div className="row between wrap" style={{ gap: 12 }}>
+          <div>
+            <div className="row" style={{ gap: 8 }}>
+              <span className="chip hill">Payment & SMS Control Center</span>
+              <span className="small muted">Real-time switches across Web, Android, iOS, Kiosk & Station POS</span>
+            </div>
+            <h3 style={{ marginTop: 6 }}>Payment Gateways & NestSMS Dashboard</h3>
+            <p className="small muted" style={{ maxWidth: 740 }}>
+              Turn any payment method or SMS feature ON or OFF instantaneously, switch individual gateways between Sandbox and Live, and run live verification tests.
+            </p>
           </div>
-          <div className="row" style={{ marginTop: 16 }}><button className="btn primary" disabled={!dirty(g)} onClick={() => save(g)}>{dirty(g) ? `Save ${dirty(g)} change${dirty(g) > 1 ? 's' : ''}` : 'No changes'}</button></div>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <button className="btn sm" onClick={() => test('fonepay', 'Fonepay Live Check')} disabled={busyKey === 'test_fonepay'}>Test Fonepay</button>
+            <button className="btn sm" onClick={() => test('esewa', 'eSewa ePay v2 Check')} disabled={busyKey === 'test_esewa'}>Test eSewa</button>
+            <button className="btn sm" onClick={() => test('khalti', 'Khalti KPG-2 Check')} disabled={busyKey === 'test_khalti'}>Test Khalti</button>
+            <button className="btn sm" onClick={() => test('nestsms', 'NestSMS Check')} disabled={busyKey === 'test_nestsms'}>Test NestSMS</button>
+          </div>
         </div>
-      ))}
-      {result && <Modal title={result.title} onClose={() => setResult(null)}><p className={result.ok ? 'ok' : 'err'} style={{ fontSize: 16 }}>{result.ok ? 'Looks good. ' : 'Needs attention. '}</p><p>{result.message}</p></Modal>}
+        <div style={{ marginTop: 14 }}>
+          <Seg
+            value={gwTab}
+            onChange={setGwTab}
+            options={[
+              { id: 'overview', label: 'Overview & Switches' },
+              { id: 'fonepay', label: 'Fonepay' },
+              { id: 'esewa', label: 'eSewa' },
+              { id: 'khalti', label: 'Khalti' },
+              { id: 'sms', label: 'NestSMS & OTP' },
+              { id: 'other', label: 'Push, App & Company' },
+            ]}
+          />
+        </div>
+      </div>
+
+      {/* TAB 1: OVERVIEW & INSTANT SWITCHES */}
+      {gwTab === 'overview' && (
+        <div className="col" style={{ gap: 16 }}>
+          {/* 4 Payment Gateway Cards */}
+          <div className="grid g2" style={{ gap: 16 }}>
+            {GATEWAY_CARDS.map((gw) => {
+              const enabled = valOf(gw.enableKey) === '1';
+              const mode = gw.modeKey ? (valOf(gw.modeKey) || valOf('payment_mode') || 'sandbox') : 'live';
+              const st = stats30[gw.id] || { paid_count: 0, paid_amount: 0, failed_count: 0, pending_count: 0 };
+              const gwStatus = ov.data?.gateways?.[gw.id];
+              return (
+                <div
+                  key={gw.id}
+                  className="panel col"
+                  style={{
+                    gap: 14,
+                    borderLeft: `5px solid ${enabled ? gw.color : 'var(--line)'}`,
+                    opacity: enabled ? 1 : 0.78,
+                  }}
+                >
+                  <div className="row between wrap" style={{ alignItems: 'flex-start' }}>
+                    <div>
+                      <div className="row" style={{ gap: 8 }}>
+                        <span className="chip" style={{ background: gw.bg, color: gw.color, fontWeight: 700 }}>{gw.badge}</span>
+                        {gw.modeKey && (
+                          <span className={`chip ${mode === 'live' ? 'hill' : 'marigold'}`}>
+                            {mode === 'live' ? 'LIVE' : 'SANDBOX'}
+                          </span>
+                        )}
+                        {gwStatus?.configured && <span className="chip hill">Keys Ready</span>}
+                      </div>
+                      <h3 style={{ marginTop: 6 }}>{gw.name}</h3>
+                      <p className="small muted">{gw.subtitle}</p>
+                    </div>
+
+                    {/* Instant ON / OFF Switch */}
+                    <label
+                      className="row card flat"
+                      style={{
+                        padding: '6px 12px',
+                        cursor: 'pointer',
+                        borderColor: enabled ? gw.color : 'var(--line)',
+                        background: enabled ? gw.bg : 'var(--surface-sunk)',
+                        gap: 8,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        style={{ width: 20, minHeight: 20 }}
+                        checked={enabled}
+                        disabled={busyKey === gw.enableKey}
+                        onChange={(e) =>
+                          quickSave(
+                            { [gw.enableKey]: e.target.checked ? '1' : '0' },
+                            `${gw.name} turned ${e.target.checked ? 'ON' : 'OFF'}`
+                          )
+                        }
+                      />
+                      <strong style={{ color: enabled ? gw.color : 'var(--ink-muted)' }}>
+                        {enabled ? 'ON' : 'OFF'}
+                      </strong>
+                    </label>
+                  </div>
+
+                  {/* 30-day KPIs */}
+                  {gw.id !== 'cash' ? (
+                    <div className="grid g3" style={{ gap: 8 }}>
+                      <div className="card flat">
+                        <div className="small muted">30d Paid Volume</div>
+                        <strong style={{ fontSize: 18 }}>{rs(st.paid_amount || 0)}</strong>
+                      </div>
+                      <div className="card flat">
+                        <div className="small muted">30d Paid Txns</div>
+                        <strong style={{ fontSize: 18 }}>{st.paid_count || 0}</strong>
+                      </div>
+                      <div className="card flat">
+                        <div className="small muted">Pending / Failed</div>
+                        <strong style={{ fontSize: 18 }}>{st.pending_count || 0} / {st.failed_count || 0}</strong>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="card flat">
+                      <div className="small muted">Counter & Kiosk Cash Orders</div>
+                      <p className="small" style={{ marginTop: 4 }}>
+                        When ON, customers and counter staff can place Cash orders. Turn OFF for cashless-only stations.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Quick Actions Footer */}
+                  <div className="row between wrap" style={{ paddingTop: 4, borderTop: '1px solid var(--line)' }}>
+                    {gw.modeKey ? (
+                      <div className="row" style={{ gap: 6 }}>
+                        <span className="small muted">Mode:</span>
+                        <button
+                          className={`btn sm ${mode === 'sandbox' ? 'primary' : 'ghost'}`}
+                          disabled={busyKey === gw.modeKey}
+                          onClick={() => quickSave({ [gw.modeKey!]: 'sandbox' }, `${gw.name} switched to Sandbox`)}
+                        >
+                          Sandbox
+                        </button>
+                        <button
+                          className={`btn sm ${mode === 'live' ? 'primary' : 'ghost'}`}
+                          disabled={busyKey === gw.modeKey}
+                          onClick={() => quickSave({ [gw.modeKey!]: 'live' }, `${gw.name} switched to Live`)}
+                        >
+                          Live
+                        </button>
+                      </div>
+                    ) : <span className="small muted">Instant counter settlement</span>}
+
+                    <div className="row" style={{ gap: 8 }}>
+                      {gw.docsUrl && (
+                        <a className="btn sm ghost" href={gw.docsUrl} target="_blank" rel="noopener noreferrer">
+                          Docs ↗
+                        </a>
+                      )}
+                      {gw.id !== 'cash' && (
+                        <>
+                          <button className="btn sm ghost" onClick={() => test(gw.id, `Test ${gw.name}`)}>
+                            Test QR
+                          </button>
+                          <button className="btn sm" onClick={() => setGwTab(gw.id as any)}>
+                            Configure →
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* NestSMS Master & Feature Switches Card */}
+          <div className="panel col" style={{ gap: 14, borderLeft: `5px solid ${valOf('sms_enabled') === '1' ? '#0284C7' : 'var(--line)'}` }}>
+            <div className="row between wrap">
+              <div>
+                <div className="row" style={{ gap: 8 }}>
+                  <span className="chip" style={{ background: 'rgba(2, 132, 199, 0.1)', color: '#0284C7', fontWeight: 700 }}>NestSMS Gateway</span>
+                  <span className={`chip ${valOf('sms_mode') === 'live' ? 'hill' : 'marigold'}`}>
+                    {valOf('sms_mode') === 'live' ? 'LIVE' : 'SANDBOX'}
+                  </span>
+                  {ov.data?.sms?.configured && <span className="chip hill">API Key Set</span>}
+                </div>
+                <h3 style={{ marginTop: 6 }}>SMS & OTP Features Control</h3>
+                <p className="small muted">
+                  Switch the entire NestSMS gateway or individual SMS triggers (Phone OTP, Order Ready, Welcome/Referral coupon alerts) ON or OFF.
+                </p>
+              </div>
+              <div className="row" style={{ gap: 8 }}>
+                <label className="row card flat" style={{ padding: '6px 12px', cursor: 'pointer', gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    style={{ width: 20, minHeight: 20 }}
+                    checked={valOf('sms_enabled') === '1'}
+                    onChange={(e) => quickSave({ sms_enabled: e.target.checked ? '1' : '0' }, `NestSMS Master Switch turned ${e.target.checked ? 'ON' : 'OFF'}`)}
+                  />
+                  <strong>Master SMS: {valOf('sms_enabled') === '1' ? 'ON' : 'OFF'}</strong>
+                </label>
+                <button className="btn sm" onClick={() => setGwTab('sms')}>Configure NestSMS →</button>
+              </div>
+            </div>
+
+            <div className="grid g4" style={{ gap: 10 }}>
+              {[
+                { key: 'sms_otp_enabled', title: 'Phone OTP Verification', desc: 'Required to claim Welcome & Referral rewards without abuse' },
+                { key: 'sms_order_ready', title: 'Order Ready SMS', desc: 'Texts customer when their drink is marked Ready at station' },
+                { key: 'sms_welcome_enabled', title: 'Welcome & Referral SMS', desc: 'Texts customer when a free cup or referral coupon unlocks' },
+              ].map((f) => {
+                const on = valOf(f.key) === '1';
+                return (
+                  <label key={f.key} className="card flat col" style={{ gap: 6, cursor: 'pointer', borderColor: on ? '#0284C7' : 'var(--line)' }}>
+                    <div className="row between">
+                      <strong>{f.title}</strong>
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        style={{ width: 20, minHeight: 20 }}
+                        checked={on}
+                        onChange={(e) => quickSave({ [f.key]: e.target.checked ? '1' : '0' }, `${f.title} turned ${e.target.checked ? 'ON' : 'OFF'}`)}
+                      />
+                    </div>
+                    <span className="small muted">{f.desc}</span>
+                  </label>
+                );
+              })}
+              <div className="card flat col" style={{ gap: 4 }}>
+                <div className="small muted">30-Day SMS Activity</div>
+                <strong style={{ fontSize: 18 }}>{smsStats.sent || 0} Sent · {smsStats.dry_run || 0} Sandbox</strong>
+                <span className="small muted">{smsStats.failed || 0} failed</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Recent Gateway Transactions & SMS Logs */}
+          <div className="grid g2" style={{ gap: 16, alignItems: 'start' }}>
+            <div className="panel col" style={{ gap: 10 }}>
+              <div className="row between">
+                <h3>Recent Gateway Transactions</h3>
+                <button className="btn sm ghost" onClick={() => ov.reload()}>Refresh</button>
+              </div>
+              {!ov.data?.recent_payments?.length ? (
+                <Empty>No digital gateway payments recorded yet.</Empty>
+              ) : (
+                <div className="col" style={{ gap: 8 }}>
+                  {ov.data.recent_payments.slice(0, 8).map((p: any) => (
+                    <div key={p.id} className="row between card flat" style={{ padding: '8px 12px' }}>
+                      <div>
+                        <div className="row" style={{ gap: 6 }}>
+                          <strong style={{ textTransform: 'uppercase' }}>{p.provider}</strong>
+                          <span className={`chip ${p.status === 'paid' ? 'hill' : p.status === 'failed' ? 'cherry' : 'marigold'}`}>{p.status}</span>
+                        </div>
+                        <div className="small muted">{p.provider_ref || p.id.slice(0, 8)} · {fmtDateTime(p.created_at)}</div>
+                      </div>
+                      <strong>{rs(p.amount)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="panel col" style={{ gap: 10 }}>
+              <div className="row between">
+                <h3>Recent NestSMS Dispatches</h3>
+                <button className="btn sm ghost" onClick={() => setGwTab('sms')}>Send Test SMS</button>
+              </div>
+              {!ov.data?.recent_sms?.length ? (
+                <Empty>No SMS messages logged yet.</Empty>
+              ) : (
+                <div className="col" style={{ gap: 8 }}>
+                  {ov.data.recent_sms.slice(0, 8).map((s: any) => (
+                    <div key={s.id} className="row between card flat" style={{ padding: '8px 12px' }}>
+                      <div>
+                        <div className="row" style={{ gap: 6 }}>
+                          <strong>{s.phone}</strong>
+                          <span className={`chip ${s.status === 'sent' ? 'hill' : s.status === 'failed' ? 'cherry' : ''}`}>{s.status}</span>
+                          <span className="small muted">{s.purpose}</span>
+                        </div>
+                        <div className="small muted" style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.message}</div>
+                      </div>
+                      <span className="small muted">{fmtDateTime(s.created_at)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: FONEPAY DEDICATED PANEL */}
+      {gwTab === 'fonepay' && (
+        <div className="panel col" style={{ gap: 16 }}>
+          <div className="ph">
+            <div>
+              <div className="row" style={{ gap: 8 }}>
+                <span className="chip" style={{ background: 'rgba(215,25,32,0.1)', color: '#D71920', fontWeight: 700 }}>Fonepay Nepal</span>
+                <a className="small" href="https://github.com/iamnabink/fonepay_flutter" target="_blank" rel="noopener noreferrer">fonepay_flutter Reference ↗</a>
+              </div>
+              <h3 style={{ marginTop: 4 }}>{GROUPS.fonepay.title}</h3>
+              <p className="small muted" style={{ maxWidth: 680 }}>{GROUPS.fonepay.note}</p>
+            </div>
+            <div className="row wrap" style={{ gap: 8 }}>
+              <button className="btn sm ghost" onClick={() => applyPreset('fonepay', 'sandbox')}>Load Sandbox URLs</button>
+              <button className="btn sm ghost" onClick={() => applyPreset('fonepay', 'live')}>Load Live URLs</button>
+              <button className="btn sm primary" onClick={() => test('fonepay', 'Fonepay Live QR & PG Test')}>Test Fonepay QR</button>
+            </div>
+          </div>
+
+          <div className="grid g3" style={{ gap: 10 }}>
+            <div className="card flat">
+              <div className="small muted">Web PG Start Endpoint</div>
+              <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.fonepay_start || '/api/payments/fonepay/start'}</code>
+            </div>
+            <div className="card flat row between">
+              <div>
+                <div className="small muted">Return / Callback URL (RU)</div>
+                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.fonepay_callback || '/api/payments/fonepay/callback'}</code>
+              </div>
+              <button className="btn sm ghost" onClick={() => copyText('Fonepay Callback URL', callbacks.fonepay_callback)}>Copy</button>
+            </div>
+            <div className="card flat row between">
+              <div>
+                <div className="small muted">Server Webhook URL</div>
+                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.fonepay_webhook || '/api/payments/fonepay/webhook'}</code>
+              </div>
+              <button className="btn sm ghost" onClick={() => copyText('Fonepay Webhook URL', callbacks.fonepay_webhook)}>Copy</button>
+            </div>
+          </div>
+
+          {renderGroupFields('fonepay')}
+        </div>
+      )}
+
+      {/* TAB 3: ESEWA DEDICATED PANEL */}
+      {gwTab === 'esewa' && (
+        <div className="panel col" style={{ gap: 16 }}>
+          <div className="ph">
+            <div>
+              <div className="row" style={{ gap: 8 }}>
+                <span className="chip" style={{ background: 'rgba(65,161,36,0.1)', color: '#41A124', fontWeight: 700 }}>eSewa ePay v2</span>
+                <a className="small" href="https://developer.esewa.com.np/" target="_blank" rel="noopener noreferrer">developer.esewa.com.np ↗</a>
+              </div>
+              <h3 style={{ marginTop: 4 }}>{GROUPS.esewa.title}</h3>
+              <p className="small muted" style={{ maxWidth: 680 }}>{GROUPS.esewa.note}</p>
+            </div>
+            <div className="row wrap" style={{ gap: 8 }}>
+              <button className="btn sm ghost" onClick={() => applyPreset('esewa', 'sandbox')}>Load EPAYTEST Sandbox</button>
+              <button className="btn sm ghost" onClick={() => applyPreset('esewa', 'live')}>Load Live ePay v2 URLs</button>
+              <button className="btn sm primary" onClick={() => test('esewa', 'eSewa ePay v2 Signature & QR Test')}>Test eSewa</button>
+            </div>
+          </div>
+
+          <div className="grid g3" style={{ gap: 10 }}>
+            <div className="card flat">
+              <div className="small muted">Signed ePay v2 Form Redirect</div>
+              <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.esewa_start || '/api/payments/esewa/start'}</code>
+            </div>
+            <div className="card flat row between">
+              <div>
+                <div className="small muted">Success / Failure Callback URL</div>
+                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.esewa_callback || '/api/payments/esewa/callback'}</code>
+              </div>
+              <button className="btn sm ghost" onClick={() => copyText('eSewa Callback URL', callbacks.esewa_callback)}>Copy</button>
+            </div>
+            <div className="card flat row between">
+              <div>
+                <div className="small muted">Server Webhook URL</div>
+                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.esewa_webhook || '/api/payments/esewa/webhook'}</code>
+              </div>
+              <button className="btn sm ghost" onClick={() => copyText('eSewa Webhook URL', callbacks.esewa_webhook)}>Copy</button>
+            </div>
+          </div>
+
+          {renderGroupFields('esewa')}
+        </div>
+      )}
+
+      {/* TAB 4: KHALTI DEDICATED PANEL */}
+      {gwTab === 'khalti' && (
+        <div className="panel col" style={{ gap: 16 }}>
+          <div className="ph">
+            <div>
+              <div className="row" style={{ gap: 8 }}>
+                <span className="chip" style={{ background: 'rgba(92,45,145,0.1)', color: '#5C2D91', fontWeight: 700 }}>Khalti KPG-2</span>
+                <a className="small" href="https://docs.khalti.com/" target="_blank" rel="noopener noreferrer">docs.khalti.com ↗</a>
+              </div>
+              <h3 style={{ marginTop: 4 }}>{GROUPS.khalti.title}</h3>
+              <p className="small muted" style={{ maxWidth: 680 }}>{GROUPS.khalti.note}</p>
+            </div>
+            <div className="row wrap" style={{ gap: 8 }}>
+              <button className="btn sm ghost" onClick={() => applyPreset('khalti', 'sandbox')}>Load Sandbox (dev.khalti.com)</button>
+              <button className="btn sm ghost" onClick={() => applyPreset('khalti', 'live')}>Load Live (khalti.com)</button>
+              <button className="btn sm primary" onClick={() => test('khalti', 'Khalti KPG-2 Initiate & QR Test')}>Test Khalti</button>
+            </div>
+          </div>
+
+          <div className="grid g3" style={{ gap: 10 }}>
+            <div className="card flat">
+              <div className="small muted">KPG-2 Initiate Redirect</div>
+              <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.khalti_start || '/api/payments/khalti/start'}</code>
+            </div>
+            <div className="card flat row between">
+              <div>
+                <div className="small muted">Return / Callback URL (return_url)</div>
+                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.khalti_callback || '/api/payments/khalti/callback'}</code>
+              </div>
+              <button className="btn sm ghost" onClick={() => copyText('Khalti Callback URL', callbacks.khalti_callback)}>Copy</button>
+            </div>
+            <div className="card flat row between">
+              <div>
+                <div className="small muted">Server Webhook URL</div>
+                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.khalti_webhook || '/api/payments/khalti/webhook'}</code>
+              </div>
+              <button className="btn sm ghost" onClick={() => copyText('Khalti Webhook URL', callbacks.khalti_webhook)}>Copy</button>
+            </div>
+          </div>
+
+          {renderGroupFields('khalti')}
+        </div>
+      )}
+
+      {/* TAB 5: NESTSMS DEDICATED PANEL */}
+      {gwTab === 'sms' && (
+        <div className="panel col" style={{ gap: 16 }}>
+          <div className="ph">
+            <div>
+              <span className="chip" style={{ background: 'rgba(2,132,199,0.1)', color: '#0284C7', fontWeight: 700 }}>NestSMS Nepal</span>
+              <h3 style={{ marginTop: 4 }}>{GROUPS.sms.title}</h3>
+              <p className="small muted" style={{ maxWidth: 680 }}>{GROUPS.sms.note}</p>
+            </div>
+            <div className="row wrap" style={{ gap: 8 }}>
+              <input
+                placeholder="Test phone (e.g. 9800000000)"
+                value={testPhone}
+                onChange={(e) => setTestPhone(e.target.value)}
+                style={{ width: 210, minHeight: 38 }}
+              />
+              <button
+                className="btn sm primary"
+                disabled={busyKey === 'test_nestsms'}
+                onClick={() => test('nestsms', 'NestSMS Dispatch Test', testPhone.trim() ? { phone: testPhone.trim() } : {})}
+              >
+                Send Test SMS
+              </button>
+            </div>
+          </div>
+
+          {renderGroupFields('sms')}
+        </div>
+      )}
+
+      {/* TAB 6: GLOBAL PAYMENTS, PUSH, APP & COMPANY */}
+      {gwTab === 'other' && (
+        <div className="col" style={{ gap: 16 }}>
+          {(['payments', 'push', 'app', 'company'] as const).map((g) => (
+            <div key={g} className="panel col" style={{ gap: 14 }}>
+              <div className="ph">
+                <div>
+                  <h3>{GROUPS[g].title}</h3>
+                  <p className="small muted" style={{ maxWidth: 680 }}>{GROUPS[g].note}</p>
+                </div>
+                {g === 'push' && (
+                  <div className="row wrap">
+                    <button className="btn sm" onClick={() => test('fcm', 'Check Firebase key')}>Check Firebase key</button>
+                    <button className="btn sm" onClick={() => test('push', 'Send me a test push')}>Send test push</button>
+                    <button className="btn sm ghost" onClick={vapid}>Generate browser keys</button>
+                  </div>
+                )}
+              </div>
+              {renderGroupFields(g)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {result && (
+        <Modal title={result.title} onClose={() => setResult(null)}>
+          <div className="col" style={{ gap: 12 }}>
+            <p className={result.ok ? 'ok' : 'err'} style={{ fontSize: 16, fontWeight: 700 }}>
+              {result.ok ? '✓ Verification Passed' : '⚠ Needs Attention'}
+            </p>
+            <p>{result.message}</p>
+            {result.qr_message && (
+              <div className="card flat col" style={{ alignItems: 'center', padding: 16 }}>
+                <FonepayQr
+                  payment={{
+                    payment_id: 'test-preview',
+                    provider: result.provider || 'fonepay',
+                    mode: result.mode || 'sandbox',
+                    qr_message: result.qr_message,
+                    pay_url: result.pay_url,
+                    amount: 1,
+                  }}
+                  amount={1}
+                  onDone={() => setResult(null)}
+                />
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

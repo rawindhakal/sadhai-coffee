@@ -10,13 +10,14 @@ import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 import { productArt } from '@/lib/art';
 import { Icon } from './icons';
+import { useData } from './ui';
 
 type Line = { key: string; product: any; qty: number; option_ids: string[]; names: string[]; unit: number };
 const T: Record<string, [string, string]> = {
   touch: ['Touch to order', 'अर्डर गर्न छुनुहोस्'], who: ['Who is this order for?', 'यो अर्डर कसको नाममा?'], name: ['Your name', 'तपाईंको नाम'], phone: ['Mobile number', 'मोबाइल नम्बर'],
   consent: ['You may use my name and number to call my order and send updates.', 'मेरो अर्डर बोलाउन र जानकारी पठाउन मेरो नाम र नम्बर प्रयोग गर्न सक्नुहुन्छ।'],
   next: ['Continue', 'अगाडि'], review: ['Review order', 'अर्डर हेर्नुहोस्'], pay: ['How will you pay?', 'भुक्तानी कसरी गर्ने?'], counter: ['Pay at the counter', 'काउन्टरमा तिर्ने'],
-  passopt: ['Use my 10-cup pass', 'मेरो १०-कप पास प्रयोग गर्ने'], scan: ['Pay online with a Fonepay QR', 'Fonepay QR बाट अहिले तिर्ने'], place: ['Place order', 'अर्डर गर्नुहोस्'],
+  passopt: ['Use my 10-cup pass', 'मेरो १०-कप पास प्रयोग गर्ने'], scan: ['Pay online with QR', 'QR बाट अहिले तिर्ने'], place: ['Place order', 'अर्डर गर्नुहोस्'],
   done: ['Your number', 'तपाईंको नम्बर'], again: ['New order', 'नयाँ अर्डर'], total: ['Total', 'जम्मा'], back: ['Back', 'पछाडि'], cart: ['View order', 'अर्डर हेर्नुहोस्'],
 };
 
@@ -443,6 +444,9 @@ function KItem({ p, onClose, onAdd }: { p: any; onClose: () => void; onAdd: (l: 
 }
 
 function Pay({ t, total, busy, error, guest, onBack, onPlace }: any) {
+  const cfg = useData<any>('/config');
+  const methods: string[] = cfg.data?.payment_methods || ['cash', 'fonepay', 'esewa', 'khalti'];
+  const onlineMethods = ['fonepay', 'esewa', 'khalti'].filter((m) => methods.includes(m));
   const [mode, setMode] = useState<'' | 'pass' | 'online'>('');
   const [code, setCode] = useState('');
   const [check, setCheck] = useState<any>(null);
@@ -455,13 +459,17 @@ function Pay({ t, total, busy, error, guest, onBack, onPlace }: any) {
     <div className="k-card wide">
       <h2>{t('pay')}</h2>
       <div className="col" style={{ marginTop: 16 }}>
-        <button className="k-opt" disabled={busy} onClick={() => onPlace('counter')}><Icon name="coin" size={30} /><span><strong>{t('counter')}</strong><small>Pay {rs(total)} when you pick up your coffee</small></span></button>
-        <button className={`k-opt ${mode === 'online' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'online' ? '' : 'online')}><Icon name="cart" size={30} /><span><strong>{t('scan')}</strong><small>Pay now with Fonepay, eSewa, or Khalti QR</small></span></button>
-        {mode === 'online' && (
+        {methods.includes('cash') && (
+          <button className="k-opt" disabled={busy} onClick={() => onPlace('counter')}><Icon name="coin" size={30} /><span><strong>{t('counter')}</strong><small>Pay {rs(total)} when you pick up your coffee</small></span></button>
+        )}
+        {onlineMethods.length > 0 && (
+          <button className={`k-opt ${mode === 'online' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'online' ? '' : 'online')}><Icon name="cart" size={30} /><span><strong>{t('scan')}</strong><small>Pay now with {[methods.includes('fonepay') && 'Fonepay', methods.includes('esewa') && 'eSewa', methods.includes('khalti') && 'Khalti'].filter(Boolean).join(', ')}</small></span></button>
+        )}
+        {mode === 'online' && onlineMethods.length > 0 && (
           <div className="row wrap" style={{ gap: 12 }}>
-            <button className="btn primary lg grow" disabled={busy} onClick={() => onPlace('online', undefined, 'fonepay')}>Fonepay QR</button>
-            <button className="btn lg grow" style={{ background: '#41A124', color: '#fff', borderColor: '#41A124' }} disabled={busy} onClick={() => onPlace('online', undefined, 'esewa')}>eSewa QR</button>
-            <button className="btn lg grow" style={{ background: '#5C2D91', color: '#fff', borderColor: '#5C2D91' }} disabled={busy} onClick={() => onPlace('online', undefined, 'khalti')}>Khalti QR</button>
+            {onlineMethods.includes('fonepay') && <button className="btn primary lg grow" disabled={busy} onClick={() => onPlace('online', undefined, 'fonepay')}>Fonepay</button>}
+            {onlineMethods.includes('esewa') && <button className="btn lg grow" style={{ background: '#41A124', color: '#fff', borderColor: '#41A124' }} disabled={busy} onClick={() => onPlace('online', undefined, 'esewa')}>eSewa</button>}
+            {onlineMethods.includes('khalti') && <button className="btn lg grow" style={{ background: '#5C2D91', color: '#fff', borderColor: '#5C2D91' }} disabled={busy} onClick={() => onPlace('online', undefined, 'khalti')}>Khalti</button>}
           </div>
         )}
         <button className={`k-opt ${mode === 'pass' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'pass' ? '' : 'pass')}><Icon name="ticket" size={30} /><span><strong>{t('passopt')}</strong><small>Enter your pass code (SP-XXXX-XXXX)</small></span></button>

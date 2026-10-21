@@ -19,8 +19,18 @@ export default function Cart() {
   const router = useRouter();
   const coupons = useData<any[]>(user ? '/coupons' : null, [user?.id]);
   const passes = useData<any[]>(user ? '/passes' : null, [user?.id]);
+  const cfg = useData<any>('/config');
   const [offer, setOffer] = useState<{ type: 'none' | 'coupon' | 'pass' | 'promo'; id?: string }>({ type: 'none' });
   const [method, setMethod] = useState('cash');
+  const enabledMethods: string[] = useMemo(() => {
+    const list = (cfg.data?.payment_methods || ['cash', 'fonepay', 'esewa', 'khalti']).filter((m: string) => ['cash', 'fonepay', 'esewa', 'khalti'].includes(m));
+    return list.length ? list : ['cash'];
+  }, [cfg.data?.payment_methods]);
+  useEffect(() => {
+    if (enabledMethods.length && !enabledMethods.includes(method)) {
+      setMethod(enabledMethods[0]);
+    }
+  }, [enabledMethods.join(','), method]);
   const [note, setNote] = useState('');
   const [quote, setQuote] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,9 +139,9 @@ export default function Cart() {
             <>
               <h4 style={{ margin: '20px 0 8px' }}>{t('pay_with')}</h4>
               <div className="row wrap">
-                {['cash', 'fonepay', 'esewa', 'khalti'].map((m) => (
+                {enabledMethods.map((m) => (
                   <button key={m} className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>
-                    {PAY_LABEL[m]}
+                    {PAY_LABEL[m] || m}
                   </button>
                 ))}
               </div>

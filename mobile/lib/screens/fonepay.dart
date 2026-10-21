@@ -6,14 +6,28 @@ import '../api.dart';
 import '../theme.dart';
 
 const _providerMeta = {
-  'fonepay': ('Fonepay', 'Open your mobile banking or wallet app, choose Scan, and scan this Fonepay QR. This closes by itself when you have paid.'),
-  'esewa': ('eSewa', 'Scan with the eSewa app or tap Open eSewa to complete payment. This closes by itself when you have paid.'),
-  'khalti': ('Khalti', 'Scan with the Khalti app or tap Open Khalti to complete payment. This closes by itself when you have paid.'),
+  'fonepay': (
+    'Fonepay',
+    'Open Fonepay Web Checkout',
+    Color(0xFFD71920),
+    'Scan this Fonepay Dynamic QR with any mobile banking app, eSewa, or Khalti — or tap Open Fonepay Web Checkout below.',
+  ),
+  'esewa': (
+    'eSewa',
+    'Pay with eSewa Wallet',
+    Color(0xFF41A124),
+    'Tap Pay with eSewa Wallet to complete ePay v2 checkout directly, or scan the QR code below with the eSewa app.',
+  ),
+  'khalti': (
+    'Khalti',
+    'Pay with Khalti Wallet',
+    Color(0xFF5C2D91),
+    'Tap Pay with Khalti Wallet to complete KPG-2 checkout directly, or scan the QR code below with the Khalti app.',
+  ),
 };
 
-/// Dynamic QR payment sheet for Fonepay, eSewa, and Khalti.
-/// Returns 'paid', 'failed' or 'later' (the customer closed it and will pay from their orders).
-/// In test mode two buttons stand in for the banking/wallet app so the whole flow can be tried without real money.
+/// Payment sheet for Fonepay, eSewa (ePay v2), and Khalti (KPG-2).
+/// Supports both direct Wallet/Web Checkout launch and Dynamic QR scanning.
 Future<String> showFonepay(BuildContext context, Map pay, num amount) async {
   final r = await showModalBottomSheet<String>(
     context: context, isScrollControlled: true, isDismissible: false, backgroundColor: Brand.surfaceRaised,
@@ -34,8 +48,8 @@ class _FonepaySheetState extends State<_FonepaySheet> {
   Timer? _t;
   bool _busy = false;
   String get _id => widget.pay['payment_id'] as String;
-  String get _provider => (widget.pay['provider'] as String?) ?? 'fonepay';
-  (String, String) get _meta => _providerMeta[_provider] ?? _providerMeta['fonepay']!;
+  String get _provider => ((widget.pay['provider'] as String?) ?? 'fonepay').toLowerCase();
+  (String, String, Color, String) get _meta => _providerMeta[_provider] ?? _providerMeta['fonepay']!;
 
   @override
   void initState() {
@@ -60,27 +74,50 @@ class _FonepaySheetState extends State<_FonepaySheet> {
 
   @override
   Widget build(BuildContext context) {
-    final qrData = (widget.pay['qr_message'] as String?) ?? (widget.pay['payment_url'] as String?) ?? _id;
-    final payUrl = widget.pay['payment_url'] as String?;
+    final qrData = (widget.pay['qr_message'] as String?) ?? (widget.pay['pay_url'] as String?) ?? (widget.pay['payment_url'] as String?) ?? _id;
+    final payUrl = (widget.pay['pay_url'] as String?) ?? (widget.pay['payment_url'] as String?);
     return SafeArea(child: Padding(padding: const EdgeInsets.all(20), child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+        decoration: BoxDecoration(color: _meta.$3, borderRadius: BorderRadius.circular(999)),
+        child: Text(_meta.$1, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+      ),
+      const SizedBox(height: 8),
       Text('Pay with ${_meta.$1}', style: display(24)),
       const SizedBox(height: 12),
-      Container(color: Colors.white, padding: const EdgeInsets.all(10), child: QrImageView(data: qrData, size: 220, semanticsLabel: '${_meta.$1} QR code to pay')),
+      if (payUrl != null && payUrl.startsWith('http')) ...[
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: _meta.$3,
+              foregroundColor: Colors.white,
+              minimumSize: const Size.fromHeight(50),
+            ),
+            onPressed: () => launchUrl(Uri.parse(payUrl), mode: LaunchMode.externalApplication),
+            icon: const Icon(Icons.open_in_new, size: 18),
+            label: Text('${_meta.$2} (${rs(widget.amount)})', style: const TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ),
+        const SizedBox(height: 12),
+      ],
+      Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _meta.$3.withValues(alpha: 0.25), width: 2),
+        ),
+        padding: const EdgeInsets.all(10),
+        child: QrImageView(data: qrData, size: 210, semanticsLabel: '${_meta.$1} QR code to pay'),
+      ),
       const SizedBox(height: 8),
       Text(rs(widget.amount), style: display(26)),
       const SizedBox(height: 4),
-      Text(_meta.$2, textAlign: TextAlign.center, style: const TextStyle(color: Brand.inkMuted)),
-      if (payUrl != null && payUrl.startsWith('http')) ...[
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: () => launchUrl(Uri.parse(payUrl), mode: LaunchMode.externalApplication),
-          icon: const Icon(Icons.open_in_new, size: 18),
-          label: Text('Open ${_meta.$1}'),
-        ),
-      ],
+      Text(_meta.$4, textAlign: TextAlign.center, style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
       if (widget.pay['mode'] == 'sandbox') ...[
         const SizedBox(height: 12),
-        const Text('Test mode. No real money moves.', style: TextStyle(color: Brand.inkMuted, fontSize: 13)),
+        const Text('Sandbox test mode. No real money moves.', style: TextStyle(color: Brand.inkMuted, fontSize: 13)),
+        const SizedBox(height: 6),
         Row(children: [
           Expanded(child: FilledButton(onPressed: _busy ? null : () => _test('paid'), child: const Text('Pretend I paid'))), const SizedBox(width: 8),
           Expanded(child: OutlinedButton(onPressed: _busy ? null : () => _test('fail'), child: const Text('Pretend it failed'))),

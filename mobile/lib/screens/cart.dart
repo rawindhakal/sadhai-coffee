@@ -26,6 +26,7 @@ class _CartScreenState extends State<CartScreen> {
   String? _offerId;
   String? _lastPromo;
   String _method = 'cash';
+  List<String> _enabledMethods = ['cash', 'fonepay', 'esewa', 'khalti'];
   final _note = TextEditingController();
   String? _error;
   bool _busy = false;
@@ -62,8 +63,20 @@ class _CartScreenState extends State<CartScreen> {
     try {
       final c = await Api.instance.get('/coupons') as List;
       final p = await Api.instance.get('/passes') as List;
+      List<String>? methods;
+      try {
+        final cfg = await Api.instance.request('GET', '/config', auth: false) as Map;
+        if (cfg['payment_methods'] is List) {
+          final list = (cfg['payment_methods'] as List).map((e) => e.toString()).where((m) => ['cash', 'fonepay', 'esewa', 'khalti'].contains(m)).toList();
+          if (list.isNotEmpty) methods = list;
+        }
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
+        if (methods != null) {
+          _enabledMethods = methods;
+          if (!_enabledMethods.contains(_method)) _method = _enabledMethods.first;
+        }
         _coupons = c.where((x) => x['status'] == 'active').toList();
         final live = p.cast<Json>().where((x) => x['status'] == 'active' && (x['remaining'] as int) > 0).toList();
         _pass = live.isEmpty ? null : {'remaining': live.first['total_remaining'], 'count': live.length};
@@ -221,7 +234,7 @@ class _CartScreenState extends State<CartScreen> {
         const SizedBox(height: 16),
         Text('Pay with', style: display(18)),
         const SizedBox(height: 8),
-        Wrap(spacing: 8, runSpacing: 4, children: [for (final m in ['cash', 'fonepay', 'esewa', 'khalti']) ChoiceChip(label: Text(payLabel[m]!), selected: _method == m, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _method == m ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { setState(() => _method = m); _requote(cart); })]),
+        Wrap(spacing: 8, runSpacing: 4, children: [for (final m in _enabledMethods) ChoiceChip(label: Text(payLabel[m] ?? m), selected: _method == m, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _method == m ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { setState(() => _method = m); _requote(cart); })]),
       ],
       const SizedBox(height: 16),
       TextField(controller: _note, maxLength: 200, decoration: const InputDecoration(labelText: 'Note for the barista (optional)'), onSubmitted: (_) => _requote(cart)),

@@ -11,7 +11,7 @@ import 'home.dart';
 import 'fonepay.dart';
 import 'offers.dart';
 
-const payLabel = {'cash': 'Cash at counter', 'fonepay': 'Fonepay QR', 'esewa': 'eSewa QR', 'khalti': 'Khalti QR', 'pass': '10-cup pass'};
+const payLabel = {'cash': 'Cash at counter', 'fonepay': 'Fonepay', 'esewa': 'eSewa', 'khalti': 'Khalti', 'pass': '10-cup pass'};
 
 void toast(BuildContext c, String m, {bool bad = false}) => ScaffoldMessenger.of(c)
   ..hideCurrentSnackBar()

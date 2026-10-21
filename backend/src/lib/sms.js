@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { query } from './db.js';
-import { rt } from './runtime.js';
+import { rt, rtBool } from './runtime.js';
 import { bad, normalizePhone } from './http.js';
 
 export const NESTSMS_LIVE_FIELDS = ['nestsms_api_key', 'nestsms_sender_id', 'nestsms_api_url'];
@@ -10,10 +10,20 @@ export function nestsmsMissing() {
 }
 
 export function smsStatus() {
-  const mode = rt('sms_mode') || 'auto';
+  const enabled = rtBool('sms_enabled');
+  const rawMode = rt('sms_mode') || 'auto';
+  const mode = !enabled ? 'off' : rawMode;
   const configured = nestsmsMissing().length === 0;
   const dry_run = mode === 'sandbox' || (mode === 'auto' && !configured);
-  return { mode, configured, dry_run };
+  return {
+    enabled,
+    mode,
+    configured,
+    dry_run,
+    otp_enabled: enabled && mode !== 'off' && rtBool('sms_otp_enabled'),
+    order_ready_enabled: enabled && mode !== 'off' && rtBool('sms_order_ready'),
+    welcome_enabled: enabled && mode !== 'off' && rtBool('sms_welcome_enabled'),
+  };
 }
 
 const hashOtp = (phone, code) =>
@@ -21,12 +31,29 @@ const hashOtp = (phone, code) =>
 
 /**
  * Sends an SMS through NestSMS (nestsms.com).
- * Supports both Bearer token and payload token/api_key formats used by NestSMS Nepal endpoints.
+ * Accepts either (rawPhone, message, opts) or ({ phone, message, kind, purpose, userId, force }).
  */
-export async function sendSms(rawPhone, message, { kind = 'transactional', userId = null } = {}) {
+export async function sendSms(arg1, arg2, arg3 = {}) {
+  let rawPhone, message, kind, userId, force;
+  if (arg1 && typeof arg1 === 'object') {
+    rawPhone = arg1.phone || arg1.to;
+    message = arg1.message || arg1.text;
+    kind = arg1.kind || arg1.purpose || 'transactional';
+    userId = arg1.userId || null;
+    force = !!arg1.force;
+  } else {
+    rawPhone = arg1;
+    message = arg2;
+    kind = arg3.kind || arg3.purpose || 'transactional';
+    userId = arg3.userId || null;
+    force = !!arg3.force;
+  }
+
   const phone = normalizePhone(rawPhone);
   const st = smsStatus();
-  if (st.mode === 'off') return { ok: false, skipped: true, reason: 'SMS is turned off' };
+  if (!force && (!st.enabled || st.mode === 'off')) {
+    return { ok: false, sent: false, dry_run: false, skipped: true, error: 'SMS gateway is turned off' };
+  }
 
   const text = String(message || '').trim().slice(0, 480);
   if (!text) throw bad('SMS message cannot be empty');
@@ -37,7 +64,7 @@ export async function sendSms(rawPhone, message, { kind = 'transactional', userI
        VALUES ($1, $2, $3, $4, 'sandbox', $5)`,
       [userId, phone, kind, text, JSON.stringify({ sandbox: true, provider: 'nestsms' })],
     );
-    return { ok: true, sandbox: true, phone };
+    return { ok: true, sent: false, dry_run: true, sandbox: true, phone };
   }
 
   const key = rt('nestsms_api_key');
@@ -86,13 +113,17 @@ export async function sendSms(rawPhone, message, { kind = 'transactional', userI
 
   if (!ok) {
     const msg = respJson?.message || respJson?.error || 'NestSMS could not deliver the SMS';
-    throw bad(String(msg));
+    return { ok: false, sent: false, dry_run: false, sandbox: false, phone, error: String(msg), response: respJson };
   }
-  return { ok: true, sandbox: false, phone, response: respJson };
+  return { ok: true, sent: true, dry_run: false, sandbox: false, phone, response: respJson };
 }
 
 /** Sends a 6-digit OTP via NestSMS with strict rate limiting (max 4 per 15 mins). */
 export async function sendPhoneOtp(rawPhone, userId = null) {
+  const st = smsStatus();
+  if (!st.enabled || st.mode === 'off' || !st.otp_enabled) {
+    throw bad('SMS phone verification is currently turned off by the administrator.');
+  }
   const phone = normalizePhone(rawPhone);
   const { rows } = await query('SELECT * FROM phone_verifications WHERE phone=$1', [phone]);
   const cur = rows[0];
@@ -129,6 +160,7 @@ export async function sendPhoneOtp(rawPhone, userId = null) {
     `Your Sadhai Coffee verification code is ${code}. Valid for 10 minutes.`,
     { kind: 'otp', userId },
   );
+  if (!res.ok) throw bad(res.error || 'Could not send verification SMS');
 
   return {
     ok: true,

@@ -51,6 +51,7 @@ class _PassPanelState extends State<PassPanel> {
   List<Map> _passes = [];
   bool _loaded = false;
   Map<String, dynamic>? _pass;
+  List<String> _paymentMethods = ['fonepay', 'esewa', 'khalti'];
   num? get _price => _pass?['price'] as num?;
   int _lastEpoch = 0;
   int _activePassIdx = 0;
@@ -61,7 +62,14 @@ class _PassPanelState extends State<PassPanel> {
   Future<void> _load() async {
     try {
       final p = await Api.instance.get('/passes') as List;
-      try { final c = await Api.instance.request('GET', '/config', auth: false); _pass = Map<String, dynamic>.from(c['pass'] as Map); } catch (_) {}
+      try {
+        final c = await Api.instance.request('GET', '/config', auth: false);
+        _pass = Map<String, dynamic>.from(c['pass'] as Map);
+        if (c['payment_methods'] is List) {
+          final m = (c['payment_methods'] as List).map((e) => e.toString()).where((x) => ['fonepay', 'esewa', 'khalti'].contains(x)).toList();
+          if (m.isNotEmpty) _paymentMethods = m;
+        }
+      } catch (_) {}
       if (mounted) setState(() { _passes = p.cast<Map>(); _loaded = true; });
     } catch (_) {}
   }
@@ -168,9 +176,12 @@ class _PassPanelState extends State<PassPanel> {
     final m = await showModalBottomSheet<String>(context: context, backgroundColor: Brand.surfaceRaised, builder: (c) => SafeArea(child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('Pay ${rs(_price ?? 900)} with', style: display(22)),
       const SizedBox(height: 12),
-      Padding(padding: const EdgeInsets.only(bottom: 8), child: FilledButton(onPressed: () => Navigator.pop(c, 'fonepay'), child: const Center(child: Text('Fonepay QR')))),
-      Padding(padding: const EdgeInsets.only(bottom: 8), child: OutlinedButton(onPressed: () => Navigator.pop(c, 'esewa'), child: const Center(child: Text('eSewa QR')))),
-      Padding(padding: const EdgeInsets.only(bottom: 8), child: OutlinedButton(onPressed: () => Navigator.pop(c, 'khalti'), child: const Center(child: Text('Khalti QR')))),
+      if (_paymentMethods.contains('fonepay'))
+        Padding(padding: const EdgeInsets.only(bottom: 8), child: FilledButton(onPressed: () => Navigator.pop(c, 'fonepay'), child: const Center(child: Text('Pay with Fonepay')))),
+      if (_paymentMethods.contains('esewa'))
+        Padding(padding: const EdgeInsets.only(bottom: 8), child: FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFF41A124), foregroundColor: Colors.white), onPressed: () => Navigator.pop(c, 'esewa'), child: const Center(child: Text('Pay with eSewa')))),
+      if (_paymentMethods.contains('khalti'))
+        Padding(padding: const EdgeInsets.only(bottom: 8), child: FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFF5C2D91), foregroundColor: Colors.white), onPressed: () => Navigator.pop(c, 'khalti'), child: const Center(child: Text('Pay with Khalti')))),
       const Text('Prefer cash? Buy it at any station counter.', style: TextStyle(color: Brand.inkMuted)),
     ]))));
     if (m == null || !mounted) return;
@@ -236,9 +247,25 @@ class AccountScreen extends StatefulWidget {
 }
 
 class _AccountScreenState extends State<AccountScreen> {
-  bool _otpSent = false, _otpBusy = false;
+  bool _otpSent = false, _otpBusy = false, _otpAllowed = true;
   final _otpCtl = TextEditingController();
   String? _devOtp;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSmsCfg();
+  }
+
+  Future<void> _checkSmsCfg() async {
+    try {
+      final cfg = await Api.instance.request('GET', '/config', auth: false) as Map;
+      final sms = cfg['sms'] as Map?;
+      if (sms != null && (sms['enabled'] == false || sms['otp_enabled'] == false)) {
+        if (mounted) setState(() => _otpAllowed = false);
+      }
+    } catch (_) {}
+  }
 
   @override
   void dispose() { _otpCtl.dispose(); super.dispose(); }
@@ -283,7 +310,7 @@ class _AccountScreenState extends State<AccountScreen> {
         const SizedBox(width: 8),
         Chip2(verified ? 'Verified' : 'Unverified', bg: verified ? Brand.hill : Brand.surfaceSunk, fg: verified ? Brand.onCherry : Brand.ink),
       ]),
-      if (!verified) Padding(
+      if (!verified && _otpAllowed) Padding(
         padding: const EdgeInsets.only(top: 12),
         child: Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('Verify your phone number', style: TextStyle(fontWeight: FontWeight.w700)),

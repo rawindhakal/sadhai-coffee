@@ -8,7 +8,7 @@ import { LangToggle } from '@/lib/i18n';
 import { rs } from '@/lib/api';
 import { Icon } from './icons';
 
-export const PAY_LABEL: Record<string, string> = { cash: 'Cash at counter', fonepay: 'Fonepay QR', esewa: 'eSewa QR', khalti: 'Khalti QR', pass: '10-cup pass' };
+export const PAY_LABEL: Record<string, string> = { cash: 'Cash at counter', fonepay: 'Fonepay', esewa: 'eSewa', khalti: 'Khalti', pass: '10-cup pass' };
 export { LangToggle };
 
 const TABS = [

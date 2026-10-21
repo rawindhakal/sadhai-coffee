@@ -8,32 +8,50 @@ import { config } from './config.js';
  * Secrets are stored encrypted (AES-256-GCM, key from SETTINGS_ENCRYPTION_KEY or JWT_SECRET) and never sent back to the browser.
  */
 export const DEFS = {
-  // payments
-  payment_mode: { group: 'payments', label: 'Payment mode', type: 'enum', options: ['sandbox', 'live'], env: 'PAYMENT_MODE', def: 'sandbox', help: 'Sandbox shows a test QR that the apps can mark as paid. Live requests a dynamic QR / payment from Fonepay, eSewa or Khalti and trusts only the provider.' },
-  fonepay_merchant_code: { group: 'payments', label: 'Fonepay merchant code', env: 'FONEPAY_MERCHANT_CODE', def: '', help: 'Given by Fonepay when your merchant account is approved.' },
-  fonepay_username: { group: 'payments', label: 'Fonepay username', env: 'FONEPAY_USERNAME', def: '' },
-  fonepay_password: { group: 'payments', label: 'Fonepay password', secret: true, env: 'FONEPAY_PASSWORD', def: '' },
-  fonepay_secret_key: { group: 'payments', label: 'Fonepay shared secret key', secret: true, env: 'FONEPAY_SECRET_KEY', def: '', help: 'Signs every request to Fonepay (HMAC-SHA512).' },
-  fonepay_qr_url: { group: 'payments', label: 'Fonepay QR address', type: 'url', env: 'FONEPAY_QR_URL', def: 'https://dev-merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrDownload', help: 'Use https://merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrDownload when live.' },
-  fonepay_status_url: { group: 'payments', label: 'Fonepay status address', type: 'url', env: 'FONEPAY_STATUS_URL', def: 'https://dev-merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrGetStatus' },
-  fonepay_webhook_secret: { group: 'payments', label: 'Fonepay notification secret', secret: true, env: 'FONEPAY_WEBHOOK_SECRET', def: '', help: 'Signs the payment notifications Fonepay sends us.' },
-  esewa_merchant_code: { group: 'payments', label: 'eSewa merchant / product code', env: 'ESEWA_PRODUCT_CODE', def: 'EPAYTEST', help: 'From your eSewa merchant account (EPAYTEST in test).' },
-  esewa_secret_key: { group: 'payments', label: 'eSewa secret key', secret: true, env: 'ESEWA_SECRET', def: '8gBm/:&EnhH.1/q', help: 'Signs eSewa dynamic QR and ePay v2 requests.' },
-  esewa_username: { group: 'payments', label: 'eSewa API username (optional)', env: 'ESEWA_USERNAME', def: '', help: 'Only required if using eSewa direct dynamic QR merchant endpoint.' },
-  esewa_password: { group: 'payments', label: 'eSewa API password (optional)', secret: true, env: 'ESEWA_PASSWORD', def: '' },
-  esewa_qr_url: { group: 'payments', label: 'eSewa QR / payment address', type: 'url', env: 'ESEWA_FORM_URL', def: 'https://rc-epay.esewa.com.np/api/epay/main/v2/form', help: 'Live: https://epay.esewa.com.np/api/epay/main/v2/form or your eSewa dynamic QR endpoint.' },
-  esewa_status_url: { group: 'payments', label: 'eSewa status address', type: 'url', env: 'ESEWA_STATUS_URL', def: 'https://rc.esewa.com.np/api/epay/transaction/status/', help: 'Live: https://epay.esewa.com.np/api/epay/transaction/status/' },
-  esewa_webhook_secret: { group: 'payments', label: 'eSewa webhook secret (optional)', secret: true, env: 'ESEWA_WEBHOOK_SECRET', def: '' },
-  khalti_secret_key: { group: 'payments', label: 'Khalti secret key', secret: true, env: 'KHALTI_SECRET', def: '', help: 'Live or sandbox secret key from the Khalti merchant dashboard.' },
-  khalti_merchant_code: { group: 'payments', label: 'Khalti merchant / public key (optional)', env: 'KHALTI_MERCHANT_CODE', def: '' },
-  khalti_base_url: { group: 'payments', label: 'Khalti API address', type: 'url', env: 'KHALTI_BASE_URL', def: 'https://dev.khalti.com/api/v2', help: 'Use https://khalti.com/api/v2 when live.' },
-  khalti_webhook_secret: { group: 'payments', label: 'Khalti webhook secret (optional)', secret: true, env: 'KHALTI_WEBHOOK_SECRET', def: '' },
+  // master payment switches
+  payment_mode: { group: 'payments', label: 'Default payment mode', type: 'enum', options: ['sandbox', 'live'], env: 'PAYMENT_MODE', def: 'sandbox', help: 'Default environment for payment gateways unless overridden on a specific gateway.' },
+  cash_enabled: { group: 'payments', label: 'Accept Cash at counter', type: 'bool', env: 'CASH_ENABLED', def: '1', help: 'Allow customers to pay with cash when picking up at the counter.' },
+
+  // fonepay
+  fonepay_enabled: { group: 'fonepay', label: 'Enable Fonepay gateway', type: 'bool', env: 'FONEPAY_ENABLED', def: '1', help: 'Show Fonepay at checkout across Web, Android, Kiosk, and Station POS.' },
+  fonepay_mode: { group: 'fonepay', label: 'Fonepay environment', type: 'enum', options: ['sandbox', 'live'], env: 'FONEPAY_MODE', def: 'sandbox', help: 'Sandbox shows a test QR / dev checkout. Live connects to Fonepay production servers.' },
+  fonepay_merchant_code: { group: 'fonepay', label: 'Fonepay merchant code (PID)', env: 'FONEPAY_MERCHANT_CODE', def: '', help: 'Merchant code / PID issued by Fonepay.' },
+  fonepay_username: { group: 'fonepay', label: 'Fonepay API username', env: 'FONEPAY_USERNAME', def: '', help: 'Used for Fonepay Dynamic QR API.' },
+  fonepay_password: { group: 'fonepay', label: 'Fonepay API password', secret: true, env: 'FONEPAY_PASSWORD', def: '' },
+  fonepay_secret_key: { group: 'fonepay', label: 'Fonepay shared secret key', secret: true, env: 'FONEPAY_SECRET_KEY', def: '', help: 'Signs every request to Fonepay (HMAC-SHA512).' },
+  fonepay_qr_url: { group: 'fonepay', label: 'Fonepay Dynamic QR API URL', type: 'url', env: 'FONEPAY_QR_URL', def: 'https://dev-merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrDownload', help: 'Live: https://merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrDownload' },
+  fonepay_status_url: { group: 'fonepay', label: 'Fonepay QR Status API URL', type: 'url', env: 'FONEPAY_STATUS_URL', def: 'https://dev-merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrGetStatus', help: 'Live: https://merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrGetStatus' },
+  fonepay_pg_url: { group: 'fonepay', label: 'Fonepay Web / Flutter PG URL', type: 'url', env: 'FONEPAY_PG_URL', def: 'https://dev-clientapi.fonepay.com/api/merchantRequest', help: 'Live: https://clientapi.fonepay.com/api/merchantRequest (used by fonepay_flutter and web redirect).' },
+  fonepay_webhook_secret: { group: 'fonepay', label: 'Fonepay webhook secret (optional)', secret: true, env: 'FONEPAY_WEBHOOK_SECRET', def: '', help: 'Signs webhook notifications Fonepay sends us.' },
+
+  // esewa (ePay v2 - developer.esewa.com.np)
+  esewa_enabled: { group: 'esewa', label: 'Enable eSewa gateway', type: 'bool', env: 'ESEWA_ENABLED', def: '1', help: 'Show eSewa at checkout across Web, Android, Kiosk, and Station POS.' },
+  esewa_mode: { group: 'esewa', label: 'eSewa environment', type: 'enum', options: ['sandbox', 'live'], env: 'ESEWA_MODE', def: 'sandbox', help: 'Sandbox uses EPAYTEST / rc-epay.esewa.com.np. Live uses epay.esewa.com.np.' },
+  esewa_merchant_code: { group: 'esewa', label: 'eSewa product / merchant code (SCD)', env: 'ESEWA_PRODUCT_CODE', def: 'EPAYTEST', help: 'From your eSewa merchant account (use EPAYTEST for sandbox testing).' },
+  esewa_secret_key: { group: 'esewa', label: 'eSewa HMAC-SHA256 secret key', secret: true, env: 'ESEWA_SECRET', def: '8gBm/:&EnhH.1/q', help: 'Signs eSewa ePay v2 form requests (sandbox key: 8gBm/:&EnhH.1/q).' },
+  esewa_username: { group: 'esewa', label: 'eSewa QR API username (optional)', env: 'ESEWA_USERNAME', def: '', help: 'Optional: only required if using eSewa direct Dynamic QR merchant endpoint.' },
+  esewa_password: { group: 'esewa', label: 'eSewa QR API password (optional)', secret: true, env: 'ESEWA_PASSWORD', def: '' },
+  esewa_qr_url: { group: 'esewa', label: 'eSewa ePay v2 Form URL', type: 'url', env: 'ESEWA_FORM_URL', def: 'https://rc-epay.esewa.com.np/api/epay/main/v2/form', help: 'Sandbox: https://rc-epay.esewa.com.np/api/epay/main/v2/form · Live: https://epay.esewa.com.np/api/epay/main/v2/form' },
+  esewa_status_url: { group: 'esewa', label: 'eSewa Transaction Status URL', type: 'url', env: 'ESEWA_STATUS_URL', def: 'https://rc.esewa.com.np/api/epay/transaction/status/', help: 'Sandbox: https://rc.esewa.com.np/api/epay/transaction/status/ · Live: https://epay.esewa.com.np/api/epay/transaction/status/' },
+  esewa_webhook_secret: { group: 'esewa', label: 'eSewa webhook secret (optional)', secret: true, env: 'ESEWA_WEBHOOK_SECRET', def: '' },
+
+  // khalti (KPG-2 ePayment - docs.khalti.com)
+  khalti_enabled: { group: 'khalti', label: 'Enable Khalti gateway', type: 'bool', env: 'KHALTI_ENABLED', def: '1', help: 'Show Khalti at checkout across Web, Android, Kiosk, and Station POS.' },
+  khalti_mode: { group: 'khalti', label: 'Khalti environment', type: 'enum', options: ['sandbox', 'live'], env: 'KHALTI_MODE', def: 'sandbox', help: 'Sandbox uses dev.khalti.com/api/v2. Live uses khalti.com/api/v2.' },
+  khalti_secret_key: { group: 'khalti', label: 'Khalti live/test secret key', secret: true, env: 'KHALTI_SECRET', def: '', help: 'Sent as Authorization: Key <secret_key> to Khalti KPG-2 /epayment/initiate/ and /epayment/lookup/.' },
+  khalti_merchant_code: { group: 'khalti', label: 'Khalti public key / merchant ID (optional)', env: 'KHALTI_MERCHANT_CODE', def: '' },
+  khalti_base_url: { group: 'khalti', label: 'Khalti KPG-2 API base URL', type: 'url', env: 'KHALTI_BASE_URL', def: 'https://dev.khalti.com/api/v2', help: 'Sandbox: https://dev.khalti.com/api/v2 · Live: https://khalti.com/api/v2' },
+  khalti_webhook_secret: { group: 'khalti', label: 'Khalti webhook secret (optional)', secret: true, env: 'KHALTI_WEBHOOK_SECRET', def: '' },
+
   // sms (NestSMS)
+  sms_enabled: { group: 'sms', label: 'Enable SMS gateway (NestSMS)', type: 'bool', env: 'SMS_ENABLED', def: '1', help: 'Master switch to turn all SMS features on or off across the platform.' },
   sms_mode: { group: 'sms', label: 'SMS mode (NestSMS)', type: 'enum', options: ['auto', 'live', 'sandbox', 'off'], env: 'SMS_MODE', def: 'auto', help: 'Auto sends via NestSMS when your API key is saved, and logs a test SMS in sandbox mode when not. Off disables all SMS.' },
   nestsms_api_url: { group: 'sms', label: 'NestSMS API address', type: 'url', env: 'NESTSMS_API_URL', def: 'https://api.nestsms.com/api/v1/sms/send', help: 'Endpoint from your NestSMS developer portal (nestsms.com).' },
   nestsms_api_key: { group: 'sms', label: 'NestSMS API key / token', secret: true, env: 'NESTSMS_API_KEY', def: '', help: 'Bearer token or API key from your NestSMS dashboard.' },
   nestsms_sender_id: { group: 'sms', label: 'NestSMS sender ID', env: 'NESTSMS_SENDER_ID', def: 'Sadhai', help: 'Approved sender mask / ID registered with NestSMS.' },
+  sms_otp_enabled: { group: 'sms', label: 'Enable SMS OTP phone verification', type: 'bool', env: 'SMS_OTP_ENABLED', def: '1', help: 'Allow customers to verify their phone number via 6-digit SMS code.' },
   sms_order_ready: { group: 'sms', label: 'Send SMS when order is ready for pickup', type: 'bool', env: 'SMS_ORDER_READY', def: '0', help: 'Texts the customer’s mobile number when their coffee is marked Ready.' },
+  sms_welcome_enabled: { group: 'sms', label: 'Send SMS when welcome or referral coupon unlocks', type: 'bool', env: 'SMS_WELCOME_ENABLED', def: '0', help: 'Texts the customer when a welcome or referral reward is added to their account.' },
   // push
   push_mode: { group: 'push', label: 'Push notifications', type: 'enum', options: ['auto', 'off'], env: 'PUSH_MODE', def: 'auto', help: 'Auto sends for real when keys are set and logs a test delivery when they are not. Off stops all push.' },
   fcm_service_account_json: { group: 'push', label: 'Firebase service account (JSON)', secret: true, type: 'json', env: 'FCM_SERVICE_ACCOUNT_JSON', def: '', help: 'Firebase, Project settings, Service accounts, Generate new private key. Paste the whole file.' },

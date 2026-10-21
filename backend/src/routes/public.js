@@ -5,6 +5,8 @@ import { stationMenu, bestSellers, liveOffers, pickupWindow } from '../lib/order
 import { getSettings } from '../lib/settings.js';
 import { vapidPublicKey } from '../lib/push.js';
 import { rt } from '../lib/runtime.js';
+import { enabledPaymentMethods, gatewayStatus } from '../lib/payments.js';
+import { smsStatus } from '../lib/sms.js';
 import { loadSite } from '../lib/site.js';
 import rateLimit from 'express-rate-limit';
 import crypto from 'node:crypto';
@@ -26,7 +28,9 @@ pub.get('/config', wrap(async (_req, res) => {
     pass: { price: s.pass_price, cups: s.pass_cups, valid_days: s.pass_valid_days },
     pricing: { hot: s.price_hot, flavored: s.price_flavored, iced: s.price_iced },
     partner_share_pct: s.partner_share_pct,
-    payment_methods: ['cash', 'fonepay', 'esewa', 'khalti'],
+    payment_methods: enabledPaymentMethods(),
+    payment_gateways: gatewayStatus(),
+    sms: smsStatus(),
     referral: {
       enabled: !!Number(s.referral_enabled),
       cap_month: s.referral_cap_month,

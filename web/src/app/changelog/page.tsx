@@ -21,9 +21,42 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
+    version: '1.6.7',
+    date: '21 October 2026',
+    badge: 'Latest',
+    highlight: 'Official eSewa ePay v2, Khalti KPG-2 & Fonepay PG + Dynamic QR, Switchable Gateways & Separated Payment/SMS Dashboard',
+    changes: [
+      {
+        category: 'Added',
+        items: [
+          {
+            title: 'Official eSewa ePay v2, Khalti KPG-2 & Fonepay PG + Dynamic QR',
+            desc: 'Full official implementation of eSewa ePay v2 (HMAC-SHA256 signed form POST, callback verification & status lookup API), Khalti KPG-2 (/epayment/initiate/ & /epayment/lookup/ with pidx checkout URL), and Fonepay Web/Flutter PG (HMAC-SHA512 merchantRequest) alongside scannable Dynamic QR codes on Web, Android, iOS, Kiosk, and Counter POS.',
+          },
+          {
+            title: 'Switchable Payment Gateways & SMS Features',
+            desc: 'Every payment gateway (Fonepay, eSewa, Khalti, Cash) and NestSMS feature (Master SMS, Phone OTP, Order-Ready SMS, Welcome/Referral SMS) can now be switched ON or OFF and toggled between Sandbox and Live independently in real time.',
+          },
+          {
+            title: 'Separated Payment & SMS Gateway Control Center',
+            desc: 'New dedicated Payment & SMS dashboard in Owner Admin with 6 organized tabs, 30-day transaction and SMS KPIs, one-click Sandbox/Live endpoint presets, copyable callback/webhook URLs, and interactive live QR test previews.',
+          },
+        ],
+      },
+      {
+        category: 'Fixed',
+        items: [
+          {
+            title: 'Payment Callback Redirect & eSewa Query Normalization',
+            desc: 'Fixed eSewa and Khalti browser callback redirects to /order/:id and handled eSewa callback ?data= query string formatting.',
+          },
+        ],
+      },
+    ],
+  },
+  {
     version: '1.6.6',
     date: '20 October 2026',
-    badge: 'Latest',
     highlight: 'Fonepay Dynamic QR Fix, eSewa & Khalti QR Gateways, NestSMS OTP, and Non-Breachable Marketing Welcome & Referrals',
     changes: [
       {

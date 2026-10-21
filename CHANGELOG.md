@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.6.7] - 2026-10-21
+
+### Added
+- **Official eSewa ePay v2 (`developer.esewa.com.np`), Khalti KPG-2 (`docs.khalti.com`), and Fonepay Web/Flutter PG (`fonepay_flutter`) + Dynamic QR**:
+  - Upgraded eSewa, Khalti, and Fonepay across Backend, Web, Android/iOS, Kiosk, and Station POS so customers can pay either via direct Wallet/Web Checkout redirect OR by scanning a Dynamic QR code.
+  - **eSewa ePay v2**: HMAC-SHA256 Base64 signature over `total_amount,transaction_uuid,product_code`, auto-submitting form at `/payments/esewa/start`, callback signature verification at `/payments/esewa/callback`, and server-to-server status verification API (`/api/epay/transaction/status/`).
+  - **Khalti KPG-2**: Server-to-server `POST /epayment/initiate/` with `customer_info` and paisa conversion, direct `payment_url` launch + QR fallback, and `POST /epayment/lookup/` verification.
+  - **Fonepay PG + Dynamic QR**: Added `fonepay_flutter` compatible HMAC-SHA512 Web PG redirect (`/payments/fonepay/start` & `/payments/fonepay/callback`) alongside Fonepay Third-Party Dynamic QR.
+- **Switchable Payment Gateways & NestSMS Features**:
+  - Individual ON/OFF switches and per-gateway `sandbox | live` selectors for `Fonepay`, `eSewa`, `Khalti`, `Cash at Counter`, and `NestSMS` (`sms_enabled`, `sms_otp_enabled`, `sms_order_ready`, `sms_welcome_enabled`).
+  - Dynamic synchronization across Web, Mobile, Kiosk, and Station POS via `GET /config`.
+- **Separated Interactive Gateway Control Center**:
+  - Added dedicated **Payment & SMS** sidebar section and 6-tab Gateway Control Center (`Overview & Switches`, `Fonepay`, `eSewa`, `Khalti`, `NestSMS & OTP`, `Push, App & Company`) with 30-day volume KPIs, one-click Sandbox/Live URL presets, copyable callback URLs, live QR test previews, and recent transaction/SMS logs.
+
+### Fixed
+- Fixed callback redirect path (`/order/:id`) for eSewa and Khalti browser redirects.
+
+---
+
 ## [1.6.6] - 2026-10-20
 
 ### Added

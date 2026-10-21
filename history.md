@@ -17,6 +17,22 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.6.7 (2026-10-21)
+
+### Added
+- **Official eSewa ePay v2, Khalti KPG-2, and Fonepay Web/Flutter PG + Dynamic QR**:
+  - **eSewa (`developer.esewa.com.np` - ePay v2)**: Full signed ePay v2 form POST (`amount`, `tax_amount`, `total_amount`, `transaction_uuid`, `product_code`, `product_service_charge`, `product_delivery_charge`, `success_url`, `failure_url`, `signed_field_names="total_amount,transaction_uuid,product_code"`, Base64 HMAC-SHA256 `signature`), callback verification (including eSewa's `?data=` query suffix quirk), server-to-server Transaction Status Check API (`/api/epay/transaction/status/`), and scannable QR fallback.
+  - **Khalti (`docs.khalti.com` - KPG-2 ePayment)**: Server-to-server `POST /epayment/initiate/` (`Authorization: Key <secret_key>`, `amount` in paisa, `purchase_order_id`, `purchase_order_name`, `customer_info`) returning `pidx` and `payment_url`, direct "Pay with Khalti Wallet" launch + QR fallback, and `POST /epayment/lookup/` verification.
+  - **Fonepay (`iamnabink/fonepay_flutter` + Dynamic QR)**: Added Fonepay Web/Flutter PG (`PID`, `MD="P"`, `PRN`, `AMT`, `CRN="NPR"`, `DT="MM/dd/yyyy"`, `R1`, `R2`, `RU`, `DV` = HMAC-SHA512 hex of `PID,MD,PRN,AMT,CRN,DT,R1,R2,RU` at `/payments/fonepay/start` and `/payments/fonepay/callback`) alongside Third-Party Dynamic QR (`thirdPartyDynamicQrDownload` / `thirdPartyDynamicQrGetStatus`).
+- **Switchable Payment Gateways & SMS Features + Separated Gateway Control Center**:
+  - Added individual ON/OFF switches (`cash_enabled`, `fonepay_enabled`, `esewa_enabled`, `khalti_enabled`, `sms_enabled`, `sms_otp_enabled`, `sms_order_ready`, `sms_welcome_enabled`) and per-gateway `sandbox | live` environment switches.
+  - Turning off any payment gateway immediately removes it from checkout on Web, Android, iOS, Kiosk, and Station POS (`GET /config` -> `payment_methods`) and blocks it on the backend.
+  - Redesigned the Owner **Payment & SMS** dashboard into 6 separated, uncluttered tabs (`Overview & Switches`, `Fonepay`, `eSewa`, `Khalti`, `NestSMS & OTP`, `Push, App & Company`) with 30-day transaction/SMS KPIs, one-click Sandbox/Live endpoint presets, copyable callback/webhook URLs, and interactive live QR test modals.
+
+### Fixed
+- Fixed eSewa and Khalti callback redirect path (`/order/:id` instead of `/orders/:id`).
+- Unified `sendSms` call signatures across object and positional invocations.
+
 ## v1.6.6 (2026-10-20)
 
 ### Added

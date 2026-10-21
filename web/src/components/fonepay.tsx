@@ -3,21 +3,24 @@ import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { api, rs } from '@/lib/api';
 
-const PROVIDER_META: Record<string, { name: string; color: string; hint: string }> = {
+const PROVIDER_META: Record<string, { name: string; btnLabel: string; color: string; hint: string }> = {
   fonepay: {
-    name: 'Fonepay Dynamic QR',
+    name: 'Fonepay',
+    btnLabel: 'Open Fonepay Web Checkout',
     color: '#D71920',
-    hint: 'Open any mobile banking app, eSewa, or Khalti, choose Scan & Pay, and scan this Fonepay QR.',
+    hint: 'Open any mobile banking app, eSewa, or Khalti, choose Scan & Pay, and scan this Fonepay QR — or use Fonepay Web Checkout below.',
   },
   esewa: {
-    name: 'eSewa Dynamic QR',
+    name: 'eSewa',
+    btnLabel: 'Pay with eSewa Wallet',
     color: '#41A124',
-    hint: 'Scan with the eSewa app or tap Open eSewa Checkout below. This page updates automatically when paid.',
+    hint: 'Tap Pay with eSewa Wallet to sign in and pay directly via eSewa ePay v2, or scan the QR code below with the eSewa app.',
   },
   khalti: {
-    name: 'Khalti Dynamic QR',
+    name: 'Khalti',
+    btnLabel: 'Pay with Khalti Wallet',
     color: '#5C2D91',
-    hint: 'Scan with the Khalti app or tap Open Khalti Checkout below. This page updates automatically when paid.',
+    hint: 'Tap Pay with Khalti Wallet to complete KPG-2 checkout directly, or scan the QR code below with your Khalti app.',
   },
 };
 
@@ -28,7 +31,7 @@ export function FonepayQr({
   size = 220,
   big = false,
 }: {
-  payment: { payment_id: string; provider?: string; mode: string; qr_message: string; pay_url?: string | null; amount?: number };
+  payment: { payment_id: string; provider?: string; mode: string; qr_message: string; pay_url?: string | null; payment_url?: string | null; amount?: number };
   amount?: number;
   onDone: (status: 'paid' | 'failed') => void;
   size?: number;
@@ -39,6 +42,7 @@ export function FonepayQr({
   const done = useRef(false);
   const provKey = (payment.provider || 'fonepay').toLowerCase();
   const meta = PROVIDER_META[provKey] || PROVIDER_META.fonepay;
+  const checkoutUrl = payment.pay_url || payment.payment_url || null;
 
   useEffect(() => {
     if (canvas.current && payment.qr_message) {
@@ -87,18 +91,25 @@ export function FonepayQr({
       <p className="muted center" style={{ fontSize: big ? 20 : undefined, maxWidth: 380 }}>
         {meta.hint}
       </p>
-      {payment.pay_url && payment.mode !== 'sandbox' && (
+      {checkoutUrl && !big && payment.payment_id !== 'test-preview' && (
         <a
-          href={payment.pay_url}
+          href={checkoutUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="btn sm ghost"
-          style={{ borderColor: meta.color, color: meta.color }}
+          className="btn lg block"
+          style={{
+            background: meta.color,
+            borderColor: meta.color,
+            color: '#fff',
+            fontWeight: 700,
+            maxWidth: 340,
+            textAlign: 'center',
+          }}
         >
-          Open {provKey === 'esewa' ? 'eSewa' : provKey === 'khalti' ? 'Khalti' : 'Payment'} Checkout ↗
+          {meta.btnLabel} ({rs(amount ?? payment.amount)}) ↗
         </a>
       )}
-      {payment.mode === 'sandbox' && (
+      {payment.mode === 'sandbox' && payment.payment_id !== 'test-preview' && (
         <div className="card flat col" style={{ alignItems: 'center', gap: 8, width: '100%' }}>
           <p className="small muted center">
             Sandbox mode ({meta.name}). No real money moves. These buttons stand in for your banking/wallet app.

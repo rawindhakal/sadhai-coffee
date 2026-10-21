@@ -3,7 +3,7 @@ import { bad, conflict, forbidden, notFound } from './http.js';
 import { publish } from './hub.js';
 import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
-import { initiate, ONLINE_PROVIDERS, ALL_PAYMENT_METHODS } from './payments.js';
+import { initiate, ONLINE_PROVIDERS, ALL_PAYMENT_METHODS, isProviderEnabled } from './payments.js';
 import { sendSms } from './sms.js';
 import { rtBool } from './runtime.js';
 import crypto from 'node:crypto';
@@ -427,6 +427,9 @@ export async function createOrder(user, input) {
     const q = await quote(db, user, { ...input, channel });
     const method = q.total === 0 && q.pass_id ? 'pass' : input.payment_method;
     if (!ALL_PAYMENT_METHODS.includes(method)) throw bad('Choose how you will pay');
+    if (channel !== 'counter' && !isProviderEnabled(method)) {
+      throw bad(`${method[0].toUpperCase() + method.slice(1)} is currently turned off. Please choose another payment method.`);
+    }
 
     // Prevent unpaid cash order spam that locks stock or coupons
     if (method === 'cash' && channel !== 'counter' && user?.id) {
@@ -486,7 +489,14 @@ export async function createOrder(user, input) {
     let low = [];
     let paymentInit = null;
     if (digital) {
-      paymentInit = await initiate(method, pay[0], { orderLabel: `Sadhai ${code}` });
+      paymentInit = await initiate(method, pay[0], {
+        orderLabel: `Sadhai ${code}`,
+        customer: {
+          name: user?.name || input.customer_name || 'Sadhai Customer',
+          phone: user?.phone || input.customer_phone || '',
+          email: user?.email || '',
+        },
+      });
       await db.query('UPDATE payments SET provider_ref=COALESCE($2, provider_ref), raw=$3 WHERE id=$1', [pay[0].id, paymentInit.provider_ref || null, paymentInit.raw || null]);
     } else {
       low = await placeOrder(db, order, q.lines, user?.id);
@@ -669,9 +679,10 @@ export async function advanceOrder(orderId, next, actor, { code, override } = {}
       picked_up: { title: 'Enjoy your coffee', body: 'You earned beans for this order. Tell us how it was.' },
     }[next];
     if (msg) await notify(order.user_id, { kind: 'order', ...msg, data: { order_id: order.id } });
-    if (next === 'ready' && rtBool('sms_order_ready') && order.customer?.phone) {
+    const targetPhone = order.user_phone || order.customer_phone;
+    if (next === 'ready' && rtBool('sms_order_ready') && targetPhone) {
       sendSms({
-        phone: order.customer.phone,
+        phone: targetPhone,
         message: `Sadhai Coffee: Order ${order.pickup_code} is ready at ${order.station_name || 'the counter'}. Handover code: ${order.handover_code || '—'}.`,
         purpose: 'order_ready',
         userId: order.user_id,
@@ -679,9 +690,26 @@ export async function advanceOrder(orderId, next, actor, { code, override } = {}
     }
     if (res.welcome) {
       await notify(order.user_id, { kind: 'info', title: 'Welcome reward unlocked!', body: res.welcome.body });
+      if (rtBool('sms_welcome_enabled') && targetPhone) {
+        sendSms({
+          phone: targetPhone,
+          message: `Sadhai Coffee: ${res.welcome.body}`,
+          purpose: 'welcome_reward',
+          userId: order.user_id,
+        }).catch(() => {});
+      }
     }
     if (res.referral) {
-      for (const r of res.referral) await notify(r.user_id, { kind: 'info', title: 'Referral reward unlocked', body: r.body });
+      for (const r of res.referral) {
+        await notify(r.user_id, { kind: 'info', title: 'Referral reward unlocked', body: r.body });
+        if (rtBool('sms_welcome_enabled')) {
+          query('SELECT phone FROM users WHERE id=$1', [r.user_id]).then(({ rows }) => {
+            if (rows[0]?.phone) {
+              sendSms({ phone: rows[0].phone, message: `Sadhai Coffee: ${r.body}`, purpose: 'referral_reward', userId: r.user_id }).catch(() => {});
+            }
+          }).catch(() => {});
+        }
+      }
     }
   }
   return order;
@@ -830,7 +858,11 @@ export async function buyPass(user, method, { stationId = null, soldBy = null } 
     return { pass, payment: null };
   }
   if (method === 'cash') throw bad('Pay for a pass in the app with Fonepay, eSewa, or Khalti, or buy it at the counter');
-  const init = await initiate(method, pay, { orderLabel: 'Sadhai 10-cup pass' });
+  if (!isProviderEnabled(method)) throw bad(`${method[0].toUpperCase() + method.slice(1)} is currently turned off. Please choose another payment method.`);
+  const init = await initiate(method, pay, {
+    orderLabel: 'Sadhai 10-cup pass',
+    customer: { name: user?.name || 'Sadhai Customer', phone: user?.phone || '', email: user?.email || '' },
+  });
   await query('UPDATE payments SET provider_ref=COALESCE($2, provider_ref), raw=$3 WHERE id=$1', [pay.id, init.provider_ref || null, init.raw || null]);
   return { pass, payment: init };
 }

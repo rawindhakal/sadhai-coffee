@@ -166,6 +166,8 @@ function Ticket({ o, target, move, pay, handover, bare }: any) {
 
 function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: () => void }) {
   const menu = useData<any>(`/station/menu${q}`);
+  const cfg = useData<any>('/config');
+  const enabledMethods: string[] = (cfg.data?.payment_methods || ['cash', 'fonepay', 'esewa', 'khalti']).filter((m: string) => ['cash', 'fonepay', 'esewa', 'khalti'].includes(m));
   const toast = useToast();
   const [cart, setCart] = useState<any[]>([]);
   const [phone, setPhone] = useState('');
@@ -223,9 +225,9 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
         )}
         {offer !== 'pass' && (
           <div className="row wrap">
-            {(['cash', 'fonepay', 'esewa', 'khalti'] as const).map((m) => (
+            {(enabledMethods.length ? enabledMethods : ['cash']).map((m) => (
               <button key={m} className={`btn sm ${method === m ? 'primary' : 'ghost'}`} onClick={() => setMethod(m)}>
-                {m === 'cash' ? 'Cash' : m === 'fonepay' ? 'Fonepay QR' : m === 'esewa' ? 'eSewa QR' : 'Khalti QR'}
+                {m === 'cash' ? 'Cash' : m === 'fonepay' ? 'Fonepay' : m === 'esewa' ? 'eSewa' : 'Khalti'}
               </button>
             ))}
           </div>
