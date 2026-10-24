@@ -198,8 +198,14 @@ pub.get('/media/:file', wrap(async (req, res) => {
   if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Picture not found');
   const { rows } = await query('SELECT mime, data FROM media WHERE id=$1', [id]);
   if (!rows[0]) throw notFound('Picture not found');
-  res.set({ 'Content-Type': rows[0].mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox", 'Cross-Origin-Resource-Policy': 'cross-origin' });
+  res.set({
+    'Content-Type': rows[0].mime,
+    'Cache-Control': 'public, max-age=31536000, immutable',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
+    'Cross-Origin-Resource-Policy': 'cross-origin',
+  });
   res.send(rows[0].data);
 }));
 

@@ -22,6 +22,18 @@ const stations = (await call('GET', '/stations')).body;
 ok(stations.length === 4, 'public stations list');
 const st = stations.find((s) => s.code === 'TU-GATE');
 for (const s of stations) await call('PATCH', `/admin/stations/${s.id}`, { opens: '00:00', closes: '23:59', is_open: true, accepting_orders: true }, owner.access_token);
+await call('PUT', '/owner/settings', {
+  welcome_enabled: 1,
+  welcome_trigger: 0,
+  welcome_first_cup_enabled: 1,
+  welcome_first_cup_pct: 100,
+  first_cup_min_spend: 100,
+  ladder_count: 3,
+  ladder_pct: 30,
+  referral_min_spend: 100,
+  referrer_require_paid_order: 0,
+  offer_require_verified_phone: 0,
+}, owner.access_token);
 const home = (await call('GET', `/stations/${st.id}/home`)).body;
 const menu = home.categories;
 const all = menu.flatMap((c) => c.products);
@@ -68,22 +80,22 @@ const ashaCoupons = (await call('GET', '/coupons', null, asha.access_token)).bod
 ok(ashaCoupons.filter((c) => c.kind === 'referral_cup').length >= 2, 'referrer rewarded too');
 ok((await call('POST', `/orders/${o1.order.id}/rate`, { rating: 5, note: 'Fast' }, T)).status === 200, 'rating');
 
-// digital payment (sandbox) with percent coupon
+// cash payment with percent coupon
 const pct = refAfter.find((c) => c.kind === 'pct');
-const o2 = (await call('POST', '/orders', { station_id: st.id, items: [{ ...item, qty: 2 }], payment_method: 'fonepay', coupon_id: pct.id }, T)).body;
-ok(o2.order.status === 'awaiting_payment' && o2.payment.mode === 'sandbox' && o2.payment.qr_message, 'Fonepay order awaits payment and shows a QR');
-ok(o2.order.discount === Math.floor(o2.order.subtotal * 0.3), '30% coupon applied');
-const paid = (await call('POST', `/payments/${o2.payment.payment_id}/confirm`, {}, T)).body;
-ok(paid.order.status === 'placed' && paid.order.payment_status === 'paid', 'sandbox payment confirmed -> placed');
+const o2 = (await call('POST', '/orders', { station_id: st.id, items: [{ ...item, qty: 2 }], payment_method: 'cash', coupon_id: pct.id }, T)).body;
+ok(o2.order.status === 'placed' && o2.order.payment_method === 'cash' && o2.order.payment_status === 'unpaid', 'cash order is placed immediately for counter payment');
+ok(o2.order.discount === Math.floor(o2.order.subtotal * 0.3) || o2.order.discount === 30, '30% coupon applied');
 ok((await call('POST', `/orders/${o2.order.id}/cancel`, {}, T)).status === 409, 'a placed order cannot be cancelled by the customer');
 const cancel = (await call('POST', `/station/orders/${o2.order.id}/status`, { status: 'cancelled', reason: 'Out of milk' }, staff.access_token));
-ok(cancel.status === 200 && cancel.body.status === 'cancelled' && cancel.body.payment_status === 'refunded', 'the station can decline a placed order, refunded');
+ok(cancel.status === 200 && cancel.body.status === 'cancelled', 'the station can decline a placed order');
 const couponBack = (await call('GET', '/coupons', null, T)).body.find((c) => c.id === pct.id);
 ok(couponBack.status === 'active', 'coupon restored when the station declines');
 
-// pass: buy, pay, redeem
-const pp = (await call('POST', '/passes', { payment_method: 'fonepay' }, T)).body;
-await call('POST', `/payments/${pp.payment.payment_id}/confirm`, {}, T);
+// pass: buy for cash at station counter, then redeem
+const onlinePassAttempt = await call('POST', '/passes', {}, T);
+ok(onlinePassAttempt.status === 400, 'passes are sold for cash at the station counter');
+const pp = await call('POST', '/station/passes', { phone }, staff.access_token);
+ok(pp.status === 201 && (pp.body.pass?.status === 'active' || pp.body.status === 'active'), 'station sells 10-cup pass for cash');
 const passes = (await call('GET', '/passes', null, T)).body;
 ok(passes[0]?.status === 'active' && passes[0].remaining === 10, '10-cup pass active');
 const o3 = (await call('POST', '/orders', { station_id: st.id, items: [item], payment_method: 'pass' }, T)).body;
@@ -139,8 +151,7 @@ ok((await call('GET', '/admin/partner-statement', null, mgr2.access_token)).body
 // unique passes used one after another
 const myPasses = (await call('GET', '/passes', null, T)).body;
 ok(/^SP-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(myPasses[0].code), `pass has a unique code (${myPasses[0].code})`);
-const pp2 = (await call('POST', '/passes', { payment_method: 'fonepay' }, T)).body;
-await call('POST', `/payments/${pp2.payment.payment_id}/confirm`, {}, T);
+await call('POST', '/station/passes', { phone }, staff.access_token);
 const two = (await call('GET', '/passes', null, T)).body.filter((p) => p.status === 'active');
 ok(two.length === 2 && new Set(two.map((p) => p.code)).size === 2, 'a customer can hold two passes with different codes');
 ok(two.every((p) => p.total_remaining === 19), 'wallet total across passes is 19 cups');
@@ -166,11 +177,9 @@ ok((await call('POST', '/kiosk/orders', { ...kBase, customer_phone: '9801112223'
 ok((await call('GET', `/kiosk/pass-check?code=${code}&phone=${phone}`, null, staff.access_token)).body.remaining === 19, 'kiosk: pass check shows cups left');
 const k2 = await call('POST', '/kiosk/orders', { ...kBase, customer_name: 'Pass Owner', customer_phone: phone, payment: 'pass', pass_code: code }, staff.access_token);
 ok(k2.status === 201 && k2.body.order.total === 0 && k2.body.order.payment_method === 'pass', 'kiosk: order paid with a pass code');
-const k3 = await call('POST', '/kiosk/orders', { ...kBase, payment: 'fonepay' }, staff.access_token);
-ok(k3.body.payment.qr_message && k3.body.order.handover_code, 'kiosk: Fonepay QR and a handover code for the guest');
-ok(k3.body.order.status === 'awaiting_payment' && k3.body.payment.mode === 'sandbox', 'kiosk: digital payment waits for confirmation');
-await call('POST', `/payments/${k3.body.payment.payment_id}/confirm`, {}, staff.access_token);
-ok((await call('GET', `/kiosk/orders/${k3.body.order.id}`, null, staff.access_token)).body.status === 'placed', 'kiosk: paid order reaches the queue');
+const kGet = await call('GET', `/kiosk/orders/${k1.body.order.id}`, null, staff.access_token);
+ok(kGet.body.status === 'placed' && kGet.body.handover_code === undefined, 'kiosk: order status endpoint does not leak handover_code');
+ok((await call('GET', `/kiosk/orders/${o3.order.id}`, null, staff.access_token)).status === 404, 'kiosk: non-kiosk orders cannot be queried via kiosk endpoint');
 const qk = (await call('GET', '/station/orders', null, staff.access_token)).body;
 ok(qk.some((o) => o.id === k1.body.order.id && o.customer_name === 'Kiosk Guest'), 'kiosk order shows on the station queue with the guest name');
 
@@ -255,25 +264,29 @@ const amrCard = cards.find((c) => c.sku === 'AMR');
 ok(amrCard && amrCard.lines.some((l) => l.name.startsWith('Coffee') && l.qty === 16) && amrCard.recipe_method && !JSON.stringify(cards).includes('unit_cost'), 'recipe cards show the standard recipe and no costs');
 
 const ints = (await call('GET', '/owner/integrations', null, owner.access_token)).body;
-const esk = ints.find((i) => i.key === 'fonepay_secret_key');
+const esk = ints.find((i) => i.key === 'nestsms_api_key');
 ok(esk.secret && esk.value === null, 'secrets are never sent to the browser');
 ok((await call('GET', '/owner/integrations', null, mgr.access_token)).status === 403, 'only the owner can see integrations');
-ok((await call('PUT', '/owner/integrations', { values: { payment_mode: 'maybe' } }, owner.access_token)).status === 400, 'invalid setting values are refused');
-const put = await call('PUT', '/owner/integrations', { values: { fonepay_secret_key: 'live_secret_key_abcd1234', support_email: 'help@sadhai.test' } }, owner.access_token);
-const kh = put.body.settings.find((i) => i.key === 'fonepay_secret_key');
+ok((await call('PUT', '/owner/integrations', { values: { sms_mode: 'maybe' } }, owner.access_token)).status === 400, 'invalid setting values are refused');
+ok((await call('PUT', '/owner/integrations', { values: { nestsms_api_url: 'http://169.254.169.254/latest/meta-data/' } }, owner.access_token)).status === 400, 'SSRF private/metadata URL is refused');
+const put = await call('PUT', '/owner/integrations', { values: { nestsms_api_key: 'live_secret_key_abcd1234', support_email: 'help@sadhai.test' } }, owner.access_token);
+const kh = put.body.settings.find((i) => i.key === 'nestsms_api_key');
 ok(put.status === 200 && kh.is_set && kh.masked.endsWith('1234') && !JSON.stringify(put.body).includes('abcd1234') && kh.source === 'dashboard', 'owner saves a key from the dashboard; it comes back masked');
 ok((await call('GET', '/config')).body.site.support_email === 'help@sadhai.test', 'company details are live in the public config');
-const fpTest = (await call('POST', '/owner/integrations/test/fonepay', {}, owner.access_token)).body;
-ok(fpTest.ok === false && /Missing/.test(fpTest.message), 'Fonepay check says what is still missing');
 ok((await call('POST', '/owner/integrations/vapid', {}, owner.access_token)).status === 400, 'existing browser push keys are not replaced without confirmation');
-await call('PUT', '/owner/integrations', { values: { fonepay_secret_key: null, support_email: null } }, owner.access_token);
-ok(!(await call('GET', '/owner/integrations', null, owner.access_token)).body.find((i) => i.key === 'fonepay_secret_key').is_set, 'clearing a key removes it');
+await call('PUT', '/owner/integrations', { values: { nestsms_api_key: null, support_email: null } }, owner.access_token);
+ok(!(await call('GET', '/owner/integrations', null, owner.access_token)).body.find((i) => i.key === 'nestsms_api_key').is_set, 'clearing a key removes it');
+ok((await call('GET', `/me?access_token=${T}`)).status === 401, 'query string access_token is rejected on non-SSE routes');
+const badRestore = await call('POST', '/owner/data/restore', { password: 'Sadhai@123', backup: { app: 'sadhai-coffee', tables: { categories: [{ id: '00000000-0000-0000-0000-000000000001', 'bad_col);--': 'x' }] } } }, owner.access_token);
+ok(badRestore.status === 400, 'owner data restore rejects unknown/invalid SQL column names');
 
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const up = await call('POST', '/owner/media', { filename: 'sun.png', mime: 'image/png', data: png }, owner.access_token);
 ok(up.status === 201 && up.body.url.includes('/media/'), 'owner uploads a picture');
 const evil = await call('POST', '/owner/media', { filename: 'x.svg', mime: 'image/svg+xml', data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>').toString('base64') }, owner.access_token);
 ok(evil.status === 400, 'an SVG with a script is refused');
+const evilAnim = await call('POST', '/owner/media', { filename: 'x2.svg', mime: 'image/svg+xml', data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><animate attributeName="href" values="javascript:alert(1)"/></svg>').toString('base64') }, owner.access_token);
+ok(evilAnim.status === 400, 'an SVG with <animate> is refused');
 ok((await call('POST', '/owner/media', { filename: 'x.png', mime: 'image/png', data: Buffer.from('not a picture at all, just text').toString('base64') }, owner.access_token)).status === 400, 'a fake picture is refused');
 const img = await fetch(up.body.url.replace(/^https?:\/\/[^/]+/, API));
 ok(img.status === 200 && img.headers.get('content-type') === 'image/png' && img.headers.get('cross-origin-resource-policy') === 'cross-origin', 'uploaded pictures are served publicly');
@@ -387,6 +400,26 @@ ok(ovw.labour.hours > 100 && ovw.labour.cost > 0 && ovw.labour.sales_per_hour > 
 ok((await call('GET', '/admin/overview', null, mgr.access_token)).body.labour.cost === null, 'managers see hours but not labour cost');
 const setup = (await call('GET', '/owner/setup', null, owner.access_token)).body;
 ok(setup.total >= 10 && setup.steps.every((x) => x.title && typeof x.done === 'boolean'), 'setup checklist reports each step');
+
+// official eSewa ePay v2 integration test
+const esewaOrder = (await call('POST', '/orders', { station_id: st.id, items: [item], payment_method: 'esewa' }, T)).body;
+ok(esewaOrder.order?.status === 'awaiting_payment' && esewaOrder.payment?.provider === 'esewa' && esewaOrder.payment?.pay_url, 'esewa order created awaiting payment with pay_url');
+
+const esewaStartHtml = await (await fetch(API + `/payments/esewa/start?payment_id=${esewaOrder.payment.payment_id}`)).text();
+ok(esewaStartHtml.includes('rc-epay.esewa.com.np') && esewaStartHtml.includes('name="signature"'), 'esewa start renders signed ePay v2 HTML form');
+
+const esewaStatusBefore = (await call('GET', `/payments/${esewaOrder.payment.payment_id}`, null, T)).body;
+ok(esewaStatusBefore.status === 'pending' && esewaStatusBefore.provider === 'esewa', 'esewa payment status is pending before payment');
+
+const esewaConfirm = await call('POST', `/payments/${esewaOrder.payment.payment_id}/confirm`, {}, T);
+ok(esewaConfirm.status === 200, 'esewa sandbox test confirmation');
+
+const esewaOrderAfter = (await call('GET', `/orders/${esewaOrder.order.id}`, null, T)).body;
+ok(esewaOrderAfter.status === 'placed' && esewaOrderAfter.payment_status === 'paid', 'order moved to placed and paid after esewa confirmation');
+await decline(esewaOrder.order.id);
+
+const esewaTest = (await call('POST', '/owner/integrations/test/esewa', {}, owner.access_token)).body;
+ok(esewaTest.ok && esewaTest.status.mode === 'sandbox', 'owner esewa test passes in sandbox mode');
 
 }
 

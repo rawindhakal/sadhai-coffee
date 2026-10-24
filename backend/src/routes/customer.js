@@ -1,14 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { query } from '../lib/db.js';
+import { query, pool } from '../lib/db.js';
 import { wrap, bad, notFound, forbidden, HttpError } from '../lib/http.js';
 import { authenticate, requireRole, verifyAccess } from '../lib/auth.js';
 import { subscribe } from '../lib/hub.js';
 import { createOrder, quote, fullOrder, cancelOrder, rateOrder, confirmPayment, buyPass } from '../lib/orders.js';
 import { getSettings } from '../lib/settings.js';
 import { rt } from '../lib/runtime.js';
-import { verifyWebhookSignature, checkPaymentStatus, verifyEsewa, checkKhalti, verifyFonepayCallback, esewaFields, esewaFormUrl, fonepayPgFields, providerMode, ONLINE_PROVIDERS } from '../lib/payments.js';
-import { pool } from '../lib/db.js';
+import { verifyEsewa, checkPaymentStatus, esewaFields, esewaFormUrl, providerMode } from '../lib/payments.js';
 
 export const customer = Router();
 
@@ -16,7 +15,7 @@ const itemSchema = z.object({ product_id: z.string().uuid(), qty: z.number().int
 const orderSchema = z.object({
   station_id: z.string().uuid(),
   items: z.array(itemSchema).min(1).max(20),
-  payment_method: z.enum(['cash', 'fonepay', 'esewa', 'khalti', 'pass']),
+  payment_method: z.enum(['cash', 'esewa', 'pass']).default('cash'),
   coupon_id: z.string().uuid().optional().nullable(),
   promo_code: z.string().trim().max(30).optional().nullable(),
   note: z.string().max(200).optional(),
@@ -24,39 +23,13 @@ const orderSchema = z.object({
   scheduled_for: z.string().datetime().optional(),
 });
 
-// Validate a promo code from the Offers tab (the discount itself is applied at checkout).
-customer.post('/promos/check', wrap(async (req, res) => {
-  const b = z.object({ code: z.string().trim().min(1).max(30), station_id: z.string().uuid().optional().nullable() }).parse(req.body);
-  const { rows } = await query('SELECT * FROM promo_codes WHERE upper(code)=upper($1)', [b.code]);
-  const p = rows[0];
-  if (!p || !p.active) throw bad('That promo code is not valid');
-  if (p.valid_until && new Date(p.valid_until) < new Date()) throw bad('That promo code has expired');
-  if (p.max_uses != null && p.used >= p.max_uses) throw bad('That promo code has been fully used');
-  if (p.station_id && b.station_id && p.station_id !== b.station_id) throw bad('That promo code is not valid at this station');
-  res.json({ code: p.code, title: p.title, pct: p.pct, min_total: p.min_total, max_discount: p.max_discount, drinks_only: p.drinks_only, valid_until: p.valid_until });
-}));
-
-// --- Signed webhooks for Fonepay, eSewa, and Khalti (no bearer token) ---
-customer.post('/payments/webhook/:provider', wrap(async (req, res) => {
-  const provider = req.params.provider;
-  if (!ONLINE_PROVIDERS.includes(provider)) throw bad('Unknown payment provider');
-  if (!verifyWebhookSignature(req.body, req.headers['x-signature'], provider)) throw new HttpError(401, 'Bad signature');
-  const paymentId = req.body.payment_id || req.body.transaction_uuid || req.body.purchase_order_id;
-  if (!paymentId) throw bad('Missing payment_id');
-  const statusStr = String(req.body.status || '').toLowerCase();
-  const outcome = ['success', 'paid', 'complete', 'completed'].includes(statusStr) ? 'paid' : 'failed';
-  const ref = req.body.provider_ref || req.body.transaction_code || req.body.pidx || `${provider.toUpperCase()}-WH`;
-  const r = await confirmPayment(paymentId, { ref, raw: req.body, outcome });
-  res.json({ ok: true, already: !!r.already });
-}));
-
-// Auto-submitting HTML form for eSewa ePay v2 (developer.esewa.com.np) when opened on a customer's phone or browser
+// Auto-submitting HTML form for official eSewa ePay v2 when opened in browser/WebView
 customer.get('/payments/esewa/start', wrap(async (req, res) => {
   const pid = String(req.query.payment_id || '');
   const { rows } = await query('SELECT * FROM payments WHERE id=$1 AND provider=$2', [pid, 'esewa']);
   const p = rows[0];
   if (!p) throw notFound('eSewa payment not found');
-  const form = p.raw?.epay_form || p.raw?.fields || esewaFields(p);
+  const form = p.raw?.epay_form || esewaFields(p);
   const action = p.raw?.epay_action || esewaFormUrl();
   const inputs = Object.entries(form)
     .map(([k, v]) => `<input type="hidden" name="${k.replace(/"/g, '&quot;')}" value="${String(v ?? '').replace(/"/g, '&quot;')}" />`)
@@ -65,7 +38,7 @@ customer.get('/payments/esewa/start', wrap(async (req, res) => {
   res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Redirecting to eSewa…</title></head>
     <body style="font-family:system-ui,sans-serif;background:#1A1410;color:#FAF6F0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
       <div style="text-align:center;padding:24px;max-width:360px">
-        <div style="display:inline-block;background:#41A124;color:#fff;font-weight:700;padding:6px 16px;border-radius:99px;margin-bottom:14px">eSewa ePay v2</div>
+        <div style="display:inline-block;background:#41A124;color:#fff;font-weight:700;padding:6px 16px;border-radius:99px;margin-bottom:14px">eSewa ePay</div>
         <p style="font-size:18px;font-weight:700;margin:0 0 6px">Connecting to eSewa…</p>
         <p style="font-size:14px;opacity:0.75;margin:0 0 18px">NPR ${p.amount} · Sadhai Coffee</p>
         <form id="esewaForm" method="POST" action="${action}">
@@ -77,9 +50,8 @@ customer.get('/payments/esewa/start', wrap(async (req, res) => {
     </body></html>`);
 }));
 
-// eSewa callback after customer completes or cancels payment in browser/app
+// eSewa callback after customer completes or cancels payment
 customer.get('/payments/esewa/callback', wrap(async (req, res) => {
-  // Note: eSewa sometimes appends ?data=... using a second '?' if success_url already has query params
   let pid = String(req.query.payment_id || '');
   let dataB64 = String(req.query.data || '');
   if (pid.includes('?data=')) {
@@ -88,102 +60,63 @@ customer.get('/payments/esewa/callback', wrap(async (req, res) => {
     dataB64 = dataB64 || parts[1];
   }
   const outcomeParam = String(req.query.outcome || '').split('?')[0];
-  const { rows } = await query('SELECT * FROM payments WHERE id=$1', [pid]);
-  const p = rows[0];
-  const baseUrl = (rt('public_web_url') || 'https://sadhaicoffee.com').replace(/\/$/, '');
-  if (!p) return res.redirect(`${baseUrl}/orders`);
-  if (outcomeParam === 'failed') {
-    if (p.status === 'pending') await confirmPayment(p.id, { raw: { ...(p.raw || {}), callback: 'failed' }, outcome: 'failed' });
-  } else if (p.status === 'pending') {
+
+  let decoded = null;
+  if (dataB64) {
     try {
-      const c = await verifyEsewa(p, dataB64 || undefined);
-      if (c.paid) await confirmPayment(p.id, { ref: c.ref, raw: { ...(p.raw || {}), ...c.raw }, outcome: 'paid' });
-      else if (c.failed) await confirmPayment(p.id, { raw: { ...(p.raw || {}), ...c.raw }, outcome: 'failed' });
-    } catch { /* poll will retry */ }
+      decoded = JSON.parse(Buffer.from(dataB64, 'base64').toString('utf8'));
+    } catch {}
   }
-  return res.redirect(p.order_id ? `${baseUrl}/order/${p.order_id}` : `${baseUrl}/account`);
-}));
 
-// Khalti start redirect (redirects to Khalti payment_url or shows sandbox simulator if in sandbox without key)
-customer.get('/payments/khalti/start', wrap(async (req, res) => {
-  const pid = String(req.query.payment_id || '');
-  const { rows } = await query('SELECT * FROM payments WHERE id=$1 AND provider=$2', [pid, 'khalti']);
-  const p = rows[0];
-  if (!p) throw notFound('Khalti payment not found');
-  if (p.raw?.pay_url && !String(p.raw.pay_url).includes('/payments/khalti/start')) {
-    return res.redirect(p.raw.pay_url);
+  let { rows } = pid ? await query('SELECT * FROM payments WHERE id=$1', [pid]) : { rows: [] };
+  if (!rows[0] && decoded?.transaction_uuid) {
+    const prn = decoded.transaction_uuid;
+    rows = (await query('SELECT * FROM payments WHERE provider_ref=$1 OR replace(id::text, \'-\', \'\') ILIKE $2', [prn, `%${prn}%`])).rows;
   }
-  const apiUrl = rt('public_api_url').replace(/\/$/, '');
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Khalti Sandbox Checkout</title></head>
-    <body style="font-family:system-ui,sans-serif;background:#1A1410;color:#FAF6F0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
-      <div style="text-align:center;padding:28px;max-width:380px;background:#261E18;border-radius:16px;border:1px solid rgba(255,255,255,0.12)">
-        <div style="display:inline-block;background:#5C2D91;color:#fff;font-weight:700;padding:6px 16px;border-radius:99px;margin-bottom:12px">Khalti KPG-2 Sandbox</div>
-        <h2 style="margin:0 0 8px">NPR ${p.amount}</h2>
-        <p style="font-size:14px;opacity:0.75;margin:0 0 20px">Sadhai Coffee · Ref ${p.provider_ref || p.id.slice(0, 8)}</p>
-        <div style="display:flex;gap:10px;justify-content:center">
-          <a href="${apiUrl}/payments/khalti/callback?payment_id=${p.id}&status=Completed&transaction_id=KHLTEST${Date.now()}" style="background:#5C2D91;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:700">Simulate Paid</a>
-          <a href="${apiUrl}/payments/khalti/callback?payment_id=${p.id}&status=User+canceled" style="background:transparent;color:#FAF6F0;border:1px solid rgba(255,255,255,0.25);text-decoration:none;padding:12px 20px;border-radius:10px">Cancel</a>
-        </div>
-      </div>
-    </body></html>`);
-}));
-
-// Khalti callback after customer completes or cancels payment in browser/app
-customer.get('/payments/khalti/callback', wrap(async (req, res) => {
-  const pid = String(req.query.payment_id || req.query.purchase_order_id || '');
-  const pidx = String(req.query.pidx || '');
-  const qStatus = String(req.query.status || '');
-  const { rows } = await query('SELECT * FROM payments WHERE id=$1 OR provider_ref=$2', [pid || null, pid || pidx || null]);
   const p = rows[0];
-  const baseUrl = (rt('public_web_url') || 'https://sadhaicoffee.com').replace(/\/$/, '');
-  if (!p) return res.redirect(`${baseUrl}/orders`);
-  if (p.status === 'pending') {
-    if (p.raw?.sandbox && !rt('khalti_secret_key')) {
-      if (qStatus === 'Completed') {
-        await confirmPayment(p.id, { ref: String(req.query.transaction_id || `KHL-SBX-${Date.now()}`), raw: { ...(p.raw || {}), callback: req.query }, outcome: 'paid' });
-      } else if (['User canceled', 'Expired'].includes(qStatus)) {
-        await confirmPayment(p.id, { raw: { ...(p.raw || {}), callback: req.query }, outcome: 'failed' });
-      }
-    } else {
-      try {
-        const c = await checkKhalti(p, pidx || undefined);
-        if (c.paid) await confirmPayment(p.id, { ref: c.ref, raw: { ...(p.raw || {}), ...c.raw }, outcome: 'paid' });
-        else if (c.failed) await confirmPayment(p.id, { raw: { ...(p.raw || {}), ...c.raw }, outcome: 'failed' });
-      } catch { /* poll will retry */ }
+
+  const web = rt('public_web_url').replace(/\/$/, '');
+  const targetUrl = p?.order_id ? `${web}/order/${p.order_id}` : `${web}/account`;
+
+  if (outcomeParam === 'failed' || (decoded && String(decoded.status || '').toUpperCase() !== 'COMPLETE')) {
+    if (p && p.status === 'pending') {
+      try { await confirmPayment(p.id, { outcome: 'failed', raw: decoded || { outcome: 'failed' } }); } catch {}
     }
+    return res.redirect(`${targetUrl}?payment=failed`);
   }
-  return res.redirect(p.order_id ? `${baseUrl}/order/${p.order_id}` : `${baseUrl}/account`);
+
+  if (!p) {
+    return res.redirect(`${web}/order?payment=failed&reason=payment_not_found`);
+  }
+
+  if (p.status === 'paid') {
+    return res.redirect(`${targetUrl}?paid=esewa`);
+  }
+
+  try {
+    const v = await verifyEsewa(p, dataB64);
+    if (v.paid) {
+      await confirmPayment(p.id, { ref: v.ref, raw: v.raw, outcome: 'paid' });
+      return res.redirect(`${targetUrl}?paid=esewa`);
+    } else {
+      await confirmPayment(p.id, { outcome: 'failed', raw: v.raw });
+      return res.redirect(`${targetUrl}?payment=failed`);
+    }
+  } catch (err) {
+    return res.redirect(`${targetUrl}?payment=failed&err=${encodeURIComponent(err.message || 'verification_failed')}`);
+  }
 }));
 
-// Fonepay Web / Flutter PG start redirect (compatible with iamnabink/fonepay_flutter)
-customer.get('/payments/fonepay/start', wrap(async (req, res) => {
-  const pid = String(req.query.payment_id || '');
-  const { rows } = await query('SELECT * FROM payments WHERE id=$1 AND provider=$2', [pid, 'fonepay']);
+// Validate a promo code from the Offers tab (the discount itself is applied at checkout).
+customer.post('/promos/check', wrap(async (req, res) => {
+  const b = z.object({ code: z.string().trim().min(1).max(30), station_id: z.string().uuid().optional().nullable() }).parse(req.body);
+  const { rows } = await query('SELECT * FROM promo_codes WHERE upper(code)=upper($1)', [b.code]);
   const p = rows[0];
-  if (!p) throw notFound('Fonepay payment not found');
-  const cfg = p.raw?.fonepay_config || fonepayPgFields(p);
-  const { pg_url, ...params } = cfg;
-  const qs = new URLSearchParams(params).toString();
-  return res.redirect(`${pg_url || 'https://dev-clientapi.fonepay.com/api/merchantRequest'}?${qs}`);
-}));
-
-// Fonepay Web / Flutter PG callback
-customer.get('/payments/fonepay/callback', wrap(async (req, res) => {
-  const pid = String(req.query.payment_id || '');
-  const prn = String(req.query.PRN || '');
-  const { rows } = await query('SELECT * FROM payments WHERE id=$1 OR provider_ref=$2', [pid || null, prn || null]);
-  const p = rows[0];
-  const baseUrl = (rt('public_web_url') || 'https://sadhaicoffee.com').replace(/\/$/, '');
-  if (!p) return res.redirect(`${baseUrl}/orders`);
-  if (p.status === 'pending') {
-    try {
-      const c = verifyFonepayCallback(req.query, p.amount);
-      if (c.paid) await confirmPayment(p.id, { ref: c.ref, raw: { ...(p.raw || {}), callback: c.raw }, outcome: 'paid' });
-      else if (c.failed) await confirmPayment(p.id, { raw: { ...(p.raw || {}), callback: c.raw }, outcome: 'failed' });
-    } catch { /* poll will retry */ }
-  }
-  return res.redirect(p.order_id ? `${baseUrl}/order/${p.order_id}` : `${baseUrl}/account`);
+  if (!p || !p.active) throw bad('That promo code is not valid');
+  if (p.valid_until && new Date(p.valid_until) < new Date()) throw bad('That promo code has expired');
+  if (p.max_uses != null && p.used >= p.max_uses) throw bad('That promo code has been fully used');
+  if (p.station_id && b.station_id && p.station_id !== b.station_id) throw bad('That promo code is not valid at this station');
+  res.json({ code: p.code, title: p.title, pct: p.pct, min_total: p.min_total, max_discount: p.max_discount, drinks_only: p.drinks_only, valid_until: p.valid_until });
 }));
 
 // SSE: EventSource cannot send headers, so accept ?access_token=
@@ -202,47 +135,45 @@ customer.get('/events', wrap(async (req, res) => {
 
 customer.use(authenticate);
 
-// Status of a payment. While it is pending, this polls Fonepay, eSewa, or Khalti and confirms the order if paid.
+// Status of a payment. While it is pending, this checks eSewa and confirms the order if paid.
 customer.get('/payments/:id', wrap(async (req, res) => {
   const { rows } = await query('SELECT * FROM payments WHERE id=$1', [req.params.id]);
   let p = rows[0];
   const mine = p && (p.user_id === req.user.id || req.user.role !== 'customer');
   if (!mine) throw notFound('Payment not found');
-  const pMode = providerMode(p.provider);
-  const canPoll = pMode === 'live' || p.provider === 'esewa' || (p.provider === 'khalti' && !!p.raw?.pidx);
-  if (p.status === 'pending' && ONLINE_PROVIDERS.includes(p.provider) && canPoll) {
+  if (p.status === 'pending' && p.provider === 'esewa') {
     try {
       const c = await checkPaymentStatus(p);
-      if (c.paid) await confirmPayment(p.id, { ref: c.ref, raw: { ...(p.raw || {}), ...c.raw } });
-      else if (c.failed) await confirmPayment(p.id, { raw: { ...(p.raw || {}), ...c.raw }, outcome: 'failed' });
-    } catch { /* still waiting; the customer can try again */ }
+      if (c.paid) {
+        await confirmPayment(p.id, { ref: c.ref, raw: c.raw, outcome: 'paid' });
+      } else if (c.failed) {
+        await confirmPayment(p.id, { raw: c.raw, outcome: 'failed' });
+      }
+    } catch { /* still waiting; customer or polling can try again */ }
     p = (await query('SELECT * FROM payments WHERE id=$1', [p.id])).rows[0];
   }
+  const apiUrl = rt('public_api_url').replace(/\/$/, '');
   res.json({
     id: p.id,
-    payment_id: p.id,
     status: p.status,
     amount: p.amount,
     provider: p.provider,
-    mode: p.raw?.sandbox || pMode === 'sandbox' ? 'sandbox' : 'qr',
-    qr_message: p.raw?.qr_message || null,
-    pay_url: p.raw?.pay_url || null,
-    payment_url: p.raw?.pay_url || null,
-    fonepay_config: p.raw?.fonepay_config || null,
+    mode: p.raw?.sandbox ? 'sandbox' : 'epay',
+    pay_url: p.raw?.pay_url || `${apiUrl}/payments/esewa/start?payment_id=${p.id}`,
     order: p.order_id ? await fullOrder(p.order_id) : null,
   });
 }));
 
+// Sandbox manual test confirmation
 customer.post('/payments/:id/confirm', wrap(async (req, res) => {
+  if (providerMode('esewa') !== 'sandbox' && req.user.role !== 'owner') {
+    throw forbidden('Payments are confirmed by the provider in live mode');
+  }
   const { rows } = await query('SELECT * FROM payments WHERE id=$1', [req.params.id]);
   const p = rows[0];
-  if (!p || (p.user_id !== req.user.id && req.user.role === 'customer')) throw notFound('Payment not found');
-  if (providerMode(p.provider) !== 'sandbox' && !p.raw?.sandbox) {
-    throw forbidden('Payments in live mode are confirmed only by the payment gateway');
-  }
-  const outcome = req.body?.outcome === 'fail' ? 'failed' : 'paid';
-  const r = await confirmPayment(p.id, { ref: `SANDBOX-${Date.now()}`, raw: { ...(p.raw || {}), sandbox: true }, outcome });
-  res.json({ ok: true, status: r.failed ? 'failed' : 'paid', order: p.order_id ? await fullOrder(p.order_id) : null });
+  if (!p || (p.user_id !== req.user.id && req.user.role !== 'owner')) throw notFound('Payment not found');
+  const outcome = req.body?.outcome === 'fail' || req.body?.outcome === 'failed' ? 'failed' : 'paid';
+  res.json(await confirmPayment(p.id, { ref: 'SB-' + Date.now(), outcome }));
 }));
 
 customer.post('/orders/quote', wrap(async (req, res) => {
@@ -306,8 +237,9 @@ customer.get('/passes', wrap(async (req, res) => {
 }));
 
 customer.post('/passes', requireRole('customer'), wrap(async (req, res) => {
-  const b = z.object({ payment_method: z.enum(['fonepay', 'esewa', 'khalti', 'cash']).default('fonepay') }).parse(req.body);
-  res.status(201).json(await buyPass(req.user, b.payment_method));
+  const b = z.object({ payment_method: z.enum(['esewa', 'cash']) }).parse(req.body);
+  const out = await buyPass(req.user, b.payment_method);
+  res.status(201).json(out);
 }));
 
 customer.get('/coupons', wrap(async (req, res) => {

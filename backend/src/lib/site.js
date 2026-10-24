@@ -11,7 +11,7 @@ export const SITE_DEFAULTS = {
   },
   steps: [
     { title_en: 'Pick a counter', title_ne: 'नजिकको काउन्टर छान्नुहोस्', text: 'Share your location (free, on your phone) and we sort the nearest counters by walking time.', art: null },
-    { title_en: 'Order and pay', title_ne: 'अर्डर र भुक्तानी', text: 'Add a coffee in one tap. Pay with Fonepay, your pass, or cash at the counter.', art: null },
+    { title_en: 'Order and pay', title_ne: 'अर्डर र भुक्तानी', text: 'Add a coffee in one tap. Pay with eSewa, your pass, or cash at the counter.', art: null },
     { title_en: 'Walk in, 90 seconds', title_ne: 'भित्र आउनुहोस्, ९० सेकेन्ड', text: 'Your pickup number lights up when it is ready. Fresh Nepali beans, poured while you walk up.', art: null },
   ],
   people: [
@@ -37,7 +37,7 @@ export const SITE_DEFAULTS = {
     ],
     faqs: [
       { q: 'Who buys the coffee, milk and cups?', a: 'We do, centrally, and send stock to your counter. You confirm what arrives, so shortages are recorded fairly.' },
-      { q: 'Who holds the money?', a: 'You keep the cash you take at the counter. Digital payments (Fonepay) settle through us. Each month we net the two against your share and send one clear statement.' },
+      { q: 'Who holds the money?', a: 'You keep the cash you take at the counter. Digital payments (eSewa) settle through us. Each month we net the two against your share and send one clear statement.' },
       { q: 'Can I change the recipes or the prices?', a: 'No. Every drink is made to the Sadhai standard and sold at the Sadhai price, so customers get the same coffee wherever they order. You can still sell your own food.' },
       { q: 'What does it cost to join?', a: 'There is no franchise fee in this model. Ask us for the current terms.' },
     ],

@@ -7,9 +7,8 @@ import { useAuth } from '@/lib/auth';
 import { PromoBox } from '@/components/promo-box';
 import { useCart } from '@/lib/cart';
 import { useI18n } from '@/lib/i18n';
-import { Empty, ErrorNote, Field, Modal, useData } from '@/components/ui';
+import { Empty, ErrorNote, Field, useData } from '@/components/ui';
 import { CustomerShell, PAY_LABEL } from '@/components/customer';
-import { FonepayQr } from '@/components/fonepay';
 import { Icon } from '@/components/icons';
 
 export default function Cart() {
@@ -19,23 +18,12 @@ export default function Cart() {
   const router = useRouter();
   const coupons = useData<any[]>(user ? '/coupons' : null, [user?.id]);
   const passes = useData<any[]>(user ? '/passes' : null, [user?.id]);
-  const cfg = useData<any>('/config');
   const [offer, setOffer] = useState<{ type: 'none' | 'coupon' | 'pass' | 'promo'; id?: string }>({ type: 'none' });
-  const [method, setMethod] = useState('cash');
-  const enabledMethods: string[] = useMemo(() => {
-    const list = (cfg.data?.payment_methods || ['cash', 'fonepay', 'esewa', 'khalti']).filter((m: string) => ['cash', 'fonepay', 'esewa', 'khalti'].includes(m));
-    return list.length ? list : ['cash'];
-  }, [cfg.data?.payment_methods]);
-  useEffect(() => {
-    if (enabledMethods.length && !enabledMethods.includes(method)) {
-      setMethod(enabledMethods[0]);
-    }
-  }, [enabledMethods.join(','), method]);
+  const [method, setMethod] = useState<'cash' | 'esewa'>('cash');
   const [note, setNote] = useState('');
   const [quote, setQuote] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [payment, setPayment] = useState<any>(null);
   // Pickup now, or later today. The station says what is possible and whether it is open at all.
   const times = useData<any>(cart.station ? `/stations/${cart.station.id}/pickup-times` : null, [cart.station?.id]);
   const [when, setWhen] = useState<'now' | 'later'>('now');
@@ -77,8 +65,12 @@ export default function Cart() {
       const out = await api('/orders', { method: 'POST', body: payload });
       passes.reload();
       coupons.reload();
-      if (out.payment) { setPayment(out); return; }
-      cart.clear(); router.push(`/order/${out.order.id}`);
+      cart.clear();
+      if (out.payment?.pay_url) {
+        window.location.href = out.payment.pay_url;
+      } else {
+        router.push(`/order/${out.order.id}`);
+      }
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
@@ -138,12 +130,23 @@ export default function Cart() {
           {offer.type !== 'pass' && (
             <>
               <h4 style={{ margin: '20px 0 8px' }}>{t('pay_with')}</h4>
-              <div className="row wrap">
-                {enabledMethods.map((m) => (
-                  <button key={m} className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>
-                    {PAY_LABEL[m] || m}
-                  </button>
-                ))}
+              <div className="row wrap" style={{ gap: 8 }}>
+                <button
+                  type="button"
+                  className={`btn sm ${method === 'cash' ? 'primary' : 'ghost'}`}
+                  aria-pressed={method === 'cash'}
+                  onClick={() => setMethod('cash')}
+                >
+                  {PAY_LABEL.cash}
+                </button>
+                <button
+                  type="button"
+                  className={`btn sm ${method === 'esewa' ? 'primary' : 'ghost'}`}
+                  aria-pressed={method === 'esewa'}
+                  onClick={() => setMethod('esewa')}
+                >
+                  {PAY_LABEL.esewa}
+                </button>
               </div>
             </>
           )}
@@ -157,14 +160,6 @@ export default function Cart() {
           <ErrorNote error={error} />
           <button className="btn primary lg block" style={{ marginTop: 16 }} disabled={busy || !quote || !!closed} onClick={place}>{busy ? 'Placing…' : `${t('place_order')} · ${rs(quote?.total ?? 0)}`}</button>
         </>
-      )}
-
-      {payment && (
-        <Modal title={`Pay with ${PAY_LABEL[payment.payment?.provider || method] || 'QR'}`} onClose={() => { cart.clear(); router.push(`/order/${payment.order.id}`); }}>
-          <p>Scan to pay for order <strong>{payment.order.pickup_code}</strong>. Your order goes to the barista as soon as payment is confirmed.</p>
-          <FonepayQr payment={payment.payment} amount={payment.order.total} onDone={() => { cart.clear(); router.push(`/order/${payment.order.id}`); }} />
-          <button className="btn ghost block" onClick={() => { cart.clear(); router.push(`/order/${payment.order.id}`); }}>I will pay from my orders</button>
-        </Modal>
       )}
     </CustomerShell>
   );

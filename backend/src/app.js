@@ -23,9 +23,10 @@ export function createApp() {
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
   app.use(helmet());
-  // Allowed browsers: the CORS_ORIGINS list, owner's saved URL, and any local dev/flutter port
+  // Allowed browsers: the CORS_ORIGINS list, owner's saved URL, and local dev/flutter ports in non-production
+  const isDev = process.env.NODE_ENV !== 'production';
   app.use(cors({
-    origin: (origin, cb) => cb(null, !origin || config.corsOrigins.includes(origin) || origin === rt('public_web_url') || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)),
+    origin: (origin, cb) => cb(null, !origin || config.corsOrigins.includes(origin) || origin === rt('public_web_url') || (isDev && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))),
     credentials: true,
   }));
   app.use('/owner/media', express.json({ limit: '6mb' })); // picture uploads; everything else stays at 200 kb

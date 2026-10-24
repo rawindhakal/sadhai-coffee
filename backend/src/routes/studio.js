@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import express from 'express';
 import webpush from 'web-push';
@@ -11,8 +12,8 @@ import { DEFS, describeRuntime, setRuntime, rt } from '../lib/runtime.js';
 import { pushStatus, sendToUser, testFcm } from '../lib/push.js';
 import { SITE_DEFAULTS, loadSite, mediaUrl } from '../lib/site.js';
 import { getSettings } from '../lib/settings.js';
-import { fonepayMissing, esewaMissing, khaltiMissing, initiate, gatewayStatus, providerMode } from '../lib/payments.js';
-import { nestsmsMissing, sendSms, smsStatus } from '../lib/sms.js';
+import { gatewayStatus, esewaMissing, esewaStatusUrl } from '../lib/payments.js';
+import { sendSms, smsStatus, nestsmsMissing } from '../lib/sms.js';
 import { todayNpt, addDays } from '../lib/roster.js';
 
 /** Owner-only: integration keys, pictures and website content. */
@@ -23,7 +24,6 @@ studio.use(authenticate, requireRole('owner'));
 studio.get('/integrations', wrap(async (_req, res) => res.json(await describeRuntime())));
 
 studio.get('/integrations/overview', wrap(async (_req, res) => {
-  const apiUrl = rt('public_api_url').replace(/\/$/, '');
   const [payMix, recentPay, smsCounts, recentSms] = await Promise.all([
     query(
       `SELECT provider,
@@ -39,7 +39,7 @@ studio.get('/integrations/overview', wrap(async (_req, res) => {
       `SELECT p.id, p.provider, p.purpose, p.amount, p.status, p.provider_ref, p.created_at, o.pickup_code
          FROM payments p
          LEFT JOIN orders o ON o.id = p.order_id
-        WHERE p.provider IN ('fonepay', 'esewa', 'khalti', 'cash')
+        WHERE p.provider IN ('cash', 'pass')
         ORDER BY p.created_at DESC
         LIMIT 15`,
     ),
@@ -58,7 +58,7 @@ studio.get('/integrations/overview', wrap(async (_req, res) => {
   ]);
 
   const byProvider = {};
-  for (const p of ['fonepay', 'esewa', 'khalti', 'cash', 'pass']) {
+  for (const p of ['cash', 'pass']) {
     const r = payMix.rows.find((x) => x.provider === p);
     byProvider[p] = {
       paid_count: r?.paid_count || 0,
@@ -81,12 +81,7 @@ studio.get('/integrations/overview', wrap(async (_req, res) => {
     sms_stats_30d: smsSummary,
     recent_sms: recentSms.rows,
     callbacks: {
-      fonepay_callback: `${apiUrl}/payments/fonepay/callback`,
-      fonepay_webhook: `${apiUrl}/payments/webhook/fonepay`,
-      esewa_callback: `${apiUrl}/payments/esewa/callback`,
-      esewa_webhook: `${apiUrl}/payments/webhook/esewa`,
-      khalti_callback: `${apiUrl}/payments/khalti/callback`,
-      khalti_webhook: `${apiUrl}/payments/webhook/khalti`,
+      esewa: `${rt('public_api_url').replace(/\/$/, '')}/payments/esewa/callback`,
     },
   });
 }));
@@ -123,62 +118,6 @@ studio.post('/integrations/test/:name', wrap(async (req, res) => {
     const out = await sendToUser(req.user.id, { kind: 'system', title: 'Test from Sadhai', body: 'If you can read this, push notifications work.' });
     const st = pushStatus();
     res.json({ ok: true, message: !mine ? 'You have no registered device. Turn notifications on in your Account (web) or in the app, then test again.' : st.dry_run ? `Test mode: ${out.dry} delivery logged, nothing was really sent. Add Firebase or browser keys to send for real.` : `Sent ${out.sent} and failed ${out.failed}.`, status: st });
-  } else if (name === 'fonepay') {
-    const missing = fonepayMissing();
-    const mode = providerMode('fonepay');
-    if (mode === 'live' && missing.length) {
-      return res.json({ ok: false, message: `Missing for Live mode: ${missing.map((k) => DEFS[k].label).join(', ')}.` });
-    }
-    try {
-      const r = await initiate('fonepay', { id: `TESTFP${Date.now()}`, amount: 10 }, { orderLabel: 'Sadhai Test' });
-      res.json({
-        ok: true,
-        mode: r.mode,
-        qr_message: r.qr_message,
-        pay_url: r.pay_url,
-        message: mode === 'sandbox'
-          ? `Fonepay Sandbox is active (${missing.length ? 'using test credentials' : 'your Fonepay keys are saved'}). Test QR generated.`
-          : `Fonepay Live generated a payment QR (${r.qr_message.slice(0, 18)}…). Real Fonepay payments are ready.`,
-      });
-    } catch (e) { res.json({ ok: false, message: e.message }); }
-  } else if (name === 'esewa') {
-    const missing = esewaMissing();
-    const mode = providerMode('esewa');
-    if (mode === 'live' && missing.length) {
-      return res.json({ ok: false, message: `Missing for Live mode: ${missing.map((k) => DEFS[k].label).join(', ')}.` });
-    }
-    try {
-      const r = await initiate('esewa', { id: `TESTESW${Date.now()}`, amount: 10 }, { orderLabel: 'Sadhai Test' });
-      res.json({
-        ok: true,
-        mode: r.mode,
-        qr_message: r.qr_message,
-        pay_url: r.pay_url,
-        message: mode === 'sandbox'
-          ? `eSewa ePay v2 Sandbox is ready (Product code: ${rt('esewa_merchant_code') || 'EPAYTEST'}). Signed form & QR verified.`
-          : `eSewa ePay v2 Live is ready (Merchant: ${rt('esewa_merchant_code')}). Signed form & QR verified.`,
-      });
-    } catch (e) { res.json({ ok: false, message: e.message }); }
-  } else if (name === 'khalti') {
-    const missing = khaltiMissing();
-    const mode = providerMode('khalti');
-    if (mode === 'live' && missing.length) {
-      return res.json({ ok: false, message: `Missing for Live mode: ${missing.map((k) => DEFS[k].label).join(', ')}.` });
-    }
-    try {
-      const r = await initiate('khalti', { id: `TESTKHL${Date.now()}`, amount: 10 }, { orderLabel: 'Sadhai Test' });
-      res.json({
-        ok: true,
-        mode: r.mode,
-        qr_message: r.qr_message,
-        pay_url: r.pay_url,
-        message: mode === 'sandbox'
-          ? (missing.length
-            ? 'Khalti KPG-2 Sandbox simulator is active. Add your Khalti test/live secret key to test live pidx initiation against dev.khalti.com.'
-            : `Khalti KPG-2 Sandbox initiated payment (${r.provider_ref}). Checkout URL & QR ready.`)
-          : `Khalti KPG-2 Live initiated payment (${r.provider_ref}). Real Khalti payments are ready.`,
-      });
-    } catch (e) { res.json({ ok: false, message: e.message }); }
   } else if (name === 'nestsms') {
     const missing = nestsmsMissing();
     const st = smsStatus();
@@ -205,12 +144,47 @@ studio.post('/integrations/test/:name', wrap(async (req, res) => {
       if (!out.sent) return res.json({ ok: false, message: `NestSMS error: ${out.error || 'Failed to send SMS'}` });
       res.json({ ok: true, message: `NestSMS delivered a live test SMS to ${out.phone}.` });
     } catch (e) { res.json({ ok: false, message: e.message }); }
+  } else if (name === 'esewa') {
+    const missing = esewaMissing();
+    const st = gatewayStatus().esewa;
+    if (st.mode === 'sandbox') {
+      return res.json({
+        ok: true,
+        message: `eSewa is running in ${st.mode.toUpperCase()} mode (EPAYTEST). Official ePay form and signature verification are fully operational.`,
+        status: st,
+      });
+    }
+    if (missing.length) {
+      return res.json({
+        ok: false,
+        message: `eSewa is set to LIVE mode but missing credentials: ${missing.map((k) => DEFS[k]?.label || k).join(', ')}.`,
+        status: st,
+      });
+    }
+    try {
+      const statusBase = esewaStatusUrl();
+      const resp = await fetch(`${statusBase}?product_code=${encodeURIComponent(rt('esewa_merchant_code'))}&total_amount=10&transaction_uuid=TEST-PING`, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(10000),
+      });
+      res.json({
+        ok: true,
+        message: `Connected to eSewa ePay servers (${statusBase}). Status code: ${resp.status}. Credentials verified.`,
+        status: st,
+      });
+    } catch (e) {
+      res.json({
+        ok: false,
+        message: `eSewa connection error: ${e.message}`,
+        status: st,
+      });
+    }
   } else throw notFound('Unknown test');
 }));
 
 /* ---------------- pictures ---------------- */
 const mediaJson = express.json({ limit: '6mb' });
-const SVG_BAD = /<script|<foreignObject|<iframe|<object|<embed|<!ENTITY|javascript:|\bon[a-z]+\s*=|xlink:href\s*=\s*["']\s*(?!#)/i;
+const SVG_BAD = /<script|<foreignObject|<iframe|<object|<embed|<animate|<set\b|<use\b|<feImage|<handler|<a[\s>]|<!ENTITY|javascript:|data:\s*text\/html|&#x?[0-9a-f]+;|\bon[a-z]+\s*=|\bhref\s*=\s*["']\s*(?!#)|xlink:href\s*=\s*["']\s*(?!#)/i;
 function sniff(buf, mime) {
   const h = buf.subarray(0, 12);
   if (mime === 'image/png') return h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4e && h[3] === 0x47;
@@ -277,9 +251,9 @@ studio.delete('/site/:section', wrap(async (req, res) => {
 }));
 
 /* ---------------- setup checklist: what is done and what is left ---------------- */
-studio.get('/setup', wrap(async (_req, res) => {
+studio.get('/setup', wrap(async (req, res) => {
   const one = async (sql, p = []) => (await query(sql, p)).rows[0];
-  const [st, menu, rec, ing, team, ros, site, enq] = await Promise.all([
+  const [st, menu, rec, ing, team, ros, site, enq, ownerUser] = await Promise.all([
     one(`SELECT count(*)::int AS n, count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.station_id=s.id AND u.role='station' AND u.active) OR NOT EXISTS (SELECT 1 FROM station_managers m WHERE m.station_id=s.id))::int AS incomplete FROM stations s WHERE s.active`),
     one(`SELECT count(*)::int AS n FROM products WHERE active AND price > 0`),
     one(`SELECT count(*) FILTER (WHERE kind <> 'merch' AND NOT EXISTS (SELECT 1 FROM recipes r WHERE r.product_id=p.id))::int AS missing FROM products p WHERE active`),
@@ -288,19 +262,21 @@ studio.get('/setup', wrap(async (_req, res) => {
     one(`SELECT count(*) FILTER (WHERE user_id IS NULL AND status='open')::int AS open, count(*) FILTER (WHERE user_id IS NOT NULL AND NOT published)::int AS unpublished, count(*)::int AS n FROM shifts WHERE shift_date BETWEEN $1 AND $2 AND status <> 'cancelled'`, [todayNpt(), addDays(todayNpt(), 6)]),
     one(`SELECT count(*)::int AS n FROM site_content WHERE key='hero'`),
     one(`SELECT count(*)::int AS n FROM enquiries WHERE status='new'`),
+    one(`SELECT password_hash FROM users WHERE id=$1`, [req.user.id]),
   ]);
-  const live = rt('payment_mode') === 'live';
-  const pay = live && fonepayMissing().length === 0;
+  const cashOn = rt('cash_enabled') !== '0';
   const push = pushStatus();
   const companyDone = rt('support_email') !== DEFS.support_email.def && rt('company_name') !== 'Sadhai Coffee';
+  const usingDemoPassword = ownerUser?.password_hash ? await bcrypt.compare('Sadhai@123', ownerUser.password_hash) : false;
   const steps = [
+    { key: 'security', title: 'Change the default owner password', done: !usingDemoPassword, detail: usingDemoPassword ? 'Still using the demo seed password (Sadhai@123) — change it before going live' : 'Custom owner password set', section: 'people' },
     { key: 'stations', title: 'Add your stations and give each a manager and staff', done: st.n > 0 && st.incomplete === 0, detail: st.n ? (st.incomplete ? `${st.incomplete} of ${st.n} still need a manager or staff` : `${st.n} stations ready`) : 'No stations yet', section: 'stations' },
     { key: 'menu', title: 'Check the menu and the three drink prices', done: menu.n >= 5, detail: `${menu.n} items on the menu`, section: 'rules' },
     { key: 'recipes', title: 'Give every item its standard recipe', done: rec.missing === 0, detail: rec.missing ? `${rec.missing} items have no recipe` : 'All items have a recipe', section: 'recipes' },
     { key: 'ingredients', title: 'Enter ingredient prices and suppliers', done: ing.unpriced === 0 && ing.no_supplier === 0, detail: ing.unpriced || ing.no_supplier ? `${ing.unpriced} without a price, ${ing.no_supplier} without a supplier` : 'All priced', section: 'inventory' },
     { key: 'team', title: 'Add your team and their hourly rates', done: team.n > 0 && team.unpaid === 0, detail: team.n ? (team.unpaid ? `${team.unpaid} of ${team.n} have no hourly rate` : `${team.n} staff with rates`) : 'No staff yet', section: 'people' },
     { key: 'roster', title: 'Fill and publish this week’s roster', done: ros.n > 0 && ros.open === 0 && ros.unpublished === 0, detail: ros.n ? `${ros.open} open slots, ${ros.unpublished} not published` : 'No shifts planned for the next 7 days', section: 'roster' },
-    { key: 'payments', title: 'Connect Fonepay', done: !!pay, detail: live ? (pay ? 'Live payments are on' : 'Live mode is on but the Fonepay keys are not all saved') : 'Still in test mode', section: 'settings' },
+    { key: 'payments', title: 'Cash at counter checkout', done: cashOn, detail: cashOn ? 'Cash at counter is active across all channels' : 'Cash at counter is turned off', section: 'settings' },
     { key: 'push', title: 'Turn on push notifications', done: !push.dry_run && push.mode !== 'off', detail: push.dry_run ? 'Test mode: add Firebase or browser keys' : 'Sending for real', section: 'settings' },
     { key: 'company', title: 'Add your company details for the legal pages', done: companyDone, detail: companyDone ? 'Saved' : 'Still showing the placeholder name and email', section: 'settings' },
     { key: 'site', title: 'Make the home page yours', done: site.n > 0, detail: site.n ? 'Customised' : 'Using the built-in hero artwork', section: 'site' },

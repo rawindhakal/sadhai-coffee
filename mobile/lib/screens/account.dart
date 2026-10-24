@@ -6,7 +6,6 @@ import '../version.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'fonepay.dart';
 import 'package:provider/provider.dart';
 import '../api.dart';
 import '../state.dart';
@@ -51,7 +50,6 @@ class _PassPanelState extends State<PassPanel> {
   List<Map> _passes = [];
   bool _loaded = false;
   Map<String, dynamic>? _pass;
-  List<String> _paymentMethods = ['fonepay', 'esewa', 'khalti'];
   num? get _price => _pass?['price'] as num?;
   int _lastEpoch = 0;
   int _activePassIdx = 0;
@@ -65,10 +63,6 @@ class _PassPanelState extends State<PassPanel> {
       try {
         final c = await Api.instance.request('GET', '/config', auth: false);
         _pass = Map<String, dynamic>.from(c['pass'] as Map);
-        if (c['payment_methods'] is List) {
-          final m = (c['payment_methods'] as List).map((e) => e.toString()).where((x) => ['fonepay', 'esewa', 'khalti'].contains(x)).toList();
-          if (m.isNotEmpty) _paymentMethods = m;
-        }
       } catch (_) {}
       if (mounted) setState(() { _passes = p.cast<Map>(); _loaded = true; });
     } catch (_) {}
@@ -173,30 +167,55 @@ class _PassPanelState extends State<PassPanel> {
   }
 
   Future<void> _buy() async {
-    final m = await showModalBottomSheet<String>(context: context, backgroundColor: Brand.surfaceRaised, builder: (c) => SafeArea(child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Pay ${rs(_price ?? 900)} with', style: display(22)),
-      const SizedBox(height: 12),
-      if (_paymentMethods.contains('fonepay'))
-        Padding(padding: const EdgeInsets.only(bottom: 8), child: FilledButton(onPressed: () => Navigator.pop(c, 'fonepay'), child: const Center(child: Text('Pay with Fonepay')))),
-      if (_paymentMethods.contains('esewa'))
-        Padding(padding: const EdgeInsets.only(bottom: 8), child: FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFF41A124), foregroundColor: Colors.white), onPressed: () => Navigator.pop(c, 'esewa'), child: const Center(child: Text('Pay with eSewa')))),
-      if (_paymentMethods.contains('khalti'))
-        Padding(padding: const EdgeInsets.only(bottom: 8), child: FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFF5C2D91), foregroundColor: Colors.white), onPressed: () => Navigator.pop(c, 'khalti'), child: const Center(child: Text('Pay with Khalti')))),
-      const Text('Prefer cash? Buy it at any station counter.', style: TextStyle(color: Brand.inkMuted)),
-    ]))));
-    if (m == null || !mounted) return;
-    try {
-      final out = await Api.instance.post('/passes', {'payment_method': m});
-      final pay = out['payment'] as Map;
-      if (!mounted) return;
-      final r = await showFonepay(context, pay, (pay['amount'] ?? _price ?? 900) as num);
-      if (mounted && r == 'paid') {
-        toast(context, 'Pass ${out['pass']['code']} is ready');
-        context.read<CartState>().invalidatePasses();
-      }
-      if (mounted && r == 'failed') toast(context, 'The payment did not go through', bad: true);
-      await _load();
-    } on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); }
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Brand.surfaceRaised,
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Buy a 10-cup pass (${rs(_price ?? 900)})', style: display(22)),
+              const SizedBox(height: 8),
+              const Text(
+                'Buy online via eSewa, or pay cash at any Sadhai station counter. A new pass starts only when you use its first cup.',
+                style: TextStyle(color: Brand.inkMuted),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                onPressed: () async {
+                  Navigator.pop(c);
+                  try {
+                    final out = await Api.instance.post('/passes', {'payment_method': 'esewa'});
+                    final pay = out['payment'] as Map?;
+                    if (pay != null && pay['pay_url'] != null) {
+                      final uri = Uri.parse(pay['pay_url'] as String);
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      }
+                    }
+                    _load();
+                    if (mounted) toast(context, 'Pass created. Complete payment via eSewa.');
+                  } on ApiException catch (e) {
+                    if (mounted) toast(context, e.message, bad: true);
+                  }
+                },
+                child: Text('Pay ${rs(_price ?? 900)} with eSewa'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                onPressed: () => Navigator.pop(c),
+                child: const Text('Pay cash at counter'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

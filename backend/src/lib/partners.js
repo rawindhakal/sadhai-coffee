@@ -5,7 +5,7 @@ import { range } from './reports.js';
 /**
  * Partner-cafe statement. Sadhai runs on existing cafes, so money moves two ways:
  *  - the cafe holds the CASH it takes at the counter (and for passes sold over the counter)
- *  - Sadhai holds the DIGITAL money (Fonepay)
+ *  - Sadhai holds the DIGITAL money (eSewa)
  * The cafe earns revenue_share_pct of net sales. Pass cups count at the pass's per-cup value, so the cafe is paid for them.
  * net_due > 0: Sadhai pays the cafe. net_due < 0: the cafe remits to Sadhai.
  */

@@ -3,7 +3,7 @@ import { bad, conflict, forbidden, notFound } from './http.js';
 import { publish } from './hub.js';
 import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
-import { initiate, ONLINE_PROVIDERS, ALL_PAYMENT_METHODS, isProviderEnabled } from './payments.js';
+import { ONLINE_PROVIDERS, ALL_PAYMENT_METHODS, isProviderEnabled, initiate } from './payments.js';
 import { sendSms } from './sms.js';
 import { rtBool } from './runtime.js';
 import crypto from 'node:crypto';
@@ -438,12 +438,12 @@ export async function createOrder(user, input) {
         [user.id],
       );
       if (openCash[0].n >= 2) {
-        throw conflict('You already have two unpaid cash orders waiting for pickup. Pick them up or pay online with Fonepay, eSewa or Khalti.', 'unpaid_limit');
+        throw conflict('You already have two unpaid cash orders waiting for pickup. Please pick them up at the counter first.', 'unpaid_limit');
       }
     }
 
     const code = await nextPickupCode(db, q.station);
-    const digital = ONLINE_PROVIDERS.includes(method) && q.total > 0; // online QR orders wait for payment confirmation before hitting the bar
+    const digital = ONLINE_PROVIDERS.includes(method) && q.total > 0;
     const paidNow = q.total === 0 || (channel === 'counter' && !digital && input.paid_now !== false);
     const { rows } = await db.query(
       `INSERT INTO orders(station_id, user_id, customer_name, pickup_code, channel, status, subtotal, discount, total, discount_label,
@@ -719,7 +719,7 @@ export async function advanceOrder(orderId, next, actor, { code, override } = {}
  * Anti-Loss Referral Reward Engine:
  * 1. Referral program must be enabled (`referral_enabled = 1`).
  * 2. Referee must have a pending referral row (`referrals.status = 'pending'`).
- * 3. Qualifying order MUST be a real paid order (`payment_status = 'paid'`, `payment_method` in cash/fonepay/esewa/khalti — NOT a pass order),
+ * 3. Qualifying order MUST be a real paid order (`payment_status = 'paid'`, `payment_method` in cash/esewa — NOT a pass order),
  *    with NO coupon/promo discount (`discount = 0`) and `total >= referral_min_spend`.
  * 4. If `offer_require_verified_phone = 1`, referee phone must be verified (`phone_verified = true`).
  * 5. Referrer must not have exceeded `referral_cap_month` this calendar month or `referral_lifetime_cap` all-time.
@@ -735,11 +735,10 @@ async function rewardReferral(db, userId, order) {
   if (!ref) return null;
   if (ref.referrer_id === userId) return null;
 
-  // Must be a real paid cash/QR order without existing coupon/promo discount and meeting minimum spend
-  const minSpend = Math.max(100, Number(s.referral_min_spend) || 180);
+  // Must be a real paid cash/QR order meeting minimum spend
+  const minSpend = Math.max(50, Number(s.referral_min_spend) || 100);
   if (!order || order.payment_status !== 'paid' || order.payment_method === 'pass') return null;
-  if (Number(order.discount || 0) > 0) return null;
-  if (Number(order.total || 0) < minSpend) return null;
+  if (Number(order.subtotal || order.total || 0) < minSpend) return null;
 
   // Verify referee phone & check claimed_phones anti-recreate guard
   const referee = (await db.query('SELECT phone, phone_verified FROM users WHERE id=$1', [userId])).rows[0];
@@ -822,58 +821,86 @@ const newPassCode = () => {
 
 /** Buying another pass is always allowed. Each pass gets its own unique code and passes are used one after another. */
 export async function buyPass(user, method, { stationId = null, soldBy = null } = {}) {
-  if (!ONLINE_PROVIDERS.includes(method) && method !== 'cash') {
-    throw bad('Choose Fonepay, eSewa, Khalti, or counter cash');
-  }
   const s = await getSettings();
   const price = s.pass_price;
-  const { pass, pay } = await tx(async (db) => {
-    const cashNow = method === 'cash' && soldBy;
-    let rows;
-    for (let i = 0; ; i++) {
-      try {
-        await db.query('SAVEPOINT code');
-        ({ rows } = await db.query(
-          `INSERT INTO passes(user_id, total_cups, price_paid, status, purchased_at, expires_at, code)
-           VALUES ($1,$2,$3,$4, now(), CASE WHEN $4='active' THEN now() + ($5 || ' days')::interval END, $6) RETURNING *`,
-          [user.id, s.pass_cups, price, cashNow ? 'active' : 'pending', String(s.pass_use_by_days), newPassCode()],
-        ));
-        await db.query('RELEASE SAVEPOINT code');
-        break;
-      } catch (e) {
-        await db.query('ROLLBACK TO SAVEPOINT code');
-        if (e.code !== '23505' || i > 5) throw e;
-      }
+
+  if (method === 'cash') {
+    if (!soldBy) {
+      throw bad('10-cup passes for cash are purchased at any Sadhai Coffee station counter.');
     }
-    const { rows: p } = await db.query(
-      `INSERT INTO payments(user_id, pass_id, station_id, purpose, provider, amount, status, settled_at)
-       VALUES ($1,$2,$3,'pass',$4,$5,$6,$7) RETURNING *`,
-      [user.id, rows[0].id, stationId, method, price, cashNow ? 'paid' : 'pending', cashNow ? new Date() : null],
-    );
-    await audit(soldBy || user.id, 'pass.sell', 'pass', rows[0].id, { method, code: rows[0].code }, db);
-    return { pass: rows[0], pay: p[0] };
-  });
-  if (method === 'cash' && soldBy) {
+    const { pass } = await tx(async (db) => {
+      let rows;
+      for (let i = 0; ; i++) {
+        try {
+          await db.query('SAVEPOINT code');
+          ({ rows } = await db.query(
+            `INSERT INTO passes(user_id, total_cups, price_paid, status, purchased_at, expires_at, code)
+             VALUES ($1,$2,$3,'active', now(), now() + ($4 || ' days')::interval, $5) RETURNING *`,
+            [user.id, s.pass_cups, price, String(s.pass_use_by_days), newPassCode()],
+          ));
+          await db.query('RELEASE SAVEPOINT code');
+          break;
+        } catch (e) {
+          await db.query('ROLLBACK TO SAVEPOINT code');
+          if (e.code !== '23505' || i > 5) throw e;
+        }
+      }
+      await db.query(
+        `INSERT INTO payments(user_id, pass_id, station_id, purpose, provider, amount, status, settled_at)
+         VALUES ($1,$2,$3,'pass','cash',$4,'paid',now())`,
+        [user.id, rows[0].id, stationId, price],
+      );
+      await audit(soldBy || user.id, 'pass.sell', 'pass', rows[0].id, { method: 'cash', code: rows[0].code }, db);
+      return { pass: rows[0] };
+    });
     await notify(user.id, { kind: 'pass', title: 'Your 10-cup pass is ready', body: `Pass ${pass.code}. It starts when you use your first cup, then lasts 30 days.`, data: { pass_id: pass.id } });
     return { pass, payment: null };
   }
-  if (method === 'cash') throw bad('Pay for a pass in the app with Fonepay, eSewa, or Khalti, or buy it at the counter');
-  if (!isProviderEnabled(method)) throw bad(`${method[0].toUpperCase() + method.slice(1)} is currently turned off. Please choose another payment method.`);
-  const init = await initiate(method, pay, {
-    orderLabel: 'Sadhai 10-cup pass',
-    customer: { name: user?.name || 'Sadhai Customer', phone: user?.phone || '', email: user?.email || '' },
-  });
-  await query('UPDATE payments SET provider_ref=COALESCE($2, provider_ref), raw=$3 WHERE id=$1', [pay.id, init.provider_ref || null, init.raw || null]);
-  return { pass, payment: init };
+
+  if (method === 'esewa') {
+    if (!isProviderEnabled('esewa')) {
+      throw bad('eSewa payment is currently disabled');
+    }
+    const { pass, payment } = await tx(async (db) => {
+      let rows;
+      for (let i = 0; ; i++) {
+        try {
+          await db.query('SAVEPOINT code');
+          ({ rows } = await db.query(
+            `INSERT INTO passes(user_id, total_cups, price_paid, status, purchased_at, expires_at, code)
+             VALUES ($1,$2,$3,'pending', now(), now() + ($4 || ' days')::interval, $5) RETURNING *`,
+            [user.id, s.pass_cups, price, String(s.pass_use_by_days), newPassCode()],
+          ));
+          await db.query('RELEASE SAVEPOINT code');
+          break;
+        } catch (e) {
+          await db.query('ROLLBACK TO SAVEPOINT code');
+          if (e.code !== '23505' || i > 5) throw e;
+        }
+      }
+      const pay = (await db.query(
+        `INSERT INTO payments(user_id, pass_id, station_id, purpose, provider, amount, status)
+         VALUES ($1,$2,$3,'pass','esewa',$4,'pending') RETURNING *`,
+        [user.id, rows[0].id, stationId, price],
+      )).rows[0];
+      return { pass: rows[0], payment: pay };
+    });
+    const paymentInit = await initiate('esewa', payment, { customer: user });
+    await query('UPDATE payments SET provider_ref=COALESCE($2, provider_ref), raw=$3 WHERE id=$1', [payment.id, paymentInit.provider_ref || null, paymentInit.raw || null]);
+    return { pass, payment: paymentInit };
+  }
+
+  throw bad(`Unsupported payment method ${method}`);
 }
 
 /* ---------------------------------------------------------- welcome & ladder */
 
 async function insertWelcomeCoupons(userId, db, s) {
-  const firstPct = Math.max(0, Math.min(100, Number(s.first_cup_discount_pct) || 0));
-  const firstMax = Math.max(30, Math.min(300, Number(s.first_cup_free_max) || 120));
-  const firstMinSpend = Math.max(100, Number(s.first_cup_min_spend) || 200);
-  const firstDays = Math.max(1, Math.min(60, Number(s.first_cup_valid_days) || 7));
+  const firstEnabled = Number(s.welcome_first_cup_enabled ?? 1) === 1;
+  const firstPct = firstEnabled ? Math.max(0, Math.min(100, Number(s.welcome_first_cup_pct ?? s.first_cup_discount_pct ?? 100) || 0)) : 0;
+  const firstMax = Math.max(30, Math.min(300, Number(s.first_cup_max ?? s.first_cup_free_max) || 100));
+  const firstMinSpend = Math.max(50, Number(s.first_cup_min_spend) || 100);
+  const firstDays = Math.max(1, Math.min(90, Number(s.first_cup_days ?? s.first_cup_valid_days) || 14));
 
   let count = 0;
   if (firstPct > 0) {
@@ -888,18 +915,18 @@ async function insertWelcomeCoupons(userId, db, s) {
     count++;
   }
 
-  if (Number(s.ladder_enabled)) {
-    const lPct = Math.max(5, Math.min(40, Number(s.ladder_pct) || 15));
-    const lCups = Math.max(0, Math.min(3, Number(s.ladder_cups) || 0));
-    const lMax = Math.max(30, Math.min(200, Number(s.ladder_max_discount) || 80));
-    const lMinSpend = Math.max(120, Number(s.ladder_min_spend) || 220);
-    const lDays = Math.max(1, Math.min(60, Number(s.ladder_days) || 14));
+  const lCups = Math.max(0, Math.min(5, Number(s.ladder_count ?? s.ladder_cups) || 0));
+  if (lCups > 0) {
+    const lPct = Math.max(5, Math.min(50, Number(s.ladder_pct) || 20));
+    const lMax = Math.max(10, Math.min(200, Number(s.ladder_max_discount) || 40));
+    const lMinSpend = Math.max(50, Number(s.ladder_min_spend) || 100);
+    const lDays = Math.max(1, Math.min(90, Number(s.ladder_days) || 21));
     for (let i = 0; i < lCups; i++) {
       const cupNum = i + 2;
       await db.query(
         `INSERT INTO coupons(user_id, kind, title, pct, free_max, min_spend, max_discount, single_cup, step, expires_at)
          VALUES ($1, 'pct', $2, $3, $4, $5, $4, true, $6, now() + ($7 || ' days')::interval)`,
-        [userId, `${lPct}% off · cup ${cupNum} (up to Rs ${lMax})`, lPct, lMax, lMinSpend, cupNum, String(lDays)],
+        [userId, `${lPct}% off · cup ${cupNum}`, lPct, lMax, lMinSpend, cupNum, String(lDays)],
       );
       count++;
     }

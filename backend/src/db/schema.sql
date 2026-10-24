@@ -760,6 +760,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_ip_hash text;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS min_spend int NOT NULL DEFAULT 0;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS max_discount int;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS single_cup boolean NOT NULL DEFAULT true;
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS step int NOT NULL DEFAULT 1;
 
 ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS max_discount int;
 ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS drinks_only boolean NOT NULL DEFAULT true;
@@ -773,8 +774,15 @@ CREATE TABLE IF NOT EXISTS claimed_phones (
   first_user_id uuid,
   welcome_issued boolean NOT NULL DEFAULT false,
   referral_used boolean NOT NULL DEFAULT false,
+  welcome_claimed boolean NOT NULL DEFAULT false,
+  referral_claimed boolean NOT NULL DEFAULT false,
+  updated_at timestamptz NOT NULL DEFAULT now(),
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE claimed_phones ADD COLUMN IF NOT EXISTS welcome_claimed boolean NOT NULL DEFAULT false;
+ALTER TABLE claimed_phones ADD COLUMN IF NOT EXISTS referral_claimed boolean NOT NULL DEFAULT false;
+ALTER TABLE claimed_phones ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
 -- NestSMS OTP verification table
 CREATE TABLE IF NOT EXISTS phone_verifications (

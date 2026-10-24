@@ -1,10 +1,9 @@
 'use client';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { api, fmtTime, rs } from '@/lib/api';
 import { useEvents, useRequireRole } from '@/lib/auth';
 import { ErrorNote, Loading, Status, useData, useToast } from '@/components/ui';
-import { FonepayQr } from '@/components/fonepay';
 import { CustomerShell, PAY_LABEL } from '@/components/customer';
 
 const STEPS = ['placed', 'preparing', 'ready', 'picked_up'];
@@ -12,18 +11,20 @@ const STEPS = ['placed', 'preparing', 'ready', 'picked_up'];
 export default function Tracking() {
   const user = useRequireRole('customer', 'owner', 'manager', 'station');
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const toast = useToast();
   const { data: o, error, reload } = useData<any>(user ? `/orders/${id}` : null);
   const [rating, setRating] = useState(0);
-  const [qr, setQr] = useState<any>(null);
   useEvents((ev, d) => { if (ev === 'order' && d.id === id) reload(); });
+
+  const paidSuccess = searchParams.get('paid') === 'esewa';
+  const paymentFailed = searchParams.get('payment') === 'failed';
 
   if (!user) return <CustomerShell><Loading /></CustomerShell>;
   if (error) return <CustomerShell><ErrorNote error={error} /></CustomerShell>;
   if (!o) return <CustomerShell><Loading what="Loading your order" /></CustomerShell>;
   const step = STEPS.indexOf(o.status);
 
-  async function pay() { try { setQr(await api(`/payments/${o.payment_id}`)); } catch (e: any) { toast(e.message, true); } }
   async function cancel() {
     if (!confirm('Cancel this order?')) return;
     try { await api(`/orders/${id}/cancel`, { method: 'POST', body: {} }); toast('Order cancelled'); reload(); } catch (e: any) { toast(e.message, true); }
@@ -32,6 +33,16 @@ export default function Tracking() {
 
   return (
     <CustomerShell>
+      {paidSuccess && (
+        <div className="card flat" style={{ marginBottom: 16, background: '#E8F5E9', borderColor: '#41A124', color: '#1B5E20' }}>
+          <strong>Payment confirmed via eSewa!</strong> Your order has been placed.
+        </div>
+      )}
+      {paymentFailed && (
+        <div className="card flat" style={{ marginBottom: 16, background: '#FFEBEE', borderColor: 'var(--cherry)', color: '#B71C1C' }}>
+          <strong>eSewa payment could not be completed.</strong> You can try again below or cancel the order.
+        </div>
+      )}
       <div className="card center" style={{ padding: 32 }}>
         <p className="label">Pickup number</p>
         <div className="pickup" aria-live="polite">{o.pickup_code}</div>
@@ -47,7 +58,6 @@ export default function Tracking() {
         )}
         {['placed', 'preparing'].includes(o.status) && o.scheduled_for && !o.released_at && <p className="muted">We start making it a few minutes before your pickup time.</p>}
         {['placed', 'preparing'].includes(o.status) && !(o.scheduled_for && !o.released_at) && <p className="muted">{o.ahead > 0 ? `${o.ahead} order${o.ahead > 1 ? 's' : ''} ahead of you · about ${Math.ceil(o.eta_seconds / 60)} min` : 'Your coffee in 90 seconds.'}</p>}
-        {o.status === 'awaiting_payment' && <p className="muted">Finish the payment to send your order to the barista.</p>}
         {o.status !== 'cancelled' && <div className="steps" style={{ marginTop: 20 }} aria-hidden>{STEPS.map((s, i) => <i key={s} className={i <= step ? 'on' : ''} />)}</div>}
         {o.status === 'cancelled' && <p className="err">{o.cancel_reason || 'Cancelled'}{o.payment_status === 'refunded' ? ' · Refund on its way' : ''}</p>}
       </div>
@@ -61,11 +71,23 @@ export default function Tracking() {
         <hr style={{ border: 0, borderTop: '1px solid var(--hairline)', margin: '12px 0' }} />
         {o.discount > 0 && <div className="row between"><span className="muted">{o.discount_label}</span><span>− {rs(o.discount)}</span></div>}
         <div className="row between"><strong>Total</strong><strong>{rs(o.total)}</strong></div>
-        <p className="small muted" style={{ marginTop: 4 }}>{PAY_LABEL[o.payment_method]} · <Status s={o.status === 'awaiting_payment' ? 'awaiting_payment' : o.payment_status} />{o.payment_method === 'cash' && o.payment_status === 'unpaid' ? ' Pay when you pick up.' : ''}</p>
+        <p className="small muted" style={{ marginTop: 4 }}>{PAY_LABEL[o.payment_method] || 'Cash at counter'} · <Status s={o.payment_status} />{o.payment_method === 'cash' && o.payment_status === 'unpaid' ? ' Pay when you pick up.' : ''}</p>
       </div>
-      {o.status === 'awaiting_payment' && !qr && <button className="btn primary block" style={{ marginTop: 16 }} onClick={pay}>Pay with Fonepay QR</button>}
-      {o.status === 'awaiting_payment' && qr && <div className="card" style={{ marginTop: 16 }}><FonepayQr payment={{ payment_id: qr.id, mode: qr.mode || 'qr', qr_message: qr.qr_message, amount: qr.amount }} onDone={() => { setQr(null); reload(); }} /></div>}
-      {o.status === 'awaiting_payment' && <button className="btn danger block" style={{ marginTop: 16 }} onClick={cancel}>Cancel order</button>}
+      {o.status === 'awaiting_payment' && (
+        <div className="card col" style={{ marginTop: 16, background: 'var(--foam)', borderColor: 'var(--marigold)' }}>
+          <h3 style={{ margin: 0 }}>Payment required</h3>
+          <p className="muted" style={{ margin: '4px 0 12px' }}>This order is reserved. Complete payment via eSewa to send your order to the barista.</p>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <a
+              className="btn primary"
+              href={`${process.env.NEXT_PUBLIC_API_URL || ''}/payments/esewa/start?payment_id=${o.payment_id}`}
+            >
+              Pay with eSewa
+            </a>
+            <button className="btn ghost" onClick={cancel}>Cancel order</button>
+          </div>
+        </div>
+      )}
       {['placed', 'preparing', 'ready'].includes(o.status) && <p className="small muted center" style={{ marginTop: 16 }}>Your order has gone to the barista, so it cannot be cancelled. Something wrong? Ask at the counter.</p>}
       {o.status === 'picked_up' && (
         <div className="card center" style={{ marginTop: 16 }}>

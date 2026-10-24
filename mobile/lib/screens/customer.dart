@@ -2,16 +2,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
 import 'account.dart';
 import 'cart.dart';
 import 'home.dart';
-import 'fonepay.dart';
 import 'offers.dart';
 
-const payLabel = {'cash': 'Cash at counter', 'fonepay': 'Fonepay', 'esewa': 'eSewa', 'khalti': 'Khalti', 'pass': '10-cup pass'};
+const payLabel = {'cash': 'Cash at counter', 'esewa': 'eSewa (ePay)', 'pass': '10-cup pass'};
 
 void toast(BuildContext c, String m, {bool bad = false}) => ScaffoldMessenger.of(c)
   ..hideCurrentSnackBar()
@@ -143,9 +143,24 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 Row(children: [Text(payLabel[o['payment_method']] ?? ''), const SizedBox(width: 8), Chip2.status(o['payment_status'])]),
                 if (o['payment_method'] == 'cash' && o['payment_status'] == 'unpaid') const Text('Pay when you pick up.', style: TextStyle(color: Brand.inkMuted)),
               ]))),
-              if (o['status'] == 'awaiting_payment') Padding(padding: const EdgeInsets.only(top: 16), child: FilledButton(onPressed: () async { try { final p = await Api.instance.get('/payments/${o['payment_id']}'); if (!context.mounted) return; await showFonepay(context, {'payment_id': p['id'], 'provider': p['provider'] ?? o['payment_method'], 'qr_message': p['qr_message'], 'payment_url': p['payment_url'], 'mode': p['mode'] ?? rtMode(p)}, p['amount'] as num); _load(); } on ApiException catch (e) { if (!context.mounted) return; toast(context, e.message, bad: true); } }, child: Text('Pay with ${payLabel[o['payment_method']] ?? 'QR'}'))),
               if (['placed', 'preparing', 'ready'].contains(o['status'])) const Padding(padding: EdgeInsets.only(top: 12), child: Text('Your order has gone to the barista, so it cannot be cancelled. Something wrong? Ask at the counter.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted, fontSize: 13))),
-              if (o['status'] == 'awaiting_payment') Padding(padding: const EdgeInsets.only(top: 12), child: OutlinedButton(onPressed: _cancel, child: const Text('Cancel order'))),
+              if (o['status'] == 'awaiting_payment') ...[
+                const SizedBox(height: 12),
+                FilledButton(
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: const Color(0xFF41A124)),
+                  onPressed: () async {
+                    final payId = o['payment_id'];
+                    final url = '$apiBase/payments/esewa/start?payment_id=$payId';
+                    final uri = Uri.parse(url);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                  child: const Text('Pay with eSewa'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton(style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(44)), onPressed: _cancel, child: const Text('Cancel order')),
+              ],
               if (o['status'] == 'picked_up') Padding(padding: const EdgeInsets.only(top: 16), child: Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
                 Text(o['rating'] != null ? 'Thank you for rating' : 'How was your coffee?', style: display(20)),
                 const SizedBox(height: 8),
@@ -156,5 +171,4 @@ class _TrackingScreenState extends State<TrackingScreen> {
   }
 }
 
-/// Test-mode payments are marked by the server when it sets up the QR; a QR from a live Fonepay account starts with a real merchant payload.
-String rtMode(Map p) => (p['qr_message'] as String? ?? '').startsWith('SADHAI-TEST') ? 'sandbox' : 'qr';
+

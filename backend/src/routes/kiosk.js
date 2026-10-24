@@ -10,13 +10,14 @@ import { sid } from './station.js';
 // Self-ordering kiosk. The tablet is signed in as that station's staff account, so orders are pinned to the station.
 export const kiosk = Router();
 kiosk.use(authenticate, requireRole('station', 'manager', 'owner'));
-kiosk.use(rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: true, legacyHeaders: false, message: { error: 'Slow down for a moment.' } }));
+kiosk.use(rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false, message: { error: 'Slow down for a moment.' } }));
+const passCheckLimit = rateLimit({ windowMs: 60_000, limit: 15, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many pass checks. Please wait a moment and try again.' } });
 
 const orderSchema = z.object({
   items: z.array(z.object({ product_id: z.string().uuid(), qty: z.number().int().min(1).max(10).default(1), option_ids: z.array(z.string().uuid()).default([]) })).min(1).max(20),
   customer_name: z.string().trim().min(2, 'Enter your name').max(40),
   customer_phone: z.string(),
-  payment: z.enum(['counter', 'pass', 'fonepay', 'esewa', 'khalti']),
+  payment: z.enum(['counter', 'pass']),
   pass_code: z.string().trim().max(20).optional(),
   consent: z.literal(true, { errorMap: () => ({ message: 'Please accept so we can call your order' }) }),
   note: z.string().max(200).optional(),
@@ -32,7 +33,7 @@ async function passOwner(code, phone) {
   return rows[0];
 }
 
-kiosk.get('/pass-check', wrap(async (req, res) => {
+kiosk.get('/pass-check', passCheckLimit, wrap(async (req, res) => {
   const phone = normalizePhone(req.query.phone);
   const owner = await passOwner(String(req.query.code || ''), phone);
   const { rows } = await query(
@@ -58,9 +59,10 @@ kiosk.post('/orders', wrap(async (req, res) => {
 }));
 
 kiosk.get('/orders/:id', wrap(async (req, res) => {
-  const o = await fullOrder(req.params.id, undefined, { reveal: true });
-  if (!o) throw notFound('Order not found');
+  const o = await fullOrder(req.params.id);
+  if (!o || o.channel !== 'kiosk') throw notFound('Order not found');
   const stationId = await sid(req);
   if (o.station_id !== stationId) throw forbidden();
-  res.json({ id: o.id, pickup_code: o.pickup_code, handover_code: o.handover_code, status: o.status, payment_status: o.payment_status, payment_method: o.payment_method, total: o.total, customer_name: o.customer_name, payment_id: o.payment_id });
+  if (Date.now() - new Date(o.created_at).getTime() > 2 * 3600_000) throw notFound('Order not found');
+  res.json({ id: o.id, pickup_code: o.pickup_code, status: o.status, payment_status: o.payment_status, payment_method: o.payment_method, total: o.total, customer_name: o.customer_name });
 }));

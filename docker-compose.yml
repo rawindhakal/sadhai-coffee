@@ -5,7 +5,7 @@ services:
     environment: { POSTGRES_DB: sadhai_coffee, POSTGRES_USER: sadhai, POSTGRES_PASSWORD: sadhai }
     volumes: [dbdata:/var/lib/postgresql/data]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U sadhai -d sadhai_coffee"], interval: 5s, retries: 10 }
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
   api:
     build: ./backend
     depends_on: { db: { condition: service_healthy } }
@@ -14,7 +14,7 @@ services:
       DATABASE_URL: postgres://sadhai:sadhai@db:5432/sadhai_coffee
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       CORS_ORIGINS: http://localhost:3000
-      PAYMENT_MODE: ${PAYMENT_MODE:-sandbox}
+      CASH_ENABLED: ${CASH_ENABLED:-1}
       PUBLIC_API_URL: http://localhost:4747
       PUBLIC_WEB_URL: http://localhost:3000
       IGNORE_STATION_HOURS: ${IGNORE_STATION_HOURS:-0}

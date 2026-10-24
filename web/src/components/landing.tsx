@@ -208,7 +208,7 @@ export function Landing() {
       <main>
         <Hero open={open} stations={stations?.length || 0} site={site} />
         <div className="lmarquee" aria-hidden><div>{Array.from({ length: 2 }).map((_, k) => <span key={k}>{marquee} · </span>)}</div></div>
-        <HowItWorks steps={site?.steps || [{ title_en: 'Pick a counter', text: 'Share your location (free, on your phone) and we sort the nearest counters by walking time.' }, { title_en: 'Order and pay', text: 'Add a coffee in one tap. Pay with Fonepay, your pass, or cash at the counter.' }, { title_en: 'Walk in, 90 seconds', text: 'Your pickup number lights up when it is ready.' }]} />
+        <HowItWorks steps={site?.steps || [{ title_en: 'Pick a counter', text: 'Share your location (free, on your phone) and we sort the nearest counters by walking time.' }, { title_en: 'Order and pay', text: 'Add a coffee in one tap. Pay with eSewa, your pass, or cash at the counter.' }, { title_en: 'Walk in, 90 seconds', text: 'Your pickup number lights up when it is ready.' }]} />
         <Showcase cats={homeData?.categories || null} pricing={pricing} />
         <Story cards={site?.story || [{ tag: 'Grown', title: 'In the hills of Gulmi, Syangja and Kaski', text: 'Nepali farmers pick cherries by hand on mid-hill terraces.' }, { tag: 'Roasted', title: 'By Sevya Coffee Processing', text: 'Roasted weekly in Nepal.' }, { tag: 'Poured', title: 'At a counter near you', text: 'One promise: 90 seconds.' }]} />
         <PassPlay price={cfg?.pass?.price ?? 900} hot={pricing.hot} />

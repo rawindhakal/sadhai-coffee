@@ -6,7 +6,6 @@ import { Seg, Skeleton } from './dash/kit';
 import { useDash } from './dash/shell';
 import { Icon } from './icons';
 import { HeroScene } from './hero';
-import { FonepayQr } from './fonepay';
 import { productArt } from '@/lib/art';
 import { STEP_ART, STORY_ART, PEOPLE_ART, HERO_DEFAULTS } from '@/lib/site-content';
 
@@ -51,81 +50,23 @@ export function RulesPanel() {
 }
 
 const GROUPS: Record<string, { title: string; note: string }> = {
-  payments: { title: 'Global Payment & Counter Settings', note: 'Master controls for Cash at counter and default gateway behavior.' },
-  fonepay: { title: 'Fonepay Dynamic QR & Web PG (fonepay_flutter)', note: 'Supports Fonepay Third-Party Dynamic QR and Fonepay Web/Flutter PG (HMAC-SHA512 signed merchantRequest). Keys are encrypted at rest.' },
-  esewa: { title: 'eSewa ePay v2 & QR Gateway (developer.esewa.com.np)', note: 'Official eSewa ePay v2 integration with HMAC-SHA256 signed checkout form, callback verification, and status lookup API.' },
-  khalti: { title: 'Khalti KPG-2 ePayment & QR Gateway (docs.khalti.com)', note: 'Official Khalti KPG-2 (/epayment/initiate/ & /epayment/lookup/) with pidx payment URL and QR checkout.' },
+  payments: { title: 'Payment Gateways & Counter Settings', note: 'Configure official eSewa ePay v2 and Cash at counter checkout options.' },
   sms: { title: 'NestSMS & Phone Verification Gateway', note: 'Connect NestSMS (api.nestsms.com) for phone OTP verification, Order-Ready alerts, and Welcome/Referral SMS rewards.' },
   push: { title: 'Push notifications', note: 'Firebase sends to Android and iPhone. Browser push uses a key pair. With neither, push runs in test mode.' },
   app: { title: 'Addresses and app versions', note: 'Where customers reach you and which app versions may still run.' },
   company: { title: 'Company details', note: 'Shown on the privacy policy, terms and support pages.' },
 };
 
-const GATEWAY_CARDS: {
-  id: 'fonepay' | 'esewa' | 'khalti' | 'cash';
-  name: string;
-  subtitle: string;
-  color: string;
-  bg: string;
-  badge: string;
-  docsUrl?: string;
-  enableKey: string;
-  modeKey?: string;
-}[] = [
-  {
-    id: 'fonepay',
-    name: 'Fonepay',
-    subtitle: 'Dynamic QR + Web / Flutter PG (HMAC-SHA512)',
-    color: '#D71920',
-    bg: 'rgba(215, 25, 32, 0.08)',
-    badge: 'QR + PG',
-    docsUrl: 'https://github.com/iamnabink/fonepay_flutter',
-    enableKey: 'fonepay_enabled',
-    modeKey: 'fonepay_mode',
-  },
-  {
-    id: 'esewa',
-    name: 'eSewa',
-    subtitle: 'ePay v2 Signed Form + QR + Status Lookup',
-    color: '#41A124',
-    bg: 'rgba(65, 161, 36, 0.08)',
-    badge: 'ePay v2 + QR',
-    docsUrl: 'https://developer.esewa.com.np/',
-    enableKey: 'esewa_enabled',
-    modeKey: 'esewa_mode',
-  },
-  {
-    id: 'khalti',
-    name: 'Khalti',
-    subtitle: 'KPG-2 ePayment Initiate + Lookup + QR',
-    color: '#5C2D91',
-    bg: 'rgba(92, 45, 145, 0.08)',
-    badge: 'KPG-2 + QR',
-    docsUrl: 'https://docs.khalti.com/',
-    enableKey: 'khalti_enabled',
-    modeKey: 'khalti_mode',
-  },
-  {
-    id: 'cash',
-    name: 'Cash at Counter',
-    subtitle: 'Pay in person at station pickup or POS',
-    color: '#2B6E46',
-    bg: 'rgba(43, 110, 70, 0.08)',
-    badge: 'Counter POS',
-    enableKey: 'cash_enabled',
-  },
-];
-
 export function IntegrationsPanel() {
   const { data, reload, error } = useData<any[]>('/owner/integrations');
   const ov = useData<any>('/owner/integrations/overview');
   const toast = useToast();
-  const [gwTab, setGwTab] = useState<'overview' | 'fonepay' | 'esewa' | 'khalti' | 'sms' | 'other'>('overview');
+  const [gwTab, setGwTab] = useState<'overview' | 'esewa' | 'sms' | 'other'>('overview');
   const [edit, setEdit] = useState<Record<string, string | null>>({});
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [testPhone, setTestPhone] = useState('');
-  const [result, setResult] = useState<{ title: string; ok?: boolean; message: string; qr_message?: string; pay_url?: string; provider?: string; mode?: string } | null>(null);
+  const [result, setResult] = useState<{ title: string; ok?: boolean; message: string } | null>(null);
 
   if (!data) return <><ErrorNote error={error} /><Skeleton h={80} n={4} /></>;
 
@@ -141,7 +82,7 @@ export function IntegrationsPanel() {
       setOpen({});
       reload();
       ov.reload();
-      toast('Gateway configuration saved');
+      toast('Settings saved');
     } catch (e: any) {
       toast(e.message, true);
     }
@@ -166,15 +107,7 @@ export function IntegrationsPanel() {
     setBusyKey(`test_${name}`);
     try {
       const r = await api(`/owner/integrations/test/${name}`, { method: 'POST', body: extraBody });
-      setResult({
-        title,
-        ok: r.ok,
-        message: r.message,
-        qr_message: r.qr_message,
-        pay_url: r.pay_url,
-        provider: name,
-        mode: r.mode,
-      });
+      setResult({ title, ok: r.ok, message: r.message });
       ov.reload();
     } catch (e: any) {
       setResult({ title, ok: false, message: e.message });
@@ -192,50 +125,6 @@ export function IntegrationsPanel() {
       toast('New browser push keys saved');
     } catch (e: any) {
       toast(e.message, true);
-    }
-  }
-
-  function copyText(label: string, text?: string) {
-    if (!text) return;
-    navigator.clipboard?.writeText(text);
-    toast(`${label} copied`);
-  }
-
-  function applyPreset(provider: 'fonepay' | 'esewa' | 'khalti', targetMode: 'sandbox' | 'live') {
-    if (provider === 'fonepay') {
-      setEdit({
-        ...edit,
-        fonepay_mode: targetMode,
-        fonepay_qr_url: targetMode === 'live'
-          ? 'https://merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty'
-          : 'https://dev-merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty',
-        fonepay_pg_url: targetMode === 'live'
-          ? 'https://clientapi.fonepay.com/api/merchantRequest'
-          : 'https://dev-clientapi.fonepay.com/api/merchantRequest',
-      });
-      toast(`Loaded Fonepay ${targetMode.toUpperCase()} endpoint presets — click Save below to apply`);
-    } else if (provider === 'esewa') {
-      setEdit({
-        ...edit,
-        esewa_mode: targetMode,
-        ...(targetMode === 'sandbox' ? { esewa_merchant_code: 'EPAYTEST' } : {}),
-        esewa_url: targetMode === 'live'
-          ? 'https://epay.esewa.com.np/api/epay/main/v2/form'
-          : 'https://rc-epay.esewa.com.np/api/epay/main/v2/form',
-        esewa_status_url: targetMode === 'live'
-          ? 'https://epay.esewa.com.np/api/epay/transaction/status/'
-          : 'https://rc.esewa.com.np/api/epay/transaction/status/',
-      });
-      toast(`Loaded eSewa ${targetMode.toUpperCase()} presets — click Save below to apply`);
-    } else if (provider === 'khalti') {
-      setEdit({
-        ...edit,
-        khalti_mode: targetMode,
-        khalti_url: targetMode === 'live'
-          ? 'https://khalti.com/api/v2'
-          : 'https://dev.khalti.com/api/v2',
-      });
-      toast(`Loaded Khalti ${targetMode.toUpperCase()} presets — click Save below to apply`);
     }
   }
 
@@ -307,29 +196,22 @@ export function IntegrationsPanel() {
     );
   }
 
-  const stats30 = ov.data?.stats_30d || {};
-  const smsStats = ov.data?.sms_stats_30d || { sent: 0, dry_run: 0, failed: 0 };
-  const callbacks = ov.data?.callbacks || {};
+  const smsStats = ov.data?.sms_stats_30d || { sent: 0, sandbox: 0, failed: 0 };
 
   return (
     <div className="col" style={{ gap: 16 }}>
-      {/* Top Gateway Dashboard Header & Navigation */}
       <div className="panel" style={{ background: 'linear-gradient(135deg, var(--surface-raised) 0%, var(--surface) 100%)', borderWidth: 2 }}>
         <div className="row between wrap" style={{ gap: 12 }}>
           <div>
             <div className="row" style={{ gap: 8 }}>
-              <span className="chip hill">Payment & SMS Control Center</span>
-              <span className="small muted">Real-time switches across Web, Android, iOS, Kiosk & Station POS</span>
+              <span className="chip hill">Cash at Counter & NestSMS Control Center</span>
             </div>
-            <h3 style={{ marginTop: 6 }}>Payment Gateways & NestSMS Dashboard</h3>
+            <h3 style={{ marginTop: 6 }}>Counter Cash & SMS Gateway Dashboard</h3>
             <p className="small muted" style={{ maxWidth: 740 }}>
-              Turn any payment method or SMS feature ON or OFF instantaneously, switch individual gateways between Sandbox and Live, and run live verification tests.
+              All orders are settled via Cash at counter (or 10-cup pass). Manage NestSMS phone verification, Order-Ready SMS alerts, push notifications, and app configuration below.
             </p>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>
-            <button className="btn sm" onClick={() => test('fonepay', 'Fonepay Live Check')} disabled={busyKey === 'test_fonepay'}>Test Fonepay</button>
-            <button className="btn sm" onClick={() => test('esewa', 'eSewa ePay v2 Check')} disabled={busyKey === 'test_esewa'}>Test eSewa</button>
-            <button className="btn sm" onClick={() => test('khalti', 'Khalti KPG-2 Check')} disabled={busyKey === 'test_khalti'}>Test Khalti</button>
             <button className="btn sm" onClick={() => test('nestsms', 'NestSMS Check')} disabled={busyKey === 'test_nestsms'}>Test NestSMS</button>
           </div>
         </div>
@@ -339,9 +221,7 @@ export function IntegrationsPanel() {
             onChange={setGwTab}
             options={[
               { id: 'overview', label: 'Overview & Switches' },
-              { id: 'fonepay', label: 'Fonepay' },
-              { id: 'esewa', label: 'eSewa' },
-              { id: 'khalti', label: 'Khalti' },
+              { id: 'esewa', label: 'eSewa (ePay v2)' },
               { id: 'sms', label: 'NestSMS & OTP' },
               { id: 'other', label: 'Push, App & Company' },
             ]}
@@ -349,142 +229,79 @@ export function IntegrationsPanel() {
         </div>
       </div>
 
-      {/* TAB 1: OVERVIEW & INSTANT SWITCHES */}
       {gwTab === 'overview' && (
         <div className="col" style={{ gap: 16 }}>
-          {/* 4 Payment Gateway Cards */}
-          <div className="grid g2" style={{ gap: 16 }}>
-            {GATEWAY_CARDS.map((gw) => {
-              const enabled = valOf(gw.enableKey) === '1';
-              const mode = gw.modeKey ? (valOf(gw.modeKey) || valOf('payment_mode') || 'sandbox') : 'live';
-              const st = stats30[gw.id] || { paid_count: 0, paid_amount: 0, failed_count: 0, pending_count: 0 };
-              const gwStatus = ov.data?.gateways?.[gw.id];
-              return (
-                <div
-                  key={gw.id}
-                  className="panel col"
-                  style={{
-                    gap: 14,
-                    borderLeft: `5px solid ${enabled ? gw.color : 'var(--line)'}`,
-                    opacity: enabled ? 1 : 0.78,
-                  }}
-                >
-                  <div className="row between wrap" style={{ alignItems: 'flex-start' }}>
-                    <div>
-                      <div className="row" style={{ gap: 8 }}>
-                        <span className="chip" style={{ background: gw.bg, color: gw.color, fontWeight: 700 }}>{gw.badge}</span>
-                        {gw.modeKey && (
-                          <span className={`chip ${mode === 'live' ? 'hill' : 'marigold'}`}>
-                            {mode === 'live' ? 'LIVE' : 'SANDBOX'}
-                          </span>
-                        )}
-                        {gwStatus?.configured && <span className="chip hill">Keys Ready</span>}
-                      </div>
-                      <h3 style={{ marginTop: 6 }}>{gw.name}</h3>
-                      <p className="small muted">{gw.subtitle}</p>
-                    </div>
-
-                    {/* Instant ON / OFF Switch */}
-                    <label
-                      className="row card flat"
-                      style={{
-                        padding: '6px 12px',
-                        cursor: 'pointer',
-                        borderColor: enabled ? gw.color : 'var(--line)',
-                        background: enabled ? gw.bg : 'var(--surface-sunk)',
-                        gap: 8,
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        role="switch"
-                        style={{ width: 20, minHeight: 20 }}
-                        checked={enabled}
-                        disabled={busyKey === gw.enableKey}
-                        onChange={(e) =>
-                          quickSave(
-                            { [gw.enableKey]: e.target.checked ? '1' : '0' },
-                            `${gw.name} turned ${e.target.checked ? 'ON' : 'OFF'}`
-                          )
-                        }
-                      />
-                      <strong style={{ color: enabled ? gw.color : 'var(--ink-muted)' }}>
-                        {enabled ? 'ON' : 'OFF'}
-                      </strong>
-                    </label>
-                  </div>
-
-                  {/* 30-day KPIs */}
-                  {gw.id !== 'cash' ? (
-                    <div className="grid g3" style={{ gap: 8 }}>
-                      <div className="card flat">
-                        <div className="small muted">30d Paid Volume</div>
-                        <strong style={{ fontSize: 18 }}>{rs(st.paid_amount || 0)}</strong>
-                      </div>
-                      <div className="card flat">
-                        <div className="small muted">30d Paid Txns</div>
-                        <strong style={{ fontSize: 18 }}>{st.paid_count || 0}</strong>
-                      </div>
-                      <div className="card flat">
-                        <div className="small muted">Pending / Failed</div>
-                        <strong style={{ fontSize: 18 }}>{st.pending_count || 0} / {st.failed_count || 0}</strong>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="card flat">
-                      <div className="small muted">Counter & Kiosk Cash Orders</div>
-                      <p className="small" style={{ marginTop: 4 }}>
-                        When ON, customers and counter staff can place Cash orders. Turn OFF for cashless-only stations.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Quick Actions Footer */}
-                  <div className="row between wrap" style={{ paddingTop: 4, borderTop: '1px solid var(--line)' }}>
-                    {gw.modeKey ? (
-                      <div className="row" style={{ gap: 6 }}>
-                        <span className="small muted">Mode:</span>
-                        <button
-                          className={`btn sm ${mode === 'sandbox' ? 'primary' : 'ghost'}`}
-                          disabled={busyKey === gw.modeKey}
-                          onClick={() => quickSave({ [gw.modeKey!]: 'sandbox' }, `${gw.name} switched to Sandbox`)}
-                        >
-                          Sandbox
-                        </button>
-                        <button
-                          className={`btn sm ${mode === 'live' ? 'primary' : 'ghost'}`}
-                          disabled={busyKey === gw.modeKey}
-                          onClick={() => quickSave({ [gw.modeKey!]: 'live' }, `${gw.name} switched to Live`)}
-                        >
-                          Live
-                        </button>
-                      </div>
-                    ) : <span className="small muted">Instant counter settlement</span>}
-
-                    <div className="row" style={{ gap: 8 }}>
-                      {gw.docsUrl && (
-                        <a className="btn sm ghost" href={gw.docsUrl} target="_blank" rel="noopener noreferrer">
-                          Docs ↗
-                        </a>
-                      )}
-                      {gw.id !== 'cash' && (
-                        <>
-                          <button className="btn sm ghost" onClick={() => test(gw.id, `Test ${gw.name}`)}>
-                            Test QR
-                          </button>
-                          <button className="btn sm" onClick={() => setGwTab(gw.id as any)}>
-                            Configure →
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="panel col" style={{ gap: 14, borderLeft: '5px solid #2B6E46' }}>
+            <div className="row between wrap">
+              <div>
+                <span className="chip hill">Counter POS</span>
+                <h3 style={{ marginTop: 6 }}>Cash at Counter</h3>
+                <p className="small muted">Customers pay in person when picking up their order at the station counter, or redeem their 10-cup pass.</p>
+              </div>
+              <label className="row card flat" style={{ padding: '6px 12px', cursor: 'pointer', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  style={{ width: 20, minHeight: 20 }}
+                  checked={valOf('cash_enabled') === '1'}
+                  onChange={(e) => quickSave({ cash_enabled: e.target.checked ? '1' : '0' }, `Cash at counter turned ${e.target.checked ? 'ON' : 'OFF'}`)}
+                />
+                <strong>Cash: {valOf('cash_enabled') === '1' ? 'ON' : 'OFF'}</strong>
+              </label>
+            </div>
           </div>
 
-          {/* NestSMS Master & Feature Switches Card */}
+          <div className="panel col" style={{ gap: 14, borderLeft: `5px solid ${valOf('esewa_enabled') === '1' ? '#41A124' : 'var(--line)'}` }}>
+            <div className="row between wrap">
+              <div>
+                <div className="row" style={{ gap: 8 }}>
+                  <span className="chip" style={{ background: 'rgba(65, 161, 36, 0.1)', color: '#41A124', fontWeight: 700 }}>eSewa ePay v2</span>
+                  <span className={`chip ${valOf('esewa_mode') === 'live' ? 'hill' : 'marigold'}`}>
+                    {(valOf('esewa_mode') || 'SANDBOX').toUpperCase()}
+                  </span>
+                  {ov.data?.gateways?.esewa?.configured && <span className="chip hill">Live Credentials Set</span>}
+                </div>
+                <h3 style={{ marginTop: 6 }}>eSewa Official Payment Gateway</h3>
+                <p className="small muted">
+                  Official signed ePay v2 checkout. Customers can pay via eSewa web/app on mobile or desktop with instant HMAC-SHA256 signature verification.
+                </p>
+              </div>
+              <div className="row" style={{ gap: 8 }}>
+                <label className="row card flat" style={{ padding: '6px 12px', cursor: 'pointer', gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    style={{ width: 20, minHeight: 20 }}
+                    checked={valOf('esewa_enabled') === '1'}
+                    onChange={(e) => quickSave({ esewa_enabled: e.target.checked ? '1' : '0' }, `eSewa turned ${e.target.checked ? 'ON' : 'OFF'}`)}
+                  />
+                  <strong>eSewa: {valOf('esewa_enabled') === '1' ? 'ON' : 'OFF'}</strong>
+                </label>
+                <button className="btn sm" onClick={() => test('esewa', 'eSewa Connection Test')} disabled={busyKey === 'test_esewa'}>
+                  {busyKey === 'test_esewa' ? 'Testing…' : 'Test eSewa'}
+                </button>
+                <button className="btn sm primary" onClick={() => setGwTab('esewa')}>Configure eSewa →</button>
+              </div>
+            </div>
+
+            <div className="grid g3" style={{ gap: 10 }}>
+              <div className="card flat col" style={{ gap: 4 }}>
+                <div className="small muted">Merchant Code</div>
+                <strong>{valOf('esewa_merchant_code') || 'EPAYTEST (Sandbox)'}</strong>
+                <span className="small muted">Mode: {valOf('esewa_mode') || 'auto'}</span>
+              </div>
+              <div className="card flat col" style={{ gap: 4 }}>
+                <div className="small muted">Callback Endpoint</div>
+                <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{ov.data?.callbacks?.esewa || '/payments/esewa/callback'}</code>
+              </div>
+              <div className="card flat col" style={{ gap: 4 }}>
+                <div className="small muted">30-Day eSewa Revenue</div>
+                <strong style={{ fontSize: 18 }}>Rs {ov.data?.stats_30d?.esewa?.revenue || 0}</strong>
+                <span className="small muted">{ov.data?.stats_30d?.esewa?.paid_count || 0} paid · {ov.data?.stats_30d?.esewa?.pending_count || 0} pending</span>
+              </div>
+            </div>
+          </div>
+
           <div className="panel col" style={{ gap: 14, borderLeft: `5px solid ${valOf('sms_enabled') === '1' ? '#0284C7' : 'var(--line)'}` }}>
             <div className="row between wrap">
               <div>
@@ -540,201 +357,38 @@ export function IntegrationsPanel() {
               })}
               <div className="card flat col" style={{ gap: 4 }}>
                 <div className="small muted">30-Day SMS Activity</div>
-                <strong style={{ fontSize: 18 }}>{smsStats.sent || 0} Sent · {smsStats.dry_run || 0} Sandbox</strong>
+                <strong style={{ fontSize: 18 }}>{smsStats.sent || 0} Sent · {smsStats.sandbox || 0} Sandbox</strong>
                 <span className="small muted">{smsStats.failed || 0} failed</span>
               </div>
             </div>
           </div>
-
-          {/* Recent Gateway Transactions & SMS Logs */}
-          <div className="grid g2" style={{ gap: 16, alignItems: 'start' }}>
-            <div className="panel col" style={{ gap: 10 }}>
-              <div className="row between">
-                <h3>Recent Gateway Transactions</h3>
-                <button className="btn sm ghost" onClick={() => ov.reload()}>Refresh</button>
-              </div>
-              {!ov.data?.recent_payments?.length ? (
-                <Empty>No digital gateway payments recorded yet.</Empty>
-              ) : (
-                <div className="col" style={{ gap: 8 }}>
-                  {ov.data.recent_payments.slice(0, 8).map((p: any) => (
-                    <div key={p.id} className="row between card flat" style={{ padding: '8px 12px' }}>
-                      <div>
-                        <div className="row" style={{ gap: 6 }}>
-                          <strong style={{ textTransform: 'uppercase' }}>{p.provider}</strong>
-                          <span className={`chip ${p.status === 'paid' ? 'hill' : p.status === 'failed' ? 'cherry' : 'marigold'}`}>{p.status}</span>
-                        </div>
-                        <div className="small muted">{p.provider_ref || p.id.slice(0, 8)} · {fmtDateTime(p.created_at)}</div>
-                      </div>
-                      <strong>{rs(p.amount)}</strong>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="panel col" style={{ gap: 10 }}>
-              <div className="row between">
-                <h3>Recent NestSMS Dispatches</h3>
-                <button className="btn sm ghost" onClick={() => setGwTab('sms')}>Send Test SMS</button>
-              </div>
-              {!ov.data?.recent_sms?.length ? (
-                <Empty>No SMS messages logged yet.</Empty>
-              ) : (
-                <div className="col" style={{ gap: 8 }}>
-                  {ov.data.recent_sms.slice(0, 8).map((s: any) => (
-                    <div key={s.id} className="row between card flat" style={{ padding: '8px 12px' }}>
-                      <div>
-                        <div className="row" style={{ gap: 6 }}>
-                          <strong>{s.phone}</strong>
-                          <span className={`chip ${s.status === 'sent' ? 'hill' : s.status === 'failed' ? 'cherry' : ''}`}>{s.status}</span>
-                          <span className="small muted">{s.purpose}</span>
-                        </div>
-                        <div className="small muted" style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.message}</div>
-                      </div>
-                      <span className="small muted">{fmtDateTime(s.created_at)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       )}
 
-      {/* TAB 2: FONEPAY DEDICATED PANEL */}
-      {gwTab === 'fonepay' && (
-        <div className="panel col" style={{ gap: 16 }}>
-          <div className="ph">
-            <div>
-              <div className="row" style={{ gap: 8 }}>
-                <span className="chip" style={{ background: 'rgba(215,25,32,0.1)', color: '#D71920', fontWeight: 700 }}>Fonepay Nepal</span>
-                <a className="small" href="https://github.com/iamnabink/fonepay_flutter" target="_blank" rel="noopener noreferrer">fonepay_flutter Reference ↗</a>
-              </div>
-              <h3 style={{ marginTop: 4 }}>{GROUPS.fonepay.title}</h3>
-              <p className="small muted" style={{ maxWidth: 680 }}>{GROUPS.fonepay.note}</p>
-            </div>
-            <div className="row wrap" style={{ gap: 8 }}>
-              <button className="btn sm ghost" onClick={() => applyPreset('fonepay', 'sandbox')}>Load Sandbox URLs</button>
-              <button className="btn sm ghost" onClick={() => applyPreset('fonepay', 'live')}>Load Live URLs</button>
-              <button className="btn sm primary" onClick={() => test('fonepay', 'Fonepay Live QR & PG Test')}>Test Fonepay QR</button>
-            </div>
-          </div>
-
-          <div className="grid g3" style={{ gap: 10 }}>
-            <div className="card flat">
-              <div className="small muted">Web PG Start Endpoint</div>
-              <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.fonepay_start || '/api/payments/fonepay/start'}</code>
-            </div>
-            <div className="card flat row between">
-              <div>
-                <div className="small muted">Return / Callback URL (RU)</div>
-                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.fonepay_callback || '/api/payments/fonepay/callback'}</code>
-              </div>
-              <button className="btn sm ghost" onClick={() => copyText('Fonepay Callback URL', callbacks.fonepay_callback)}>Copy</button>
-            </div>
-            <div className="card flat row between">
-              <div>
-                <div className="small muted">Server Webhook URL</div>
-                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.fonepay_webhook || '/api/payments/fonepay/webhook'}</code>
-              </div>
-              <button className="btn sm ghost" onClick={() => copyText('Fonepay Webhook URL', callbacks.fonepay_webhook)}>Copy</button>
-            </div>
-          </div>
-
-          {renderGroupFields('fonepay')}
-        </div>
-      )}
-
-      {/* TAB 3: ESEWA DEDICATED PANEL */}
       {gwTab === 'esewa' && (
         <div className="panel col" style={{ gap: 16 }}>
           <div className="ph">
             <div>
-              <div className="row" style={{ gap: 8 }}>
-                <span className="chip" style={{ background: 'rgba(65,161,36,0.1)', color: '#41A124', fontWeight: 700 }}>eSewa ePay v2</span>
-                <a className="small" href="https://developer.esewa.com.np/" target="_blank" rel="noopener noreferrer">developer.esewa.com.np ↗</a>
-              </div>
-              <h3 style={{ marginTop: 4 }}>{GROUPS.esewa.title}</h3>
-              <p className="small muted" style={{ maxWidth: 680 }}>{GROUPS.esewa.note}</p>
+              <span className="chip" style={{ background: 'rgba(65, 161, 36, 0.1)', color: '#41A124', fontWeight: 700 }}>eSewa ePay v2</span>
+              <h3 style={{ marginTop: 4 }}>eSewa Official Payment Gateway</h3>
+              <p className="small muted" style={{ maxWidth: 680 }}>
+                Configure official eSewa ePay (developer.esewa.com.np/pages/Epay). Test credentials: merchant code <code>EPAYTEST</code>, secret key <code>8gBm/:&amp;EnhH.1/q</code>.
+              </p>
             </div>
             <div className="row wrap" style={{ gap: 8 }}>
-              <button className="btn sm ghost" onClick={() => applyPreset('esewa', 'sandbox')}>Load EPAYTEST Sandbox</button>
-              <button className="btn sm ghost" onClick={() => applyPreset('esewa', 'live')}>Load Live ePay v2 URLs</button>
-              <button className="btn sm primary" onClick={() => test('esewa', 'eSewa ePay v2 Signature & QR Test')}>Test eSewa</button>
+              <button
+                className="btn sm primary"
+                disabled={busyKey === 'test_esewa'}
+                onClick={() => test('esewa', 'eSewa Connection Test')}
+              >
+                {busyKey === 'test_esewa' ? 'Testing…' : 'Test eSewa Connection'}
+              </button>
             </div>
           </div>
-
-          <div className="grid g3" style={{ gap: 10 }}>
-            <div className="card flat">
-              <div className="small muted">Signed ePay v2 Form Redirect</div>
-              <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.esewa_start || '/api/payments/esewa/start'}</code>
-            </div>
-            <div className="card flat row between">
-              <div>
-                <div className="small muted">Success / Failure Callback URL</div>
-                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.esewa_callback || '/api/payments/esewa/callback'}</code>
-              </div>
-              <button className="btn sm ghost" onClick={() => copyText('eSewa Callback URL', callbacks.esewa_callback)}>Copy</button>
-            </div>
-            <div className="card flat row between">
-              <div>
-                <div className="small muted">Server Webhook URL</div>
-                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.esewa_webhook || '/api/payments/esewa/webhook'}</code>
-              </div>
-              <button className="btn sm ghost" onClick={() => copyText('eSewa Webhook URL', callbacks.esewa_webhook)}>Copy</button>
-            </div>
-          </div>
-
-          {renderGroupFields('esewa')}
+          {renderGroupFields('payments')}
         </div>
       )}
 
-      {/* TAB 4: KHALTI DEDICATED PANEL */}
-      {gwTab === 'khalti' && (
-        <div className="panel col" style={{ gap: 16 }}>
-          <div className="ph">
-            <div>
-              <div className="row" style={{ gap: 8 }}>
-                <span className="chip" style={{ background: 'rgba(92,45,145,0.1)', color: '#5C2D91', fontWeight: 700 }}>Khalti KPG-2</span>
-                <a className="small" href="https://docs.khalti.com/" target="_blank" rel="noopener noreferrer">docs.khalti.com ↗</a>
-              </div>
-              <h3 style={{ marginTop: 4 }}>{GROUPS.khalti.title}</h3>
-              <p className="small muted" style={{ maxWidth: 680 }}>{GROUPS.khalti.note}</p>
-            </div>
-            <div className="row wrap" style={{ gap: 8 }}>
-              <button className="btn sm ghost" onClick={() => applyPreset('khalti', 'sandbox')}>Load Sandbox (dev.khalti.com)</button>
-              <button className="btn sm ghost" onClick={() => applyPreset('khalti', 'live')}>Load Live (khalti.com)</button>
-              <button className="btn sm primary" onClick={() => test('khalti', 'Khalti KPG-2 Initiate & QR Test')}>Test Khalti</button>
-            </div>
-          </div>
-
-          <div className="grid g3" style={{ gap: 10 }}>
-            <div className="card flat">
-              <div className="small muted">KPG-2 Initiate Redirect</div>
-              <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.khalti_start || '/api/payments/khalti/start'}</code>
-            </div>
-            <div className="card flat row between">
-              <div>
-                <div className="small muted">Return / Callback URL (return_url)</div>
-                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.khalti_callback || '/api/payments/khalti/callback'}</code>
-              </div>
-              <button className="btn sm ghost" onClick={() => copyText('Khalti Callback URL', callbacks.khalti_callback)}>Copy</button>
-            </div>
-            <div className="card flat row between">
-              <div>
-                <div className="small muted">Server Webhook URL</div>
-                <code className="small" style={{ wordBreak: 'break-all' }}>{callbacks.khalti_webhook || '/api/payments/khalti/webhook'}</code>
-              </div>
-              <button className="btn sm ghost" onClick={() => copyText('Khalti Webhook URL', callbacks.khalti_webhook)}>Copy</button>
-            </div>
-          </div>
-
-          {renderGroupFields('khalti')}
-        </div>
-      )}
-
-      {/* TAB 5: NESTSMS DEDICATED PANEL */}
       {gwTab === 'sms' && (
         <div className="panel col" style={{ gap: 16 }}>
           <div className="ph">
@@ -759,15 +413,13 @@ export function IntegrationsPanel() {
               </button>
             </div>
           </div>
-
           {renderGroupFields('sms')}
         </div>
       )}
 
-      {/* TAB 6: GLOBAL PAYMENTS, PUSH, APP & COMPANY */}
       {gwTab === 'other' && (
         <div className="col" style={{ gap: 16 }}>
-          {(['payments', 'push', 'app', 'company'] as const).map((g) => (
+          {(['push', 'app', 'company'] as const).map((g) => (
             <div key={g} className="panel col" style={{ gap: 14 }}>
               <div className="ph">
                 <div>
@@ -795,22 +447,6 @@ export function IntegrationsPanel() {
               {result.ok ? '✓ Verification Passed' : '⚠ Needs Attention'}
             </p>
             <p>{result.message}</p>
-            {result.qr_message && (
-              <div className="card flat col" style={{ alignItems: 'center', padding: 16 }}>
-                <FonepayQr
-                  payment={{
-                    payment_id: 'test-preview',
-                    provider: result.provider || 'fonepay',
-                    mode: result.mode || 'sandbox',
-                    qr_message: result.qr_message,
-                    pay_url: result.pay_url,
-                    amount: 1,
-                  }}
-                  amount={1}
-                  onDone={() => setResult(null)}
-                />
-              </div>
-            )}
           </div>
         </Modal>
       )}

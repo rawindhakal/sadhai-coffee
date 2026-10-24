@@ -21,6 +21,36 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
+    version: '1.6.8',
+    date: '23 October 2026',
+    badge: 'Latest',
+    highlight: 'Official eSewa ePay v2 Gateway Integration & QR Payment Retirement',
+    changes: [
+      {
+        category: 'Added',
+        items: [
+          {
+            title: 'Official eSewa ePay v2 Web & App Integration',
+            desc: 'Implemented the official eSewa ePay v2 checkout protocol (developer.esewa.com.np/pages/Epay) with HMAC-SHA256 signature generation, auto-submitting POST form, return callback signature verification, and server-to-server transaction status lookup API across Web, Android, and 10-cup pass purchases.',
+          },
+          {
+            title: 'eSewa Control Center in Owner Studio',
+            desc: 'Added dedicated eSewa ePay settings panel with master switch, auto/live/sandbox/off mode toggles, credential masking, status check connectivity tester, and 30-day analytics.',
+          },
+        ],
+      },
+      {
+        category: 'Changed',
+        items: [
+          {
+            title: 'Retirement of Alternative Gateways & Payment QR Codes',
+            desc: 'Completely removed all legacy and unofficial payment gateway integrations (Fonepay, Khalti) and all payment QR functionality. Payment options are now strictly Cash at counter, official eSewa (ePay v2), and 10-cup passes.',
+          },
+        ],
+      },
+    ],
+  },
+  {
     version: '1.6.7',
     date: '21 October 2026',
     badge: 'Latest',

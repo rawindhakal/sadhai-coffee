@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { query } from './db.js';
-import { rt, rtBool } from './runtime.js';
+import { rt, rtBool, assertSafeOutboundUrl } from './runtime.js';
 import { bad, normalizePhone } from './http.js';
 
 export const NESTSMS_LIVE_FIELDS = ['nestsms_api_key', 'nestsms_sender_id', 'nestsms_api_url'];
@@ -69,7 +69,7 @@ export async function sendSms(arg1, arg2, arg3 = {}) {
 
   const key = rt('nestsms_api_key');
   const sender = rt('nestsms_sender_id') || 'Sadhai';
-  const url = rt('nestsms_api_url') || 'https://api.nestsms.com/api/v1/sms/send';
+  const url = assertSafeOutboundUrl(rt('nestsms_api_url') || 'https://api.nestsms.com/api/v1/sms/send', 'NestSMS API address');
 
   const payload = {
     token: key,

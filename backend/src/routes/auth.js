@@ -116,12 +116,45 @@ auth.post('/register', limiter, wrap(async (req, res) => {
   res.status(201).json(await session(user));
 }));
 
+const DUMMY_BCRYPT_HASH = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
+const loginFailures = new Map();
+const LOGIN_WINDOW_MS = 15 * 60_000;
+const LOGIN_MAX_ATTEMPTS = 6;
+
+function checkPhoneLockout(phone) {
+  const entry = loginFailures.get(phone);
+  if (!entry) return;
+  if (Date.now() - entry.firstAt > LOGIN_WINDOW_MS) {
+    loginFailures.delete(phone);
+    return;
+  }
+  if (entry.count >= LOGIN_MAX_ATTEMPTS) {
+    throw new HttpError(429, 'Too many failed sign-in attempts for this number. Please wait 15 minutes or reset your password.');
+  }
+}
+
+function recordPhoneFailure(phone) {
+  const now = Date.now();
+  const entry = loginFailures.get(phone);
+  if (!entry || now - entry.firstAt > LOGIN_WINDOW_MS) {
+    loginFailures.set(phone, { count: 1, firstAt: now });
+  } else {
+    entry.count += 1;
+  }
+}
+
 auth.post('/login', limiter, wrap(async (req, res) => {
   const b = z.object({ phone: z.string(), password: z.string() }).parse(req.body);
   const phone = normalizePhone(b.phone);
+  checkPhoneLockout(phone);
   const { rows } = await query('SELECT * FROM users WHERE phone=$1', [phone]);
   const u = rows[0];
-  if (!u || !u.active || !(await bcrypt.compare(b.password, u.password_hash))) throw new HttpError(401, 'Phone number or password is wrong');
+  const validPassword = await bcrypt.compare(b.password, u?.password_hash || DUMMY_BCRYPT_HASH);
+  if (!u || !u.active || !validPassword) {
+    recordPhoneFailure(phone);
+    throw new HttpError(401, 'Phone number or password is wrong');
+  }
+  loginFailures.delete(phone);
   await query('UPDATE users SET last_login_at=now() WHERE id=$1', [u.id]);
   res.json(await session(u));
 }));

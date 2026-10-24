@@ -30,7 +30,8 @@ export function verifyAccess(token) {
 export async function authenticate(req, _res, next) {
   try {
     const h = req.headers.authorization || '';
-    const token = h.startsWith('Bearer ') ? h.slice(7) : req.query.access_token;
+    const allowQueryToken = req.method === 'GET' && req.originalUrl.split('?')[0] === '/events';
+    const token = h.startsWith('Bearer ') ? h.slice(7) : (allowQueryToken ? req.query.access_token : null);
     if (!token) throw new HttpError(401, 'Sign in required', 'no_token');
     const claims = verifyAccess(token);
     const { rows } = await query(

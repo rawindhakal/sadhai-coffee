@@ -4,8 +4,7 @@ import Link from 'next/link';
 import { api, fmtDate, fmtDateTime, rs } from '@/lib/api';
 import { useAuth, useEvents, useRequireRole } from '@/lib/auth';
 import { Empty, ErrorNote, Field, Loading, Modal, Status, Tabs, useData, useToast } from './ui';
-import { CustomerShell, PAY_LABEL } from './customer';
-import { FonepayQr } from './fonepay';
+import { CustomerShell } from './customer';
 import { useI18n } from '@/lib/i18n';
 import { disableWebPush, enableWebPush, pushState } from '@/lib/push';
 
@@ -41,18 +40,11 @@ export function PassTab() {
   const cfg = useData<any>('/config');
   const toast = useToast();
   const [buy, setBuy] = useState(false);
-  const [pay, setPay] = useState<any>(null);
-  const [busy, setBusy] = useState(false);
+  const [buying, setBuying] = useState(false);
+  const [buyErr, setBuyErr] = useState<string | null>(null);
   const list = passes.data || [];
   const live = list.filter((p) => p.status === 'active' && p.remaining > 0).sort((a, b) => a.queue_position - b.queue_position);
   const past = list.filter((p) => !live.includes(p));
-  async function purchase(method: string) {
-    setBusy(true);
-    try {
-      const out = await api('/passes', { method: 'POST', body: { payment_method: method } });
-      setPay({ ...out.payment, code: out.pass.code });
-    } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
-  }
   const [activeIdx, setActiveIdx] = useState(0);
   const total = live.reduce((a, p) => a + p.remaining, 0);
   const curPass = live[activeIdx] || live[0];
@@ -94,26 +86,37 @@ export function PassTab() {
         {!live.length && <Empty>No active pass yet.</Empty>}
       </div>
       {past.length > 0 && <><h3 style={{ margin: '24px 0 8px' }}>Past passes</h3><div className="col">{past.map((p) => <div key={p.id} className="card flat row between"><span><strong>{p.code}</strong> <span className="muted small">{rs(p.price_paid)} · {fmtDate(p.purchased_at)}</span></span><Status s={p.status} /></div>)}</div></>}
-      {pay && (
-        <Modal title="Pay for your pass" onClose={() => { setPay(null); setBuy(false); passes.reload(); }}>
-          <FonepayQr payment={pay} onDone={(s) => { toast(s === 'paid' ? `Pass ${pay.code} is ready` : 'The payment did not go through', s !== 'paid'); setPay(null); setBuy(false); passes.reload(); }} />
-        </Modal>
-      )}
-      {buy && !pay && (
-        <Modal title="Buy a 10-cup pass" onClose={() => setBuy(false)}>
-          <p className="muted">Pay {rs(cfg.data?.pass.price)} with:</p>
-          <div className="col" style={{ marginTop: 12, gap: 10 }}>
-            {(!cfg.data?.payment_methods || cfg.data.payment_methods.includes('fonepay')) && (
-              <button className="btn primary block" disabled={busy} onClick={() => purchase('fonepay')}>Pay with Fonepay</button>
-            )}
-            {(!cfg.data?.payment_methods || cfg.data.payment_methods.includes('esewa')) && (
-              <button className="btn block" style={{ background: '#41A124', color: '#fff', borderColor: '#41A124' }} disabled={busy} onClick={() => purchase('esewa')}>Pay with eSewa</button>
-            )}
-            {(!cfg.data?.payment_methods || cfg.data.payment_methods.includes('khalti')) && (
-              <button className="btn block" style={{ background: '#5C2D91', color: '#fff', borderColor: '#5C2D91' }} disabled={busy} onClick={() => purchase('khalti')}>Pay with Khalti</button>
-            )}
+      {buy && (
+        <Modal title="Buy a 10-cup pass" onClose={() => { setBuy(false); setBuyErr(null); }}>
+          <p style={{ margin: '0 0 12px' }}>
+            Get 10 cups for <strong>{rs(cfg.data?.pass.price)}</strong>. A new pass starts only when you use its first cup, and then lasts {cfg.data?.pass.valid_days} days.
+          </p>
+          <ErrorNote error={buyErr} />
+          <div className="col" style={{ gap: 10, marginTop: 14 }}>
+            <button
+              className="btn primary block"
+              disabled={buying}
+              onClick={async () => {
+                setBuying(true); setBuyErr(null);
+                try {
+                  const out = await api('/passes', { method: 'POST', body: { payment_method: 'esewa' } });
+                  if (out.payment?.pay_url) {
+                    window.location.href = out.payment.pay_url;
+                  } else {
+                    toast('Pass purchased');
+                    passes.reload();
+                    setBuy(false);
+                  }
+                } catch (e: any) { setBuyErr(e.message); } finally { setBuying(false); }
+              }}
+            >
+              {buying ? 'Connecting to eSewa…' : `Pay ${rs(cfg.data?.pass.price)} with eSewa`}
+            </button>
+            <div className="card flat" style={{ background: 'var(--surface-sunk)', padding: 12, marginTop: 4 }}>
+              <strong>Prefer Cash?</strong>
+              <p className="small muted" style={{ margin: '4px 0 0' }}>Ask the barista at any station counter to activate a pass for cash.</p>
+            </div>
           </div>
-          <p className="small muted" style={{ marginTop: 12 }}>Prefer cash? Buy it at any station counter. A new pass never starts until you use its first cup.</p>
         </Modal>
       )}
     </>

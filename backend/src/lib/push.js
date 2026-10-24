@@ -28,12 +28,14 @@ export const pushStatus = () => { providers(); const mode = rt('push_mode'); ret
 export const vapidPublicKey = () => rt('vapid_public_key') || null;
 export async function testFcm() { providers(); if (!fcm) throw new Error('No Firebase key is saved yet'); fcmToken = { value: null, exp: 0 }; await fcmAccessToken(); return { project_id: fcm.project_id, client_email: fcm.client_email }; }
 
+const GOOGLE_TOKEN_URI = 'https://oauth2.googleapis.com/token';
 let fcmToken = { value: null, exp: 0 };
 async function fcmAccessToken() {
   if (fcmToken.value && Date.now() < fcmToken.exp) return fcmToken.value;
+  if (!fcm || !/^[a-z0-9-]+$/i.test(String(fcm.project_id || ''))) throw new Error('Invalid Firebase project_id');
   const now = Math.floor(Date.now() / 1000);
-  const assertion = jwt.sign({ iss: fcm.client_email, scope: 'https://www.googleapis.com/auth/firebase.messaging', aud: fcm.token_uri || 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }, fcm.private_key, { algorithm: 'RS256' });
-  const r = await fetch(fcm.token_uri || 'https://oauth2.googleapis.com/token', {
+  const assertion = jwt.sign({ iss: fcm.client_email, scope: 'https://www.googleapis.com/auth/firebase.messaging', aud: GOOGLE_TOKEN_URI, iat: now, exp: now + 3600 }, fcm.private_key, { algorithm: 'RS256' });
+  const r = await fetch(GOOGLE_TOKEN_URI, {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }),
   });

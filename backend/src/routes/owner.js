@@ -272,11 +272,12 @@ owner.post('/categories', wrap(async (req, res) => {
   await audit(req.user.id, 'category.create', 'category', r.id, { name: b.name });
   res.status(201).json(r);
 }));
+const CATEGORY_COLS = ['name', 'name_ne', 'sort'];
 owner.patch('/categories/:id', wrap(async (req, res) => {
   const b = z.object({ name: z.string().min(2).optional(), name_ne: z.string().nullable().optional(), sort: z.number().int().optional() }).parse(req.body);
-  const cols = Object.keys(b);
+  const cols = CATEGORY_COLS.filter((c) => b[c] !== undefined);
   if (!cols.length) throw bad('Nothing to update');
-  const { rows } = await query(`UPDATE categories SET ${cols.map((c, i) => `${c}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [req.params.id, ...cols.map((c) => b[c])]);
+  const { rows } = await query(`UPDATE categories SET ${cols.map((c, i) => `"${c}"=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [req.params.id, ...cols.map((c) => b[c])]);
   if (!rows[0]) throw notFound('Category not found');
   await audit(req.user.id, 'category.update', 'category', req.params.id, b);
   res.json(rows[0]);
@@ -289,6 +290,11 @@ owner.delete('/categories/:id', wrap(async (req, res) => {
   await audit(req.user.id, 'category.delete', 'category', req.params.id, { name: r.rows[0].name });
   res.json({ ok: true });
 }));
+const PRODUCT_COLS = [
+  'category_id', 'sku', 'name', 'name_ne', 'description', 'description_ne',
+  'price', 'cost', 'prep_seconds', 'is_signature', 'is_seasonal',
+  'pass_eligible', 'origin', 'image_url', 'active', 'sort', 'price_tier', 'kind',
+];
 const productSchema = z.object({
   category_id: z.string().uuid().optional(), sku: z.string().min(2).max(20), name: z.string().min(2), name_ne: z.string().optional(),
   description: z.string().optional(), description_ne: z.string().optional(), price: z.number().int().min(0), cost: z.number().int().min(0).default(0),
@@ -301,8 +307,8 @@ owner.post('/products', wrap(async (req, res) => {
   const b = productSchema.parse(req.body);
   if (b.price_tier) b.price = await tierPrice(b.price_tier);
   else delete b.price_tier;
-  const cols = Object.keys(b);
-  const { rows } = await query(`INSERT INTO products(${cols.join(',')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`, cols.map((c) => b[c]));
+  const cols = PRODUCT_COLS.filter((c) => b[c] !== undefined);
+  const { rows } = await query(`INSERT INTO products(${cols.map((c) => `"${c}"`).join(',')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`, cols.map((c) => b[c]));
   await audit(req.user.id, 'product.create', 'product', rows[0].id, { sku: b.sku });
   res.status(201).json(rows[0]);
 }));
@@ -320,9 +326,9 @@ owner.patch('/products/:id', wrap(async (req, res) => {
   if (!cur) throw notFound('Product not found');
   if (b.price_tier) b.price = await tierPrice(b.price_tier);                 // tiered drinks take the tier price
   else if (b.price_tier === undefined && cur.price_tier) delete b.price;    // ...and cannot be priced by hand
-  const cols = Object.keys(b);
+  const cols = PRODUCT_COLS.filter((c) => b[c] !== undefined);
   if (!cols.length) throw bad('Nothing to update');
-  const { rows } = await query(`UPDATE products SET ${cols.map((c, i) => `${c}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [req.params.id, ...cols.map((c) => b[c])]);
+  const { rows } = await query(`UPDATE products SET ${cols.map((c, i) => `"${c}"=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [req.params.id, ...cols.map((c) => b[c])]);
   if (!rows[0]) throw notFound('Product not found');
   if (b.image_url !== undefined && cur.image_url && cur.image_url !== b.image_url) await dropMediaIfUnused({ query }, cur.image_url);
   await audit(req.user.id, 'product.update', 'product', req.params.id, b);
@@ -349,10 +355,10 @@ owner.post('/products/:id/duplicate', wrap(async (req, res) => {
   const copy = await tx(async (db) => {
     let sku = `${src.sku}-2`.slice(0, 20), n = 2;
     while ((await db.query('SELECT 1 FROM products WHERE sku=$1', [sku])).rows.length) { n += 1; sku = `${src.sku.slice(0, 17)}-${n}`; }
-    const { id: _i, created_at: _c, sku: _s, name, image_url: _img, ...rest } = src;
-    const cols = ['sku', 'name', 'image_url', 'active', ...Object.keys(rest).filter((k) => !['active'].includes(k))];
-    const vals = [sku, `${name} (copy)`, null, false, ...Object.keys(rest).filter((k) => !['active'].includes(k)).map((k) => rest[k])];
-    const np = (await db.query(`INSERT INTO products(${cols.join(',')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`, vals)).rows[0];
+    const restCols = PRODUCT_COLS.filter((k) => !['sku', 'name', 'image_url', 'active'].includes(k) && src[k] !== undefined);
+    const cols = ['sku', 'name', 'image_url', 'active', ...restCols];
+    const vals = [sku, `${src.name} (copy)`, null, false, ...restCols.map((k) => src[k])];
+    const np = (await db.query(`INSERT INTO products(${cols.map((c) => `"${c}"`).join(',')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`, vals)).rows[0];
     await db.query('INSERT INTO recipes(product_id, ingredient_id, qty) SELECT $2, ingredient_id, qty FROM recipes WHERE product_id=$1', [src.id, np.id]);
     const groups = (await db.query('SELECT * FROM option_groups WHERE product_id=$1 ORDER BY sort', [src.id])).rows;
     for (const g of groups) {
@@ -500,7 +506,7 @@ owner.get('/audit', wrap(async (req, res) => {
 }));
 owner.get('/reconciliation', wrap(async (req, res) => res.json(await reconciliation(req.query.from, req.query.to))));
 owner.post('/settlements', wrap(async (req, res) => {
-  const b = z.object({ provider: z.enum(['fonepay', 'esewa', 'khalti']), day: z.string().regex(/^\d{4}-\d\d-\d\d$/), amount: z.number().int().min(0), note: z.string().optional() }).parse(req.body);
+  const b = z.object({ provider: z.enum(['esewa']), day: z.string().regex(/^\d{4}-\d\d-\d\d$/), amount: z.number().int().min(0), note: z.string().optional() }).parse(req.body);
   const { rows } = await query(
     `INSERT INTO settlements(provider, day, amount, note, entered_by) VALUES ($1,$2,$3,$4,$5)
      ON CONFLICT (provider, day) DO UPDATE SET amount=$3, note=$4, entered_by=$5 RETURNING *`, [b.provider, b.day, b.amount, b.note, req.user.id],
@@ -795,13 +801,14 @@ owner.post('/data/reset', wrap(async (req, res) => {
   res.json({ ok: true, cleared, time: new Date().toISOString() });
 }));
 
-/** 3. Restore data from backup JSON */
+/** 3. Restore data from backup JSON (with strict table & column schema whitelisting) */
+const IDENT_RE = /^[a-z_][a-z0-9_]{0,62}$/;
 owner.post('/data/restore', wrap(async (req, res) => {
   const b = z.object({
     password: z.string().min(1, 'Password required'),
     backup: z.object({
       app: z.literal('sadhai-coffee'),
-      tables: z.record(z.array(z.any())),
+      tables: z.record(z.array(z.record(z.any()))),
     }),
   }).parse(req.body);
 
@@ -813,33 +820,63 @@ owner.post('/data/restore', wrap(async (req, res) => {
 
   const restored = [];
   await tx(async (db) => {
+    // Load valid column names for all exportable tables from information_schema
+    const { rows: schemaRows } = await db.query(
+      `SELECT table_name, column_name
+         FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = ANY($1)`,
+      [EXPORT_TABLES],
+    );
+    const validColsByTable = new Map();
+    for (const r of schemaRows) {
+      if (!validColsByTable.has(r.table_name)) validColsByTable.set(r.table_name, new Set());
+      validColsByTable.get(r.table_name).add(r.column_name);
+    }
+
+    const assertSafeCols = (tbl, keys) => {
+      const allowed = validColsByTable.get(tbl);
+      if (!allowed) throw bad(`Unknown table in backup: ${tbl}`);
+      for (const k of keys) {
+        if (!IDENT_RE.test(k) || !allowed.has(k)) {
+          throw bad(`Invalid or unknown column "${k}" in backup table "${tbl}"`);
+        }
+      }
+    };
+
     // Restore tables that are present in the backup
     for (const [tbl, rows] of Object.entries(b.backup.tables)) {
       if (!EXPORT_TABLES.includes(tbl) || !Array.isArray(rows) || !rows.length) continue;
-      
+
       // For safety, do not overwrite the active owner with restored hash if missing
       if (tbl === 'users') {
         for (const row of rows) {
+          if (!row || typeof row !== 'object' || Array.isArray(row)) throw bad('Invalid row in users backup');
           if (row.id === req.user.id) continue;
           const cols = Object.keys(row).filter((k) => k !== 'password_hash');
+          if (!cols.length) continue;
+          assertSafeCols(tbl, cols);
+          const quotedCols = cols.map((c) => `"${c}"`).join(',');
           const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
           const vals = cols.map((k) => row[k]);
           await db.query(
-            `INSERT INTO users (${cols.join(',')}, password_hash) VALUES (${placeholders}, $${cols.length + 1})
-             ON CONFLICT (id) DO UPDATE SET ${cols.map((c) => `${c}=EXCLUDED.${c}`).join(',')}`,
-            [...vals, uRows[0].password_hash]
+            `INSERT INTO "users" (${quotedCols}, "password_hash") VALUES (${placeholders}, $${cols.length + 1})
+             ON CONFLICT ("id") DO UPDATE SET ${cols.map((c) => `"${c}"=EXCLUDED."${c}"`).join(',')}`,
+            [...vals, uRows[0].password_hash],
           );
         }
       } else {
         for (const row of rows) {
+          if (!row || typeof row !== 'object' || Array.isArray(row)) throw bad(`Invalid row in ${tbl} backup`);
           const cols = Object.keys(row);
           if (!cols.length) continue;
+          assertSafeCols(tbl, cols);
+          const quotedCols = cols.map((c) => `"${c}"`).join(',');
           const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
           const vals = cols.map((k) => row[k]);
           await db.query(
-            `INSERT INTO ${tbl} (${cols.join(',')}) VALUES (${placeholders})
+            `INSERT INTO "${tbl}" (${quotedCols}) VALUES (${placeholders})
              ON CONFLICT DO NOTHING`,
-            vals
+            vals,
           );
         }
       }

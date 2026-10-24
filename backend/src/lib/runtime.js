@@ -8,40 +8,14 @@ import { config } from './config.js';
  * Secrets are stored encrypted (AES-256-GCM, key from SETTINGS_ENCRYPTION_KEY or JWT_SECRET) and never sent back to the browser.
  */
 export const DEFS = {
-  // master payment switches
-  payment_mode: { group: 'payments', label: 'Default payment mode', type: 'enum', options: ['sandbox', 'live'], env: 'PAYMENT_MODE', def: 'sandbox', help: 'Default environment for payment gateways unless overridden on a specific gateway.' },
+  // payment switches & gateways
   cash_enabled: { group: 'payments', label: 'Accept Cash at counter', type: 'bool', env: 'CASH_ENABLED', def: '1', help: 'Allow customers to pay with cash when picking up at the counter.' },
-
-  // fonepay
-  fonepay_enabled: { group: 'fonepay', label: 'Enable Fonepay gateway', type: 'bool', env: 'FONEPAY_ENABLED', def: '1', help: 'Show Fonepay at checkout across Web, Android, Kiosk, and Station POS.' },
-  fonepay_mode: { group: 'fonepay', label: 'Fonepay environment', type: 'enum', options: ['sandbox', 'live'], env: 'FONEPAY_MODE', def: 'sandbox', help: 'Sandbox shows a test QR / dev checkout. Live connects to Fonepay production servers.' },
-  fonepay_merchant_code: { group: 'fonepay', label: 'Fonepay merchant code (PID)', env: 'FONEPAY_MERCHANT_CODE', def: '', help: 'Merchant code / PID issued by Fonepay.' },
-  fonepay_username: { group: 'fonepay', label: 'Fonepay API username', env: 'FONEPAY_USERNAME', def: '', help: 'Used for Fonepay Dynamic QR API.' },
-  fonepay_password: { group: 'fonepay', label: 'Fonepay API password', secret: true, env: 'FONEPAY_PASSWORD', def: '' },
-  fonepay_secret_key: { group: 'fonepay', label: 'Fonepay shared secret key', secret: true, env: 'FONEPAY_SECRET_KEY', def: '', help: 'Signs every request to Fonepay (HMAC-SHA512).' },
-  fonepay_qr_url: { group: 'fonepay', label: 'Fonepay Dynamic QR API URL', type: 'url', env: 'FONEPAY_QR_URL', def: 'https://dev-merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrDownload', help: 'Live: https://merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrDownload' },
-  fonepay_status_url: { group: 'fonepay', label: 'Fonepay QR Status API URL', type: 'url', env: 'FONEPAY_STATUS_URL', def: 'https://dev-merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrGetStatus', help: 'Live: https://merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrGetStatus' },
-  fonepay_pg_url: { group: 'fonepay', label: 'Fonepay Web / Flutter PG URL', type: 'url', env: 'FONEPAY_PG_URL', def: 'https://dev-clientapi.fonepay.com/api/merchantRequest', help: 'Live: https://clientapi.fonepay.com/api/merchantRequest (used by fonepay_flutter and web redirect).' },
-  fonepay_webhook_secret: { group: 'fonepay', label: 'Fonepay webhook secret (optional)', secret: true, env: 'FONEPAY_WEBHOOK_SECRET', def: '', help: 'Signs webhook notifications Fonepay sends us.' },
-
-  // esewa (ePay v2 - developer.esewa.com.np)
-  esewa_enabled: { group: 'esewa', label: 'Enable eSewa gateway', type: 'bool', env: 'ESEWA_ENABLED', def: '1', help: 'Show eSewa at checkout across Web, Android, Kiosk, and Station POS.' },
-  esewa_mode: { group: 'esewa', label: 'eSewa environment', type: 'enum', options: ['sandbox', 'live'], env: 'ESEWA_MODE', def: 'sandbox', help: 'Sandbox uses EPAYTEST / rc-epay.esewa.com.np. Live uses epay.esewa.com.np.' },
-  esewa_merchant_code: { group: 'esewa', label: 'eSewa product / merchant code (SCD)', env: 'ESEWA_PRODUCT_CODE', def: 'EPAYTEST', help: 'From your eSewa merchant account (use EPAYTEST for sandbox testing).' },
-  esewa_secret_key: { group: 'esewa', label: 'eSewa HMAC-SHA256 secret key', secret: true, env: 'ESEWA_SECRET', def: '8gBm/:&EnhH.1/q', help: 'Signs eSewa ePay v2 form requests (sandbox key: 8gBm/:&EnhH.1/q).' },
-  esewa_username: { group: 'esewa', label: 'eSewa QR API username (optional)', env: 'ESEWA_USERNAME', def: '', help: 'Optional: only required if using eSewa direct Dynamic QR merchant endpoint.' },
-  esewa_password: { group: 'esewa', label: 'eSewa QR API password (optional)', secret: true, env: 'ESEWA_PASSWORD', def: '' },
-  esewa_qr_url: { group: 'esewa', label: 'eSewa ePay v2 Form URL', type: 'url', env: 'ESEWA_FORM_URL', def: 'https://rc-epay.esewa.com.np/api/epay/main/v2/form', help: 'Sandbox: https://rc-epay.esewa.com.np/api/epay/main/v2/form · Live: https://epay.esewa.com.np/api/epay/main/v2/form' },
-  esewa_status_url: { group: 'esewa', label: 'eSewa Transaction Status URL', type: 'url', env: 'ESEWA_STATUS_URL', def: 'https://rc.esewa.com.np/api/epay/transaction/status/', help: 'Sandbox: https://rc.esewa.com.np/api/epay/transaction/status/ · Live: https://epay.esewa.com.np/api/epay/transaction/status/' },
-  esewa_webhook_secret: { group: 'esewa', label: 'eSewa webhook secret (optional)', secret: true, env: 'ESEWA_WEBHOOK_SECRET', def: '' },
-
-  // khalti (KPG-2 ePayment - docs.khalti.com)
-  khalti_enabled: { group: 'khalti', label: 'Enable Khalti gateway', type: 'bool', env: 'KHALTI_ENABLED', def: '1', help: 'Show Khalti at checkout across Web, Android, Kiosk, and Station POS.' },
-  khalti_mode: { group: 'khalti', label: 'Khalti environment', type: 'enum', options: ['sandbox', 'live'], env: 'KHALTI_MODE', def: 'sandbox', help: 'Sandbox uses dev.khalti.com/api/v2. Live uses khalti.com/api/v2.' },
-  khalti_secret_key: { group: 'khalti', label: 'Khalti live/test secret key', secret: true, env: 'KHALTI_SECRET', def: '', help: 'Sent as Authorization: Key <secret_key> to Khalti KPG-2 /epayment/initiate/ and /epayment/lookup/.' },
-  khalti_merchant_code: { group: 'khalti', label: 'Khalti public key / merchant ID (optional)', env: 'KHALTI_MERCHANT_CODE', def: '' },
-  khalti_base_url: { group: 'khalti', label: 'Khalti KPG-2 API base URL', type: 'url', env: 'KHALTI_BASE_URL', def: 'https://dev.khalti.com/api/v2', help: 'Sandbox: https://dev.khalti.com/api/v2 · Live: https://khalti.com/api/v2' },
-  khalti_webhook_secret: { group: 'khalti', label: 'Khalti webhook secret (optional)', secret: true, env: 'KHALTI_WEBHOOK_SECRET', def: '' },
+  esewa_enabled: { group: 'payments', label: 'Enable eSewa ePay v2', type: 'bool', env: 'ESEWA_ENABLED', def: '1', help: 'Allow customers to pay online using eSewa (ePay v2).' },
+  esewa_mode: { group: 'payments', label: 'eSewa mode', type: 'enum', options: ['auto', 'live', 'sandbox', 'off'], env: 'ESEWA_MODE', def: 'auto', help: 'Live connects to epay.esewa.com.np; Sandbox connects to rc-epay.esewa.com.np (EPAYTEST); Auto uses Live when custom merchant keys are set.' },
+  esewa_merchant_code: { group: 'payments', label: 'eSewa Merchant Code (Product Code)', env: 'ESEWA_MERCHANT_CODE', def: 'EPAYTEST', help: 'Your merchant / product code from eSewa (default: EPAYTEST for sandbox).' },
+  esewa_secret_key: { group: 'payments', label: 'eSewa Secret Key', secret: true, env: 'ESEWA_SECRET_KEY', def: '8gBm/:&EnhH.1/q', help: 'Your HMAC-SHA256 Secret Key from eSewa (default: 8gBm/:&EnhH.1/q for sandbox).' },
+  esewa_epay_url: { group: 'payments', label: 'eSewa ePay Form URL', type: 'url', env: 'ESEWA_EPAY_URL', def: 'https://rc-epay.esewa.com.np/api/epay/main/v2/form', help: 'eSewa ePay v2 form endpoint (rc-epay for sandbox, epay for live).' },
+  esewa_status_url: { group: 'payments', label: 'eSewa Status Check URL', type: 'url', env: 'ESEWA_STATUS_URL', def: 'https://rc-epay.esewa.com.np/api/epay/transaction/status/', help: 'Server-to-server transaction status check endpoint.' },
 
   // sms (NestSMS)
   sms_enabled: { group: 'sms', label: 'Enable SMS gateway (NestSMS)', type: 'bool', env: 'SMS_ENABLED', def: '1', help: 'Master switch to turn all SMS features on or off across the platform.' },
@@ -72,16 +46,19 @@ export const DEFS = {
   privacy_email: { group: 'company', label: 'Privacy email', env: 'NEXT_PUBLIC_PRIVACY_EMAIL', def: 'privacy@sadhaicoffee.com' },
 };
 
-const KEY = crypto.createHash('sha256').update(process.env.SETTINGS_ENCRYPTION_KEY || config.jwtSecret).digest();
+const KEY = crypto.createHmac('sha256', 'sadhai-app-secrets-v1').update(process.env.SETTINGS_ENCRYPTION_KEY || config.jwtSecret).digest();
+const LEGACY_KEY = crypto.createHash('sha256').update(process.env.SETTINGS_ENCRYPTION_KEY || config.jwtSecret).digest();
+
 export const encrypt = (plain) => {
   const iv = crypto.randomBytes(12);
   const c = crypto.createCipheriv('aes-256-gcm', KEY, iv);
   const enc = Buffer.concat([c.update(plain, 'utf8'), c.final()]);
-  return `enc:v1:${iv.toString('base64')}:${c.getAuthTag().toString('base64')}:${enc.toString('base64')}`;
+  return `enc:v2:${iv.toString('base64')}:${c.getAuthTag().toString('base64')}:${enc.toString('base64')}`;
 };
 export const decrypt = (s) => {
-  const [, , iv, tag, data] = s.split(':');
-  const d = crypto.createDecipheriv('aes-256-gcm', KEY, Buffer.from(iv, 'base64'));
+  const [, ver, iv, tag, data] = s.split(':');
+  const k = ver === 'v2' ? KEY : LEGACY_KEY;
+  const d = crypto.createDecipheriv('aes-256-gcm', k, Buffer.from(iv, 'base64'));
   d.setAuthTag(Buffer.from(tag, 'base64'));
   return Buffer.concat([d.update(Buffer.from(data, 'base64')), d.final()]).toString('utf8');
 };
@@ -109,16 +86,35 @@ export function rt(key) {
 export const rtBool = (key) => ['1', 'true', 'yes', 'on'].includes(String(rt(key)).toLowerCase());
 export const sourceOf = (key) => (key in cache ? 'dashboard' : DEFS[key]?.env && process.env[DEFS[key].env] ? 'server environment' : 'default');
 
+const PRIVATE_HOST_RE = /^(localhost|0\.0\.0\.0|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|\[?::1\]?|\[?fe80:.*\]?|\[?fc00:.*\]?|\[?fd00:.*\]?)$/i;
+
+export function assertSafeOutboundUrl(rawUrl, label = 'Address') {
+  let u;
+  try { u = new URL(rawUrl); } catch { throw new Error(`${label} is not a valid URL`); }
+  if (u.protocol !== 'https:' && (process.env.NODE_ENV === 'production' || u.protocol !== 'http:')) {
+    throw new Error(`${label} must use https://`);
+  }
+  const host = u.hostname.toLowerCase();
+  if (PRIVATE_HOST_RE.test(host) || host.endsWith('.internal') || host.endsWith('.local')) {
+    throw new Error(`${label} cannot point to a private, loopback, or internal network address`);
+  }
+  return u.toString();
+}
+
 function validate(key, v) {
   const d = DEFS[key];
   if (v === '' || v == null) return '';
   const s = String(v).trim();
   if (d.type === 'enum' && !d.options.includes(s)) throw new Error(`${d.label} must be one of: ${d.options.join(', ')}`);
-  if (d.type === 'url' && !/^https?:\/\/[^\s]+$/.test(s)) throw new Error(`${d.label} must be a web address starting with http:// or https://`);
+  if (d.type === 'url') {
+    if (!/^https?:\/\/[^\s]+$/.test(s)) throw new Error(`${d.label} must be a web address starting with http:// or https://`);
+    if (key === 'nestsms_api_url' || key === 'esewa_epay_url' || key === 'esewa_status_url') assertSafeOutboundUrl(s, d.label);
+  }
   if (d.type === 'bool') return ['1', 'true', 'yes', 'on', true].includes(v) ? '1' : '0';
   if (d.type === 'json') {
     let j; try { j = JSON.parse(s.startsWith('{') ? s : Buffer.from(s, 'base64').toString('utf8')); } catch { throw new Error(`${d.label} is not valid JSON`); }
     if (!j.client_email || !j.private_key || !j.project_id) throw new Error('That file is missing client_email, private_key or project_id. Paste the whole service account file.');
+    if (!/^[a-z0-9-]+$/i.test(String(j.project_id))) throw new Error('Invalid Firebase project_id in service account JSON.');
     return JSON.stringify(j);
   }
   if (key === 'min_app_version' && !/^\d+\.\d+\.\d+$/.test(s)) throw new Error('Use a version like 1.2.0');

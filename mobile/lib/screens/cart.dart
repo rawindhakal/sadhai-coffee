@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
 import 'offers.dart' show PromoBox;
 import '../push.dart';
 import 'customer.dart';
-import 'fonepay.dart';
 import 'home.dart' show Stepper2;
 
 /// Cart and checkout on one screen: change quantities, pick an offer and payment, place the order.
@@ -26,7 +26,6 @@ class _CartScreenState extends State<CartScreen> {
   String? _offerId;
   String? _lastPromo;
   String _method = 'cash';
-  List<String> _enabledMethods = ['cash', 'fonepay', 'esewa', 'khalti'];
   final _note = TextEditingController();
   String? _error;
   bool _busy = false;
@@ -63,20 +62,8 @@ class _CartScreenState extends State<CartScreen> {
     try {
       final c = await Api.instance.get('/coupons') as List;
       final p = await Api.instance.get('/passes') as List;
-      List<String>? methods;
-      try {
-        final cfg = await Api.instance.request('GET', '/config', auth: false) as Map;
-        if (cfg['payment_methods'] is List) {
-          final list = (cfg['payment_methods'] as List).map((e) => e.toString()).where((m) => ['cash', 'fonepay', 'esewa', 'khalti'].contains(m)).toList();
-          if (list.isNotEmpty) methods = list;
-        }
-      } catch (_) {}
       if (!mounted) return;
       setState(() {
-        if (methods != null) {
-          _enabledMethods = methods;
-          if (!_enabledMethods.contains(_method)) _method = _enabledMethods.first;
-        }
         _coupons = c.where((x) => x['status'] == 'active').toList();
         final live = p.cast<Json>().where((x) => x['status'] == 'active' && (x['remaining'] as int) > 0).toList();
         _pass = live.isEmpty ? null : {'remaining': live.first['total_remaining'], 'count': live.length};
@@ -105,13 +92,18 @@ class _CartScreenState extends State<CartScreen> {
     try {
       final out = await Api.instance.post('/orders', _payload(cart));
       final order = out['order'] as Map;
-      final pay = out['payment'] as Map?;
+      final payment = out['payment'] as Map?;
       if (!mounted) return;
       cart.clear();
       cart.invalidatePasses();
-      if (pay != null) await showFonepay(context, pay, order['total'] as num);
-      if (!mounted) return;
       _askPush();
+      if (payment != null && payment['pay_url'] != null) {
+        final uri = Uri.parse(payment['pay_url'] as String);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      }
+      if (!mounted) return;
       await Navigator.push(context, MaterialPageRoute(builder: (_) => TrackingScreen(orderId: order['id'])));
       widget.onPlaced();
     } on ApiException catch (e) {
@@ -234,7 +226,24 @@ class _CartScreenState extends State<CartScreen> {
         const SizedBox(height: 16),
         Text('Pay with', style: display(18)),
         const SizedBox(height: 8),
-        Wrap(spacing: 8, runSpacing: 4, children: [for (final m in _enabledMethods) ChoiceChip(label: Text(payLabel[m] ?? m), selected: _method == m, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _method == m ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { setState(() => _method = m); _requote(cart); })]),
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          ChoiceChip(
+            label: const Text('Cash at counter'),
+            selected: _method == 'cash',
+            selectedColor: Brand.cherry,
+            showCheckmark: false,
+            labelStyle: TextStyle(color: _method == 'cash' ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600),
+            onSelected: (_) => setState(() => _method = 'cash'),
+          ),
+          ChoiceChip(
+            label: const Text('eSewa (ePay)'),
+            selected: _method == 'esewa',
+            selectedColor: Brand.cherry,
+            showCheckmark: false,
+            labelStyle: TextStyle(color: _method == 'esewa' ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600),
+            onSelected: (_) => setState(() => _method = 'esewa'),
+          ),
+        ]),
       ],
       const SizedBox(height: 16),
       TextField(controller: _note, maxLength: 200, decoration: const InputDecoration(labelText: 'Note for the barista (optional)'), onSubmitted: (_) => _requote(cart)),

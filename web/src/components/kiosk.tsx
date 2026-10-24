@@ -4,13 +4,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FonepayQr } from './fonepay';
 import { api, rs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 import { productArt } from '@/lib/art';
 import { Icon } from './icons';
-import { useData } from './ui';
 
 type Line = { key: string; product: any; qty: number; option_ids: string[]; names: string[]; unit: number };
 const T: Record<string, [string, string]> = {
@@ -444,10 +442,7 @@ function KItem({ p, onClose, onAdd }: { p: any; onClose: () => void; onAdd: (l: 
 }
 
 function Pay({ t, total, busy, error, guest, onBack, onPlace }: any) {
-  const cfg = useData<any>('/config');
-  const methods: string[] = cfg.data?.payment_methods || ['cash', 'fonepay', 'esewa', 'khalti'];
-  const onlineMethods = ['fonepay', 'esewa', 'khalti'].filter((m) => methods.includes(m));
-  const [mode, setMode] = useState<'' | 'pass' | 'online'>('');
+  const [mode, setMode] = useState<'' | 'pass'>('');
   const [code, setCode] = useState('');
   const [check, setCheck] = useState<any>(null);
   const [cerr, setCerr] = useState('');
@@ -459,19 +454,7 @@ function Pay({ t, total, busy, error, guest, onBack, onPlace }: any) {
     <div className="k-card wide">
       <h2>{t('pay')}</h2>
       <div className="col" style={{ marginTop: 16 }}>
-        {methods.includes('cash') && (
-          <button className="k-opt" disabled={busy} onClick={() => onPlace('counter')}><Icon name="coin" size={30} /><span><strong>{t('counter')}</strong><small>Pay {rs(total)} when you pick up your coffee</small></span></button>
-        )}
-        {onlineMethods.length > 0 && (
-          <button className={`k-opt ${mode === 'online' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'online' ? '' : 'online')}><Icon name="cart" size={30} /><span><strong>{t('scan')}</strong><small>Pay now with {[methods.includes('fonepay') && 'Fonepay', methods.includes('esewa') && 'eSewa', methods.includes('khalti') && 'Khalti'].filter(Boolean).join(', ')}</small></span></button>
-        )}
-        {mode === 'online' && onlineMethods.length > 0 && (
-          <div className="row wrap" style={{ gap: 12 }}>
-            {onlineMethods.includes('fonepay') && <button className="btn primary lg grow" disabled={busy} onClick={() => onPlace('online', undefined, 'fonepay')}>Fonepay</button>}
-            {onlineMethods.includes('esewa') && <button className="btn lg grow" style={{ background: '#41A124', color: '#fff', borderColor: '#41A124' }} disabled={busy} onClick={() => onPlace('online', undefined, 'esewa')}>eSewa</button>}
-            {onlineMethods.includes('khalti') && <button className="btn lg grow" style={{ background: '#5C2D91', color: '#fff', borderColor: '#5C2D91' }} disabled={busy} onClick={() => onPlace('online', undefined, 'khalti')}>Khalti</button>}
-          </div>
-        )}
+        <button className="k-opt" disabled={busy} onClick={() => onPlace('counter')}><Icon name="coin" size={30} /><span><strong>{t('counter')}</strong><small>Pay {rs(total)} when you pick up your coffee</small></span></button>
         <button className={`k-opt ${mode === 'pass' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'pass' ? '' : 'pass')}><Icon name="ticket" size={30} /><span><strong>{t('passopt')}</strong><small>Enter your pass code (SP-XXXX-XXXX)</small></span></button>
         {mode === 'pass' && (
           <div className="card flat col">
@@ -489,21 +472,12 @@ function Pay({ t, total, busy, error, guest, onBack, onPlace }: any) {
 }
 
 function Done({ t, result, guest, onNew }: { t: (k: string) => string; result: any; guest: any; onNew: () => void }) {
-  const [o, setO] = useState<any>(result.order);
+  const [o] = useState<any>(result.order);
   const [left, setLeft] = useState(25);
-  const pay = result.payment;
-  const awaiting = o.status === 'awaiting_payment';
-  useEffect(() => { if (!awaiting) return; const i = setInterval(() => api(`/kiosk/orders/${o.id}`).then((x) => setO({ ...o, ...x })).catch(() => {}), 2000); return () => clearInterval(i); }, [awaiting]);
-  useEffect(() => { if (awaiting) return; setLeft(25); const i = setInterval(() => setLeft((n) => { if (n <= 1) { onNew(); return 0; } return n - 1; }), 1000); return () => clearInterval(i); }, [awaiting]);
-  const refresh = () => api(`/kiosk/orders/${o.id}`).then((x) => setO({ ...o, ...x })).catch(() => {});
+  useEffect(() => { setLeft(25); const i = setInterval(() => setLeft((n) => { if (n <= 1) { onNew(); return 0; } return n - 1; }), 1000); return () => clearInterval(i); }, []);
   return (
     <div className="k-card wide center">
-      {o.status === 'cancelled' ? <><h2>That payment did not go through</h2><p className="muted">You were not charged. Please start again.</p></> : awaiting ? (
-        <>
-          <h2>Finish paying to send your order</h2>
-          {pay && <FonepayQr payment={pay} amount={o.total} big size={300} onDone={refresh} />}
-        </>
-      ) : (
+      {o.status === 'cancelled' ? <><h2>Order cancelled</h2><p className="muted">Please start again.</p></> : (
         <>
           <p className="label">{t('done')}</p>
           <div className="pickup" style={{ fontSize: 'clamp(96px, 22vw, 200px)' }} aria-live="polite">{o.pickup_code}</div>
@@ -513,7 +487,7 @@ function Done({ t, result, guest, onNew }: { t: (k: string) => string; result: a
           <p className="muted">Your coffee in 90 seconds.</p>
         </>
       )}
-      <button className="btn primary lg" style={{ marginTop: 24 }} onClick={onNew}>{t('again')}{!awaiting && o.status !== 'cancelled' ? ` (${left})` : ''}</button>
+      <button className="btn primary lg" style={{ marginTop: 24 }} onClick={onNew}>{t('again')}{o.status !== 'cancelled' ? ` (${left})` : ''}</button>
     </div>
   );
 }

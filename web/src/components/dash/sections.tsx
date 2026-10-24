@@ -10,7 +10,7 @@ import { SetupChecklist } from '../studio';
 import { useAuth } from '@/lib/auth';
 
 const qs = (o: Record<string, any>) => { const p = Object.entries(o).filter(([, v]) => v); return p.length ? '?' + p.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&') : ''; };
-const PAY_COLORS: Record<string, string> = { cash: '#5A3322', fonepay: '#F2A81D', pass: '#A81F2A', esewa: '#2F5D46', khalti: '#7C97A6' };
+const PAY_COLORS: Record<string, string> = { cash: '#5A3322', esewa: '#41A124', pass: '#A81F2A' };
 
 /* ============================== Overview ============================== */
 export function OverviewSection() {
