@@ -180,36 +180,15 @@ class _PassPanelState extends State<PassPanel> {
               Text('Buy a 10-cup pass (${rs(_price ?? 900)})', style: display(22)),
               const SizedBox(height: 8),
               const Text(
-                'Buy online via eSewa, or pay cash at any Sadhai station counter. A new pass starts only when you use its first cup.',
+                'Passes are sold for cash at any Sadhai station counter. Tell the barista your phone number and the pass appears here at once. A new pass starts only when you use its first cup.',
                 style: TextStyle(color: Brand.inkMuted),
               ),
               const SizedBox(height: 16),
-              FilledButton(
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                onPressed: () async {
-                  Navigator.pop(c);
-                  try {
-                    final out = await Api.instance.post('/passes', {'payment_method': 'esewa'});
-                    final pay = out['payment'] as Map?;
-                    if (pay != null && pay['pay_url'] != null) {
-                      final uri = Uri.parse(pay['pay_url'] as String);
-                      if (await canLaunchUrl(uri)) {
-                        await launchUrl(uri, mode: LaunchMode.externalApplication);
-                      }
-                    }
-                    _load();
-                    if (mounted) toast(context, 'Pass created. Complete payment via eSewa.');
-                  } on ApiException catch (e) {
-                    if (mounted) toast(context, e.message, bad: true);
-                  }
-                },
-                child: Text('Pay ${rs(_price ?? 900)} with eSewa'),
-              ),
               const SizedBox(height: 8),
               OutlinedButton(
                 style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
                 onPressed: () => Navigator.pop(c),
-                child: const Text('Pay cash at counter'),
+                child: const Text('Got it'),
               ),
             ],
           ),

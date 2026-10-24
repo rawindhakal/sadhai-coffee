@@ -3,7 +3,7 @@ import { bad, conflict, forbidden, notFound } from './http.js';
 import { publish } from './hub.js';
 import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
-import { ONLINE_PROVIDERS, ALL_PAYMENT_METHODS, isProviderEnabled, initiate } from './payments.js';
+import { PAYMENT_METHODS } from './payments.js';
 import { sendSms } from './sms.js';
 import { rtBool } from './runtime.js';
 import crypto from 'node:crypto';
@@ -39,13 +39,13 @@ export function bestOffer(offers, p, basePrice) {
 export async function bestSellers(stationId, db = { query }) {
   const { rows } = await db.query(
     `SELECT i.product_id, sum(i.qty)::int AS n FROM order_items i JOIN orders o ON o.id=i.order_id JOIN products p ON p.id=i.product_id
-      WHERE o.station_id=$1 AND o.status NOT IN ('cancelled','awaiting_payment') AND o.created_at > now() - interval '30 days' AND p.kind <> 'merch'
+      WHERE o.station_id=$1 AND o.status <> 'cancelled' AND o.created_at > now() - interval '30 days' AND p.kind <> 'merch'
       GROUP BY 1 ORDER BY n DESC LIMIT 8`, [stationId],
   );
   if (rows.length >= 4) return rows.map((r) => r.product_id);
   const all = await db.query(
     `SELECT i.product_id, sum(i.qty)::int AS n FROM order_items i JOIN orders o ON o.id=i.order_id JOIN products p ON p.id=i.product_id
-      WHERE o.status NOT IN ('cancelled','awaiting_payment') AND p.kind <> 'merch' GROUP BY 1 ORDER BY n DESC LIMIT 8`,
+      WHERE o.status <> 'cancelled' AND p.kind <> 'merch' GROUP BY 1 ORDER BY n DESC LIMIT 8`,
   );
   return all.rows.map((r) => r.product_id);
 }
@@ -426,10 +426,7 @@ export async function createOrder(user, input) {
   const result = await tx(async (db) => {
     const q = await quote(db, user, { ...input, channel });
     const method = q.total === 0 && q.pass_id ? 'pass' : input.payment_method;
-    if (!ALL_PAYMENT_METHODS.includes(method)) throw bad('Choose how you will pay');
-    if (channel !== 'counter' && !isProviderEnabled(method)) {
-      throw bad(`${method[0].toUpperCase() + method.slice(1)} is currently turned off. Please choose another payment method.`);
-    }
+    if (!PAYMENT_METHODS.includes(method)) throw bad('Pay with cash at pickup or with your 10-cup pass');
 
     // Prevent unpaid cash order spam that locks stock or coupons
     if (method === 'cash' && channel !== 'counter' && user?.id) {
@@ -443,13 +440,12 @@ export async function createOrder(user, input) {
     }
 
     const code = await nextPickupCode(db, q.station);
-    const digital = ONLINE_PROVIDERS.includes(method) && q.total > 0;
-    const paidNow = q.total === 0 || (channel === 'counter' && !digital && input.paid_now !== false);
+    const paidNow = q.total === 0 || (channel === 'counter' && input.paid_now !== false);
     const { rows } = await db.query(
       `INSERT INTO orders(station_id, user_id, customer_name, pickup_code, channel, status, subtotal, discount, total, discount_label,
          payment_method, payment_status, coupon_id, promo_code_id, pass_id, drop_id, note, scheduled_for, customer_phone, handover_code)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
-      [q.station.id, user?.id || null, input.customer_name || null, code, channel, digital ? 'awaiting_payment' : 'placed',
+      [q.station.id, user?.id || null, input.customer_name || null, code, channel, 'placed',
         q.subtotal, q.discount, q.total, q.discount_label, method, paidNow ? 'paid' : 'unpaid', q.coupon_id, q.promo_code_id, q.pass_id,
         [...q.drops.keys()][0] || null, input.note?.slice(0, 200) || null, q.scheduledFor, input.customer_phone || null, String(crypto.randomInt(1000, 10000))],
     );
@@ -483,26 +479,12 @@ export async function createOrder(user, input) {
     const { rows: pay } = await db.query(
       `INSERT INTO payments(user_id, order_id, station_id, purpose, provider, amount, status, settled_at)
        VALUES ($1,$2,$3,'order',$4,$5,$6, $7) RETURNING *`,
-      [user?.id || null, order.id, q.station.id, q.total === 0 ? (method === 'pass' ? 'pass' : method) : method, q.total, paidNow ? 'paid' : 'pending', paidNow ? new Date() : null],
+      [user?.id || null, order.id, q.station.id, method, q.total, paidNow ? 'paid' : 'pending', paidNow ? new Date() : null],
     );
 
-    let low = [];
-    let paymentInit = null;
-    if (digital) {
-      paymentInit = await initiate(method, pay[0], {
-        orderLabel: `Sadhai ${code}`,
-        customer: {
-          name: user?.name || input.customer_name || 'Sadhai Customer',
-          phone: user?.phone || input.customer_phone || '',
-          email: user?.email || '',
-        },
-      });
-      await db.query('UPDATE payments SET provider_ref=COALESCE($2, provider_ref), raw=$3 WHERE id=$1', [pay[0].id, paymentInit.provider_ref || null, paymentInit.raw || null]);
-    } else {
-      low = await placeOrder(db, order, q.lines, user?.id);
-    }
+    const low = await placeOrder(db, order, q.lines, user?.id);
     await audit(user?.id, 'order.create', 'order', order.id, { total: q.total, channel }, db);
-    return { id: order.id, low, paymentInit, stationId: q.station.id };
+    return { id: order.id, low, stationId: q.station.id };
   });
 
   const order = await fullOrder(result.id, undefined, { reveal: true });
@@ -511,65 +493,7 @@ export async function createOrder(user, input) {
     if (order.user_id) await notify(order.user_id, { kind: 'order', title: `Order ${order.pickup_code} received`, body: `${order.station_name} is on it. Your coffee in 90 seconds.`, data: { order_id: order.id } });
     alertLowStock(result.stationId, result.low).catch(() => {});
   }
-  return { order, payment: result.paymentInit };
-}
-
-/** Called when money is confirmed (sandbox confirm, provider callback or webhook). */
-export async function confirmPayment(paymentId, { ref, raw, outcome = 'paid' } = {}) {
-  const res = await tx(async (db) => {
-    const { rows } = await db.query('SELECT * FROM payments WHERE id=$1 FOR UPDATE', [paymentId]);
-    const p = rows[0];
-    if (!p) throw notFound('Payment not found');
-    if (p.status === 'paid') return { already: true, payment: p };
-    if (p.status !== 'pending') throw conflict('Payment is no longer pending');
-
-    if (outcome !== 'paid') {
-      await db.query(`UPDATE payments SET status='failed', raw=$2 WHERE id=$1`, [paymentId, raw || null]);
-      if (p.order_id) await cancelInTx(db, p.order_id, null, 'Payment failed', { refund: false });
-      if (p.pass_id) await db.query(`DELETE FROM passes WHERE id=$1 AND status='pending'`, [p.pass_id]);
-      return { failed: true, payment: p };
-    }
-    await db.query(`UPDATE payments SET status='paid', provider_ref=COALESCE($2, provider_ref), raw=$3, settled_at=now() WHERE id=$1`, [paymentId, ref || null, raw || null]);
-
-    let low = [];
-    if (p.purpose === 'order') {
-      const o = (await db.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [p.order_id])).rows[0];
-      if (o.status === 'awaiting_payment') {
-        const items = (await db.query('SELECT product_id, qty, options FROM order_items WHERE order_id=$1', [o.id])).rows;
-        try {
-          await db.query('SAVEPOINT stock');
-          await db.query(`UPDATE orders SET payment_status='paid' WHERE id=$1`, [o.id]);
-          low = await placeOrder(db, o, items, o.user_id);
-          await db.query('RELEASE SAVEPOINT stock');
-        } catch (e) {
-          await db.query('ROLLBACK TO SAVEPOINT stock');
-          await db.query(`UPDATE orders SET payment_status='paid' WHERE id=$1`, [o.id]);
-          await cancelInTx(db, o.id, null, 'An ingredient ran out while paying. You were refunded.', { refund: true });
-          return { cancelled: true, orderId: o.id, payment: p };
-        }
-      }
-    } else if (p.purpose === 'pass') {
-      const days = (await getSettings(db)).pass_use_by_days;
-      await db.query(`UPDATE passes SET status='active', purchased_at=now(), expires_at=now() + ($2 || ' days')::interval WHERE id=$1`, [p.pass_id, String(days)]);
-    }
-    return { payment: p, orderId: p.order_id, passId: p.pass_id, low };
-  });
-
-  if (res.orderId) {
-    const order = await fullOrder(res.orderId);
-    if (order.status === 'placed') {
-      emitOrder(order, order.scheduled_for && !order.released_at ? 'order' : 'order_new');
-      if (order.user_id) await notify(order.user_id, { kind: 'order', title: `Order ${order.pickup_code} received`, body: 'Payment confirmed. Your coffee in 90 seconds.', data: { order_id: order.id } });
-      alertLowStock(order.station_id, res.low || []).catch(() => {});
-    } else if (order.status === 'cancelled') {
-      emitOrder(order);
-    }
-  }
-  if (res.passId && !res.failed) {
-    const code = (await query('SELECT code FROM passes WHERE id=$1', [res.passId])).rows[0]?.code;
-    await notify(res.payment.user_id, { kind: 'pass', title: 'Your 10-cup pass is ready', body: `Pass ${code}. It starts when you use your first cup, then lasts 30 days.`, data: { pass_id: res.passId } });
-  }
-  return res;
+  return { order };
 }
 
 async function cancelInTx(db, orderId, actorId, reason, { refund = true } = {}) {
@@ -608,8 +532,8 @@ export async function cancelOrder(orderId, actor, reason) {
   if (!o) throw notFound('Order not found');
   if (actor.role === 'customer') {
     if (o.user_id !== actor.id) throw forbidden();
-    // Once an order is placed it goes straight to the bar, so only an unpaid order can be cancelled by the customer.
-    if (o.status !== 'awaiting_payment') throw conflict('Your order has gone to the barista, so it cannot be cancelled. Ask at the counter if something is wrong.', 'in_progress');
+    // Every order goes straight to the bar when it is placed, so a customer cannot cancel it. The station can decline it.
+    throw conflict('Your order has gone to the barista, so it cannot be cancelled. Ask at the counter if something is wrong.', 'in_progress');
   }
   await tx((db) => cancelInTx(db, orderId, actor.id, reason || 'Cancelled', { refund: true }));
   const order = await fullOrder(orderId);
@@ -618,7 +542,7 @@ export async function cancelOrder(orderId, actor, reason) {
   return order;
 }
 
-const FLOW = { placed: ['preparing', 'cancelled'], preparing: ['ready', 'cancelled'], ready: ['picked_up'], awaiting_payment: ['cancelled'] };
+const FLOW = { placed: ['preparing', 'cancelled'], preparing: ['ready', 'cancelled'], ready: ['picked_up'] };
 
 /**
  * The customer reads a 4-digit code from their phone or kiosk receipt and says it at the counter.
@@ -719,7 +643,7 @@ export async function advanceOrder(orderId, next, actor, { code, override } = {}
  * Anti-Loss Referral Reward Engine:
  * 1. Referral program must be enabled (`referral_enabled = 1`).
  * 2. Referee must have a pending referral row (`referrals.status = 'pending'`).
- * 3. Qualifying order MUST be a real paid order (`payment_status = 'paid'`, `payment_method` in cash/esewa — NOT a pass order),
+ * 3. Qualifying order MUST be a real paid order (`payment_status = 'paid'`, `payment_method` cash — NOT a pass order),
  *    with NO coupon/promo discount (`discount = 0`) and `total >= referral_min_spend`.
  * 4. If `offer_require_verified_phone = 1`, referee phone must be verified (`phone_verified = true`).
  * 5. Referrer must not have exceeded `referral_cap_month` this calendar month or `referral_lifetime_cap` all-time.
@@ -857,40 +781,7 @@ export async function buyPass(user, method, { stationId = null, soldBy = null } 
     return { pass, payment: null };
   }
 
-  if (method === 'esewa') {
-    if (!isProviderEnabled('esewa')) {
-      throw bad('eSewa payment is currently disabled');
-    }
-    const { pass, payment } = await tx(async (db) => {
-      let rows;
-      for (let i = 0; ; i++) {
-        try {
-          await db.query('SAVEPOINT code');
-          ({ rows } = await db.query(
-            `INSERT INTO passes(user_id, total_cups, price_paid, status, purchased_at, expires_at, code)
-             VALUES ($1,$2,$3,'pending', now(), now() + ($4 || ' days')::interval, $5) RETURNING *`,
-            [user.id, s.pass_cups, price, String(s.pass_use_by_days), newPassCode()],
-          ));
-          await db.query('RELEASE SAVEPOINT code');
-          break;
-        } catch (e) {
-          await db.query('ROLLBACK TO SAVEPOINT code');
-          if (e.code !== '23505' || i > 5) throw e;
-        }
-      }
-      const pay = (await db.query(
-        `INSERT INTO payments(user_id, pass_id, station_id, purpose, provider, amount, status)
-         VALUES ($1,$2,$3,'pass','esewa',$4,'pending') RETURNING *`,
-        [user.id, rows[0].id, stationId, price],
-      )).rows[0];
-      return { pass: rows[0], payment: pay };
-    });
-    const paymentInit = await initiate('esewa', payment, { customer: user });
-    await query('UPDATE payments SET provider_ref=COALESCE($2, provider_ref), raw=$3 WHERE id=$1', [payment.id, paymentInit.provider_ref || null, paymentInit.raw || null]);
-    return { pass, payment: paymentInit };
-  }
-
-  throw bad(`Unsupported payment method ${method}`);
+  throw bad('10-cup passes are bought at a station counter, in cash');
 }
 
 /* ---------------------------------------------------------- welcome & ladder */

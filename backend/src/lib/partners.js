@@ -5,7 +5,7 @@ import { range } from './reports.js';
 /**
  * Partner-cafe statement. Sadhai runs on existing cafes, so money moves two ways:
  *  - the cafe holds the CASH it takes at the counter (and for passes sold over the counter)
- *  - Sadhai holds the DIGITAL money (eSewa)
+ *  - there is no online payment, so Sadhai holds no digital money (digital_held_by_sadhai only shows older history)
  * The cafe earns revenue_share_pct of net sales. Pass cups count at the pass's per-cup value, so the cafe is paid for them.
  * net_due > 0: Sadhai pays the cafe. net_due < 0: the cafe remits to Sadhai.
  */
@@ -46,7 +46,7 @@ export async function scorecard(stationIds, from, to) {
   const [stations, staff] = await Promise.all([
     query(
       `SELECT st.id, st.name, st.operator_type, st.partner_name,
-              count(o.id) FILTER (WHERE o.status <> 'awaiting_payment')::int AS orders,
+              count(o.id)::int AS orders,
               count(o.id) FILTER (WHERE o.status='cancelled')::int AS cancelled,
               count(o.id) FILTER (WHERE o.ready_at IS NOT NULL AND o.channel <> 'counter' AND extract(epoch FROM (o.ready_at - COALESCE(o.accepted_at,o.created_at))) <= st.prep_target_seconds)::int AS on_time,
               count(o.id) FILTER (WHERE o.ready_at IS NOT NULL AND o.channel <> 'counter')::int AS timed,

@@ -18,7 +18,7 @@ How the app meets the Google Play and Apple App Store rules that apply to it. "D
 | **Export compliance (encryption)** | `ITSAppUsesNonExemptEncryption = false` (only standard HTTPS) | Done |
 | **HTTPS only in release** | Android release has cleartext off (debug manifest allows local http). iOS ATS is on, with only local-network allowed for development | Done. You: point `API_URL` at an https domain |
 | **Sign in with Apple** (Apple 4.8) | Not required: the app uses its own phone and password login, no third-party social login | N/A |
-| **In-app purchase rules** (Apple 3.1.1, Google Payments) | Customers buy physical goods and food (coffee, merch) and vouchers redeemable for them in person, so external payment (Fonepay, cash) is allowed. No digital content or subscriptions | Done. Keep it that way |
+| **In-app purchase rules** (Apple 3.1.1, Google Payments) | Customers buy physical goods and food (coffee, merch) and vouchers redeemable for them in person, and the app takes no online payment (cash at the counter, or a pass sold at the counter). No digital content or subscriptions | Done. Keep it that way |
 | **User-generated content** (Apple 1.2) | The only free text is an optional order note and rating comment, visible only to the station and managers, not to other customers. No public feed | Done |
 | **Minimum functionality / not a web wrapper** (Apple 4.2) | Native Flutter app with location, live order tracking and a pass wallet | Done |
 | **Accessibility basics** | Semantic labels on controls, 44 px minimum touch targets, text contrast 4.5:1 (brand tokens), reduced-motion respected, system text scaling works | Done. You: test with VoiceOver and TalkBack before release |

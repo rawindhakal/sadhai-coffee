@@ -132,7 +132,7 @@ station.get('/summary', wrap(async (req, res) => {
     query(`SELECT count(*)::int AS orders, COALESCE(sum(o.total),0)::int AS revenue,
                   COALESCE(sum((SELECT sum(i.qty) FROM order_items i JOIN products pk ON pk.id=i.product_id WHERE i.order_id=o.id AND pk.kind='drink')),0)::int AS cups,
                   COALESCE(avg(extract(epoch FROM (o.ready_at - COALESCE(o.accepted_at,o.created_at)))),0)::int AS avg_make_seconds
-             FROM orders o WHERE o.station_id=$1 AND ${today} AND o.status NOT IN ('cancelled','awaiting_payment')`, [id]),
+             FROM orders o WHERE o.station_id=$1 AND ${today} AND o.status <> 'cancelled'`, [id]),
     query(`SELECT count(*) FILTER (WHERE status='placed' AND (scheduled_for IS NULL OR released_at IS NOT NULL))::int AS waiting, count(*) FILTER (WHERE status='placed' AND scheduled_for IS NOT NULL AND released_at IS NULL)::int AS later, count(*) FILTER (WHERE status='preparing')::int AS making,
                   count(*) FILTER (WHERE status='ready')::int AS ready FROM orders WHERE station_id=$1 AND status IN ('placed','preparing','ready')`, [id]),
     query(`SELECT COALESCE(sum(p.amount),0)::int AS cash FROM payments p WHERE p.station_id=$1 AND p.provider='cash' AND p.status='paid'

@@ -808,3 +808,19 @@ CREATE TABLE IF NOT EXISTS sms_log (
 );
 CREATE INDEX IF NOT EXISTS sms_log_created_idx ON sms_log(created_at DESC);
 
+
+-- ---- v1.7: no online payments ----
+-- Orders are paid with cash or a pass. Older rows may still say esewa, khalti or fonepay, and 'awaiting_payment'; they stay readable in reports.
+-- Online payments are no longer accepted by the API, and the settlements table is kept only for old history.
+
+-- Tidy any order or pass that was still waiting for an online payment when online payments were removed. Safe to run again.
+UPDATE coupons SET status = CASE WHEN expires_at > now() THEN 'active' ELSE 'expired' END, used_order_id = NULL
+ WHERE used_order_id IN (SELECT id FROM orders WHERE status = 'awaiting_payment');
+UPDATE passes p SET used_cups = GREATEST(0, p.used_cups - u.cups),
+       status = CASE WHEN p.status = 'used' THEN 'active' ELSE p.status END
+  FROM (SELECT pass_id, sum(cups)::int AS cups FROM order_pass_uses WHERE order_id IN (SELECT id FROM orders WHERE status = 'awaiting_payment') GROUP BY pass_id) u
+ WHERE u.pass_id = p.id;
+UPDATE payments SET status = 'failed' WHERE status = 'pending' AND provider NOT IN ('cash', 'pass');
+UPDATE orders SET status = 'cancelled', payment_status = 'unpaid', cancel_reason = 'Online payment is no longer available' WHERE status = 'awaiting_payment';
+UPDATE passes SET status = 'expired' WHERE status = 'pending';
+DELETE FROM app_secrets WHERE key LIKE 'esewa%' OR key LIKE 'khalti%' OR key LIKE 'fonepay%' OR key IN ('payment_mode', 'cash_enabled');

@@ -29,7 +29,7 @@ Google Play and App Store requirements are tracked in `store/COMPLIANCE.md`: in-
 
 | Role | Web | Mobile |
 |---|---|---|
-| **Customer** | Pick a station, order ahead, pay (cash, Fonepay QR, pass), live pickup number, 10-cup pass, coupons, referral, ratings, English/Nepali | Same, native |
+| **Customer** | Pick a station, order ahead, pay (cash at pickup or a 10-cup pass; no online payment), live pickup number, 10-cup pass, coupons, referral, ratings, English/Nepali | Same, native |
 | **Station staff** | Live queue with 90-second timers and sound, counter orders, customer lookup, pass sales, sold-out toggles, stock, cash count | Live queue, sold out, stock, close day |
 | **Manager** (one or more stations) | Modern dashboard: KPIs against the previous period, live operations board, alerts, orders with detail drawer, customers and win-back list, station menu, stock, staff, offer of the day, promos, cash counts, ratings, accountability | Numbers, run station, promos |
 | **Owner** | Everything, plus stations, menu and prices, drops, team, finance (settlement reconciliation, pass register), growth, rules, audit log, CSV export | Numbers, run station, promos |
@@ -101,24 +101,23 @@ Demo data: 4 stations, 13 menu items with Nepali names, ~15,000 orders over 60 d
 - **One push a day**: owner broadcasts skip anyone already sent a promo in the last 24 hours.
 - **Honest prices**: every price is all-in; no tax or service line anywhere.
 - **Offer payback and spend**: Growth tab shows spend per offer, cost per acquired customer, repeat rate within 90 days, app share. Promo codes carry use caps and end dates.
-- **Anti-fabrication guardrails**: pass register with a related-party flag (reported, target zero), passes sold against cups redeemed, cups still owed, and a daily reconciliation of app sales to Fonepay settlements and cash counts.
+- **Anti-fabrication guardrails**: pass register with a related-party flag (reported, target zero), passes sold against cups redeemed, cups still owed, and daily cash counts per counter.
 - **Pickup-first operations**: letter-plus-number pickup codes per station, a queue board that flags orders past the 90-second target, auto sold-out when an ingredient runs short, low-stock alerts to managers.
 
 ## Payments
 
-`PAYMENT_MODE=sandbox` (default) lets the app confirm test payments, so nothing real moves. For production set `PAYMENT_MODE=live` and configure:
+Sadhai takes **no online payments**. There is no payment gateway anywhere in the API, the web app, the mobile apps, the kiosk or the settings.
 
-- **Fonepay is the only online payment.** Customers, kiosk guests and counter staff show or scan a Fonepay dynamic QR. Set `FONEPAY_MERCHANT_CODE`, `FONEPAY_USERNAME`, `FONEPAY_PASSWORD`, `FONEPAY_SECRET_KEY`, `FONEPAY_QR_URL` and `FONEPAY_STATUS_URL` (or save them under Settings and keys in the owner dashboard). Every request is signed with HMAC-SHA512 of the fields joined by commas.
-- The order reaches the station only after payment is confirmed, either by Fonepay's signed notification (`POST /payments/webhook/fonepay`, header `x-signature` = HMAC-SHA256 of `payment_id|provider_ref|status` with `FONEPAY_WEBHOOK_SECRET`) or by the app polling `GET /payments/:id`, which asks Fonepay for the status.
-- Cash (at the counter or at pickup) and 10-cup passes are not online payments. eSewa and Khalti were removed; old rows keep their label in reports.
-- The Fonepay request fields and URLs follow Fonepay's third-party dynamic QR merchant API as documented to us. They are settings, so match them to your merchant agreement before going live. Live mode has not been exercised against Fonepay from this repository: only sandbox mode is covered by `npm run smoke` and `npm run flows`.
-
-Test the sandbox values against each provider's current documentation before going live. Digital refunds are recorded in Sadhai (`refund_pending_manual`) and paid out from the provider dashboard.
+- An order is paid in **cash at the counter when the customer collects it**, or with a **10-cup pass**. Coupons and promo codes only reduce the price.
+- **10-cup passes are sold for cash at a station counter.** The barista enters the customer's phone number and the pass appears in the customer's account.
+- Every order goes straight to the station when it is placed, so a customer cannot cancel it. The station can decline it with a reason.
+- Cash is counted at close of day per station; partner cafes hold the cash and are settled by the statement (their share netted against the cash they hold).
+- Older orders from before this change may still show an online provider in reports. Nothing new can be created with one.
 
 ## Things to do before launch
 
 - **Domain `sadhaicoffee.com`:** web app and legal pages at `https://sadhaicoffee.com` (also `www`), API at `https://api.sadhaicoffee.com`. Set `PUBLIC_WEB_URL`, `PUBLIC_API_URL` and `CORS_ORIGINS` to match (see `backend/.env.example`), build the web app with `NEXT_PUBLIC_API_URL=https://api.sadhaicoffee.com`, and build the mobile apps with `--dart-define=API_URL=https://api.sadhaicoffee.com --dart-define=WEB_URL=https://sadhaicoffee.com`. The support and privacy addresses default to `support@sadhaicoffee.com` and `privacy@sadhaicoffee.com`; create those mailboxes. The same values can be saved under Settings and keys. Privacy policy URL for the stores: `https://sadhaicoffee.com/privacy`.
-- Set a strong `JWT_SECRET`, `PAYMENT_MODE=live`, `IGNORE_STATION_HOURS=0`, HTTPS, and tight `CORS_ORIGINS`.
+- Set a strong `JWT_SECRET`, `IGNORE_STATION_HOURS=0`, HTTPS, and tight `CORS_ORIGINS`.
 - Sign-up uses phone and password. Add SMS OTP (Sparrow SMS or Aakash SMS) in `routes/auth.js`, and push delivery (FCM) in `lib/notify.js`; hooks are marked.
 - The SSE hub is in memory. For more than one API instance, replace `lib/hub.js` with Postgres `LISTEN/NOTIFY` or Redis.
 - Have a native copywriter check the Nepali strings, as the brand notes ask.

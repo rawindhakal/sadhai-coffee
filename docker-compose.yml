@@ -14,7 +14,6 @@ services:
       DATABASE_URL: postgres://sadhai:sadhai@db:5432/sadhai_coffee
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       CORS_ORIGINS: http://localhost:3000
-      CASH_ENABLED: ${CASH_ENABLED:-1}
       PUBLIC_API_URL: http://localhost:4747
       PUBLIC_WEB_URL: http://localhost:3000
       IGNORE_STATION_HOURS: ${IGNORE_STATION_HOURS:-0}

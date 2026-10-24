@@ -6,7 +6,7 @@ import { loadRuntime, rt } from './lib/runtime.js';
 
 await loadRuntime();
 const app = createApp();
-const server = app.listen(config.port, () => console.log(`Sadhai API listening on :${config.port} (cash: ${rt('cash_enabled') !== '0' ? 'enabled' : 'disabled'})`));
+const server = app.listen(config.port, () => console.log(`Sadhai API listening on :${config.port}`));
 if (process.env.DISABLE_SCHEDULER !== '1') startScheduler();
 const stop = () => server.close(() => pool.end().then(() => process.exit(0)));
 process.on('SIGTERM', stop);

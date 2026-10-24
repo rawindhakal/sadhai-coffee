@@ -351,7 +351,7 @@ export function WelcomeReferralsTab({ isOwner }: { isOwner: boolean }) {
             <div className="row between wrap" style={{ marginBottom: 14 }}>
               <div>
                 <h3>3. Referral program (“Give a cup, get a cup”)</h3>
-                <p className="small muted">Both friend and referrer are rewarded ONLY after the friend completes a full-price paid cash or eSewa order meeting the minimum spend.</p>
+                <p className="small muted">Both friend and referrer are rewarded ONLY after the friend completes a full-price paid cash order meeting the minimum spend.</p>
               </div>
               <span className={`chip ${s.referral_enabled ? 'hill' : ''}`}>{s.referral_enabled ? 'Enabled' : 'Disabled'}</span>
             </div>

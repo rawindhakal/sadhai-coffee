@@ -21,9 +21,29 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
+    version: '1.7.0',
+    date: '24 October 2026',
+    badge: 'Latest',
+    highlight: 'No online payments: cash at the counter or a 10-cup pass',
+    changes: [
+      {
+        category: 'Changed',
+        items: [
+          { title: 'Cash or pass only', desc: 'Orders are paid with cash when the customer collects, or with a 10-cup pass. Orders go straight to the station when placed. Customers cannot cancel; the station can decline an order with a reason.' },
+          { title: 'Passes are sold at the counter', desc: 'A 10-cup pass is sold for cash at any station counter and appears in the customer account at once.' },
+        ],
+      },
+      {
+        category: 'Fixed',
+        items: [
+          { title: 'Removed every payment gateway', desc: 'eSewa, Khalti and Fonepay are removed from the API, apps, kiosk, counter POS, owner settings, legal pages and store listings. Older orders stay in reports as "Online (old)".' },
+        ],
+      },
+    ],
+  },
+  {
     version: '1.6.8',
     date: '23 October 2026',
-    badge: 'Latest',
     highlight: 'Official eSewa ePay v2 Gateway Integration & QR Payment Retirement',
     changes: [
       {

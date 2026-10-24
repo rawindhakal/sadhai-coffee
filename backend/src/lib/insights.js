@@ -1,7 +1,7 @@
 import { query } from './db.js';
 import { range } from './reports.js';
 
-const SALE = `o.status NOT IN ('cancelled','awaiting_payment')`;
+const SALE = `o.status <> 'cancelled'`;
 const CUPS = `(SELECT sum(i.qty) FROM order_items i JOIN products pk ON pk.id=i.product_id WHERE i.order_id=o.id AND pk.kind='drink')`;
 
 export async function periodTotals(stationIds, start, end) {
@@ -32,7 +32,7 @@ export async function extras(stationIds, from, to) {
          FROM order_items i JOIN orders o ON o.id=i.order_id JOIN products pr ON pr.id=i.product_id LEFT JOIN categories c ON c.id=pr.category_id
         WHERE o.station_id = ANY($1) AND o.created_at >= $2 AND o.created_at < $3 AND ${SALE} GROUP BY 1 ORDER BY revenue DESC`, p),
     query(
-      `WITH firsts AS (SELECT user_id, min(created_at) AS first_at FROM orders WHERE user_id IS NOT NULL AND status NOT IN ('cancelled','awaiting_payment') GROUP BY 1),
+      `WITH firsts AS (SELECT user_id, min(created_at) AS first_at FROM orders WHERE user_id IS NOT NULL AND status <> 'cancelled' GROUP BY 1),
             inrange AS (SELECT DISTINCT o.user_id FROM orders o WHERE o.user_id IS NOT NULL AND o.station_id = ANY($1) AND o.created_at >= $2 AND o.created_at < $3 AND ${SALE})
        SELECT count(*) FILTER (WHERE f.first_at >= $2)::int AS new_customers, count(*) FILTER (WHERE f.first_at < $2)::int AS returning_customers
          FROM inrange r JOIN firsts f ON f.user_id=r.user_id`, p),
@@ -49,8 +49,8 @@ export async function liveBoard(stationIds) {
     `SELECT st.id, st.name, st.code, st.is_open, st.accepting_orders, st.operator_type, st.partner_name, st.prep_target_seconds, st.breakeven_cups,
             count(o.id) FILTER (WHERE o.status='placed')::int AS waiting, count(o.id) FILTER (WHERE o.status='preparing')::int AS making, count(o.id) FILTER (WHERE o.status='ready')::int AS ready,
             COALESCE(max(extract(epoch FROM (now() - o.created_at))) FILTER (WHERE o.status IN ('placed','preparing')),0)::int AS oldest_seconds,
-            (SELECT COALESCE(sum(oo.total),0)::int FROM orders oo WHERE oo.station_id=st.id AND oo.created_at >= ${today} AND oo.status NOT IN ('cancelled','awaiting_payment')) AS revenue_today,
-            (SELECT COALESCE(sum((SELECT sum(i.qty) FROM order_items i JOIN products pk ON pk.id=i.product_id WHERE i.order_id=oo.id AND pk.kind='drink')),0)::int FROM orders oo WHERE oo.station_id=st.id AND oo.created_at >= ${today} AND oo.status NOT IN ('cancelled','awaiting_payment')) AS cups_today,
+            (SELECT COALESCE(sum(oo.total),0)::int FROM orders oo WHERE oo.station_id=st.id AND oo.created_at >= ${today} AND oo.status <> 'cancelled') AS revenue_today,
+            (SELECT COALESCE(sum((SELECT sum(i.qty) FROM order_items i JOIN products pk ON pk.id=i.product_id WHERE i.order_id=oo.id AND pk.kind='drink')),0)::int FROM orders oo WHERE oo.station_id=st.id AND oo.created_at >= ${today} AND oo.status <> 'cancelled') AS cups_today,
             (SELECT COALESCE(avg(extract(epoch FROM (oo.ready_at - COALESCE(oo.accepted_at, oo.created_at)))),0)::int FROM orders oo WHERE oo.station_id=st.id AND oo.ready_at > now() - interval '1 hour') AS make_seconds_1h,
             (SELECT count(*)::int FROM orders oo WHERE oo.station_id=st.id AND oo.created_at > now() - interval '1 hour' AND oo.status <> 'cancelled') AS orders_1h
        FROM stations st LEFT JOIN orders o ON o.station_id=st.id AND o.status IN ('placed','preparing','ready')
@@ -109,13 +109,6 @@ export async function alerts(stationIds, isOwner) {
   if (isOwner) {
     const enq = await query(`SELECT count(*)::int AS n FROM enquiries WHERE status='new'`);
     if (enq.rows[0].n) push('info', 'enquiry', `${enq.rows[0].n} new partner or investor enquir${enq.rows[0].n > 1 ? 'ies' : 'y'}`, 'Someone is waiting to hear back.', 'enquiries');
-    const refunds = await query(`SELECT count(*)::int AS n, COALESCE(sum(amount),0)::int AS amt FROM payments WHERE status='refunded' AND raw->>'refund_pending_manual'='true' AND provider <> 'cash'`);
-    if (refunds.rows[0].n) push('warning', 'refund', `${refunds.rows[0].n} digital refund${refunds.rows[0].n > 1 ? 's' : ''} to pay out`, `Rs ${refunds.rows[0].amt} to send from the provider dashboards.`, 'finance');
-    const unrec = await query(
-      `SELECT count(DISTINCT (p.created_at AT TIME ZONE 'Asia/Kathmandu')::date || p.provider)::int AS n FROM payments p
-        WHERE p.status='paid' AND p.provider NOT IN ('cash','pass') AND p.created_at < now() - interval '2 days' AND p.created_at > now() - interval '9 days'
-          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.provider=p.provider AND s.day=(p.created_at AT TIME ZONE 'Asia/Kathmandu')::date)`);
-    if (unrec.rows[0].n) push('warning', 'settlement', `${unrec.rows[0].n} provider day${unrec.rows[0].n > 1 ? 's' : ''} not reconciled`, 'Enter what each provider paid into the bank.', 'finance');
   }
   const order = { critical: 0, warning: 1, info: 2 };
   return out.sort((a, b) => order[a.severity] - order[b.severity]);

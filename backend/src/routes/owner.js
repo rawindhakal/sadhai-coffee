@@ -6,7 +6,7 @@ import { wrap, bad, notFound, normalizePhone } from '../lib/http.js';
 import { authenticate, requireRole } from '../lib/auth.js';
 import { audit, notify } from '../lib/notify.js';
 import { DEFAULT_SETTINGS, getSettings, validateSettingValue } from '../lib/settings.js';
-import { reconciliation, range } from '../lib/reports.js';
+import { range } from '../lib/reports.js';
 import { statement } from '../lib/partners.js';
 import { recomputeProductCosts } from '../lib/costing.js';
 
@@ -497,22 +497,12 @@ owner.put('/settings', wrap(async (req, res) => {
   res.json(out);
 }));
 
-/* ---- audit, reconciliation, passes ---- */
+/* ---- audit and passes ---- */
 owner.get('/audit', wrap(async (req, res) => {
   const { rows } = await query(
     `SELECT a.*, u.name AS actor FROM audit_log a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT $1`, [Math.min(Number(req.query.limit) || 100, 500)],
   );
   res.json(rows);
-}));
-owner.get('/reconciliation', wrap(async (req, res) => res.json(await reconciliation(req.query.from, req.query.to))));
-owner.post('/settlements', wrap(async (req, res) => {
-  const b = z.object({ provider: z.enum(['esewa']), day: z.string().regex(/^\d{4}-\d\d-\d\d$/), amount: z.number().int().min(0), note: z.string().optional() }).parse(req.body);
-  const { rows } = await query(
-    `INSERT INTO settlements(provider, day, amount, note, entered_by) VALUES ($1,$2,$3,$4,$5)
-     ON CONFLICT (provider, day) DO UPDATE SET amount=$3, note=$4, entered_by=$5 RETURNING *`, [b.provider, b.day, b.amount, b.note, req.user.id],
-  );
-  await audit(req.user.id, 'settlement.enter', 'settlement', rows[0].id, b);
-  res.status(201).json(rows[0]);
 }));
 owner.get('/reports/passes', wrap(async (req, res) => {
   const from = req.query.from || '2020-01-01';
@@ -524,7 +514,7 @@ owner.get('/reports/passes', wrap(async (req, res) => {
       `SELECT
         (SELECT count(*)::int FROM passes WHERE status IN ('active','used','expired') AND purchased_at >= $1 AND purchased_at <= $2) AS passes_sold,
         (SELECT COALESCE(sum(price_paid), 0)::int FROM passes WHERE status IN ('active','used','expired') AND purchased_at >= $1 AND purchased_at <= $2) AS total_revenue,
-        (SELECT COALESCE(sum(u.cups), 0)::int FROM order_pass_uses u JOIN orders o ON o.id=u.order_id WHERE o.status NOT IN ('cancelled','awaiting_payment') AND o.created_at >= $1 AND o.created_at <= $2) AS redeemed_cups,
+        (SELECT COALESCE(sum(u.cups), 0)::int FROM order_pass_uses u JOIN orders o ON o.id=u.order_id WHERE o.status <> 'cancelled' AND o.created_at >= $1 AND o.created_at <= $2) AS redeemed_cups,
         (SELECT count(*)::int FROM passes WHERE status='active' AND expires_at > now()) AS active_passes,
         (SELECT COALESCE(sum(total_cups - used_cups), 0)::int FROM passes WHERE status='active' AND expires_at > now()) AS outstanding_cups,
         (SELECT count(*)::int FROM passes WHERE related_party AND purchased_at >= $1 AND purchased_at <= $2) AS related_party_count,
@@ -536,7 +526,7 @@ owner.get('/reports/passes', wrap(async (req, res) => {
               COALESCE(sum(u.cups), 0)::int AS redeemed_cups,
               count(DISTINCT o.id)::int AS orders_count
          FROM stations s
-         LEFT JOIN orders o ON o.station_id = s.id AND o.status NOT IN ('cancelled','awaiting_payment') AND o.created_at >= $1 AND o.created_at <= $2
+         LEFT JOIN orders o ON o.station_id = s.id AND o.status <> 'cancelled' AND o.created_at >= $1 AND o.created_at <= $2
          LEFT JOIN order_pass_uses u ON u.order_id = o.id
         WHERE s.active
         GROUP BY s.id, s.name

@@ -163,7 +163,7 @@ function ModernHero({ stations, site, pricing }: { stations: any[] | null; site:
             <div className="nh-trust-item"><span className="nh-trust-num">{rs(pricing.hot)}</span><span className="nh-trust-lbl">Any hot coffee</span></div>
             <div className="nh-trust-item"><span className="nh-trust-num">90 sec</span><span className="nh-trust-lbl">From order to cup</span></div>
             <div className="nh-trust-item"><span className="nh-trust-num">VAT in</span><span className="nh-trust-lbl">The price is the price</span></div>
-            <div className="nh-trust-item"><span className="nh-trust-num">eSewa</span><span className="nh-trust-lbl">ePay online</span></div>
+            <div className="nh-trust-item"><span className="nh-trust-num">Cash or pass</span><span className="nh-trust-lbl">Pay at the counter</span></div>
           </div>
         </div>
         <HeroArt site={site} pricing={pricing} />

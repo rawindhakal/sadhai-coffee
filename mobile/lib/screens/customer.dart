@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
@@ -11,7 +10,7 @@ import 'cart.dart';
 import 'home.dart';
 import 'offers.dart';
 
-const payLabel = {'cash': 'Cash at counter', 'esewa': 'eSewa (ePay)', 'pass': '10-cup pass'};
+const payLabel = {'cash': 'Cash at counter', 'pass': '10-cup pass', 'esewa': 'Online (old)', 'khalti': 'Online (old)', 'fonepay': 'Online (old)'};
 
 void toast(BuildContext c, String m, {bool bad = false}) => ScaffoldMessenger.of(c)
   ..hideCurrentSnackBar()
@@ -88,11 +87,6 @@ class _TrackingScreenState extends State<TrackingScreen> {
     on ApiException catch (e) { if (mounted) setState(() => _error = e.message); }
   }
 
-  Future<void> _cancel() async {
-    final yes = await showDialog<bool>(context: context, builder: (c) => AlertDialog(title: const Text('Cancel this order?'), actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep it')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Cancel order'))]));
-    if (yes != true) return;
-    try { await Api.instance.post('/orders/${widget.orderId}/cancel'); _load(); } on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); }
-  }
 
   Future<void> _rate(int n) async {
     try { await Api.instance.post('/orders/${widget.orderId}/rate', {'rating': n}); _load(); if (mounted) toast(context, 'Thank you'); } on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); }
@@ -144,23 +138,6 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 if (o['payment_method'] == 'cash' && o['payment_status'] == 'unpaid') const Text('Pay when you pick up.', style: TextStyle(color: Brand.inkMuted)),
               ]))),
               if (['placed', 'preparing', 'ready'].contains(o['status'])) const Padding(padding: EdgeInsets.only(top: 12), child: Text('Your order has gone to the barista, so it cannot be cancelled. Something wrong? Ask at the counter.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted, fontSize: 13))),
-              if (o['status'] == 'awaiting_payment') ...[
-                const SizedBox(height: 12),
-                FilledButton(
-                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: const Color(0xFF41A124)),
-                  onPressed: () async {
-                    final payId = o['payment_id'];
-                    final url = '$apiBase/payments/esewa/start?payment_id=$payId';
-                    final uri = Uri.parse(url);
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
-                    }
-                  },
-                  child: const Text('Pay with eSewa'),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton(style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(44)), onPressed: _cancel, child: const Text('Cancel order')),
-              ],
               if (o['status'] == 'picked_up') Padding(padding: const EdgeInsets.only(top: 16), child: Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
                 Text(o['rating'] != null ? 'Thank you for rating' : 'How was your coffee?', style: display(20)),
                 const SizedBox(height: 8),

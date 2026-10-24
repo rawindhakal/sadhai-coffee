@@ -50,7 +50,6 @@ export function RulesPanel() {
 }
 
 const GROUPS: Record<string, { title: string; note: string }> = {
-  payments: { title: 'Payment Gateways & Counter Settings', note: 'Configure official eSewa ePay v2 and Cash at counter checkout options.' },
   sms: { title: 'NestSMS & Phone Verification Gateway', note: 'Connect NestSMS (api.nestsms.com) for phone OTP verification, Order-Ready alerts, and Welcome/Referral SMS rewards.' },
   push: { title: 'Push notifications', note: 'Firebase sends to Android and iPhone. Browser push uses a key pair. With neither, push runs in test mode.' },
   app: { title: 'Addresses and app versions', note: 'Where customers reach you and which app versions may still run.' },
@@ -61,7 +60,7 @@ export function IntegrationsPanel() {
   const { data, reload, error } = useData<any[]>('/owner/integrations');
   const ov = useData<any>('/owner/integrations/overview');
   const toast = useToast();
-  const [gwTab, setGwTab] = useState<'overview' | 'esewa' | 'sms' | 'other'>('overview');
+  const [gwTab, setGwTab] = useState<'overview' | 'sms' | 'other'>('overview');
   const [edit, setEdit] = useState<Record<string, string | null>>({});
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -204,11 +203,11 @@ export function IntegrationsPanel() {
         <div className="row between wrap" style={{ gap: 12 }}>
           <div>
             <div className="row" style={{ gap: 8 }}>
-              <span className="chip hill">Cash at Counter & NestSMS Control Center</span>
+              <span className="chip hill">SMS and App Control Center</span>
             </div>
-            <h3 style={{ marginTop: 6 }}>Counter Cash & SMS Gateway Dashboard</h3>
+            <h3 style={{ marginTop: 6 }}>SMS, Push and App Settings</h3>
             <p className="small muted" style={{ maxWidth: 740 }}>
-              All orders are settled via Cash at counter (or 10-cup pass). Manage NestSMS phone verification, Order-Ready SMS alerts, push notifications, and app configuration below.
+              Sadhai takes no online payments: orders are paid with cash at pickup or a 10-cup pass. Manage NestSMS phone verification, order-ready SMS, push notifications and app settings here.
             </p>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>
@@ -220,8 +219,7 @@ export function IntegrationsPanel() {
             value={gwTab}
             onChange={setGwTab}
             options={[
-              { id: 'overview', label: 'Overview & Switches' },
-              { id: 'esewa', label: 'eSewa (ePay v2)' },
+              { id: 'overview', label: 'Overview' },
               { id: 'sms', label: 'NestSMS & OTP' },
               { id: 'other', label: 'Push, App & Company' },
             ]}
@@ -231,77 +229,6 @@ export function IntegrationsPanel() {
 
       {gwTab === 'overview' && (
         <div className="col" style={{ gap: 16 }}>
-          <div className="panel col" style={{ gap: 14, borderLeft: '5px solid #2B6E46' }}>
-            <div className="row between wrap">
-              <div>
-                <span className="chip hill">Counter POS</span>
-                <h3 style={{ marginTop: 6 }}>Cash at Counter</h3>
-                <p className="small muted">Customers pay in person when picking up their order at the station counter, or redeem their 10-cup pass.</p>
-              </div>
-              <label className="row card flat" style={{ padding: '6px 12px', cursor: 'pointer', gap: 8 }}>
-                <input
-                  type="checkbox"
-                  role="switch"
-                  style={{ width: 20, minHeight: 20 }}
-                  checked={valOf('cash_enabled') === '1'}
-                  onChange={(e) => quickSave({ cash_enabled: e.target.checked ? '1' : '0' }, `Cash at counter turned ${e.target.checked ? 'ON' : 'OFF'}`)}
-                />
-                <strong>Cash: {valOf('cash_enabled') === '1' ? 'ON' : 'OFF'}</strong>
-              </label>
-            </div>
-          </div>
-
-          <div className="panel col" style={{ gap: 14, borderLeft: `5px solid ${valOf('esewa_enabled') === '1' ? '#41A124' : 'var(--line)'}` }}>
-            <div className="row between wrap">
-              <div>
-                <div className="row" style={{ gap: 8 }}>
-                  <span className="chip" style={{ background: 'rgba(65, 161, 36, 0.1)', color: '#41A124', fontWeight: 700 }}>eSewa ePay v2</span>
-                  <span className={`chip ${valOf('esewa_mode') === 'live' ? 'hill' : 'marigold'}`}>
-                    {(valOf('esewa_mode') || 'SANDBOX').toUpperCase()}
-                  </span>
-                  {ov.data?.gateways?.esewa?.configured && <span className="chip hill">Live Credentials Set</span>}
-                </div>
-                <h3 style={{ marginTop: 6 }}>eSewa Official Payment Gateway</h3>
-                <p className="small muted">
-                  Official signed ePay v2 checkout. Customers can pay via eSewa web/app on mobile or desktop with instant HMAC-SHA256 signature verification.
-                </p>
-              </div>
-              <div className="row" style={{ gap: 8 }}>
-                <label className="row card flat" style={{ padding: '6px 12px', cursor: 'pointer', gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    style={{ width: 20, minHeight: 20 }}
-                    checked={valOf('esewa_enabled') === '1'}
-                    onChange={(e) => quickSave({ esewa_enabled: e.target.checked ? '1' : '0' }, `eSewa turned ${e.target.checked ? 'ON' : 'OFF'}`)}
-                  />
-                  <strong>eSewa: {valOf('esewa_enabled') === '1' ? 'ON' : 'OFF'}</strong>
-                </label>
-                <button className="btn sm" onClick={() => test('esewa', 'eSewa Connection Test')} disabled={busyKey === 'test_esewa'}>
-                  {busyKey === 'test_esewa' ? 'Testing…' : 'Test eSewa'}
-                </button>
-                <button className="btn sm primary" onClick={() => setGwTab('esewa')}>Configure eSewa →</button>
-              </div>
-            </div>
-
-            <div className="grid g3" style={{ gap: 10 }}>
-              <div className="card flat col" style={{ gap: 4 }}>
-                <div className="small muted">Merchant Code</div>
-                <strong>{valOf('esewa_merchant_code') || 'EPAYTEST (Sandbox)'}</strong>
-                <span className="small muted">Mode: {valOf('esewa_mode') || 'auto'}</span>
-              </div>
-              <div className="card flat col" style={{ gap: 4 }}>
-                <div className="small muted">Callback Endpoint</div>
-                <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{ov.data?.callbacks?.esewa || '/payments/esewa/callback'}</code>
-              </div>
-              <div className="card flat col" style={{ gap: 4 }}>
-                <div className="small muted">30-Day eSewa Revenue</div>
-                <strong style={{ fontSize: 18 }}>Rs {ov.data?.stats_30d?.esewa?.revenue || 0}</strong>
-                <span className="small muted">{ov.data?.stats_30d?.esewa?.paid_count || 0} paid · {ov.data?.stats_30d?.esewa?.pending_count || 0} pending</span>
-              </div>
-            </div>
-          </div>
-
           <div className="panel col" style={{ gap: 14, borderLeft: `5px solid ${valOf('sms_enabled') === '1' ? '#0284C7' : 'var(--line)'}` }}>
             <div className="row between wrap">
               <div>
@@ -362,30 +289,6 @@ export function IntegrationsPanel() {
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {gwTab === 'esewa' && (
-        <div className="panel col" style={{ gap: 16 }}>
-          <div className="ph">
-            <div>
-              <span className="chip" style={{ background: 'rgba(65, 161, 36, 0.1)', color: '#41A124', fontWeight: 700 }}>eSewa ePay v2</span>
-              <h3 style={{ marginTop: 4 }}>eSewa Official Payment Gateway</h3>
-              <p className="small muted" style={{ maxWidth: 680 }}>
-                Configure official eSewa ePay (developer.esewa.com.np/pages/Epay). Test credentials: merchant code <code>EPAYTEST</code>, secret key <code>8gBm/:&amp;EnhH.1/q</code>.
-              </p>
-            </div>
-            <div className="row wrap" style={{ gap: 8 }}>
-              <button
-                className="btn sm primary"
-                disabled={busyKey === 'test_esewa'}
-                onClick={() => test('esewa', 'eSewa Connection Test')}
-              >
-                {busyKey === 'test_esewa' ? 'Testing…' : 'Test eSewa Connection'}
-              </button>
-            </div>
-          </div>
-          {renderGroupFields('payments')}
         </div>
       )}
 

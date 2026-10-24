@@ -12,7 +12,6 @@ import { DEFS, describeRuntime, setRuntime, rt } from '../lib/runtime.js';
 import { pushStatus, sendToUser, testFcm } from '../lib/push.js';
 import { SITE_DEFAULTS, loadSite, mediaUrl } from '../lib/site.js';
 import { getSettings } from '../lib/settings.js';
-import { gatewayStatus, esewaMissing, esewaStatusUrl } from '../lib/payments.js';
 import { sendSms, smsStatus, nestsmsMissing } from '../lib/sms.js';
 import { todayNpt, addDays } from '../lib/roster.js';
 
@@ -24,66 +23,13 @@ studio.use(authenticate, requireRole('owner'));
 studio.get('/integrations', wrap(async (_req, res) => res.json(await describeRuntime())));
 
 studio.get('/integrations/overview', wrap(async (_req, res) => {
-  const [payMix, recentPay, smsCounts, recentSms] = await Promise.all([
-    query(
-      `SELECT provider,
-              count(*) FILTER (WHERE status='paid')::int AS paid_count,
-              count(*) FILTER (WHERE status='failed')::int AS failed_count,
-              count(*) FILTER (WHERE status='pending')::int AS pending_count,
-              COALESCE(sum(amount) FILTER (WHERE status='paid'), 0)::int AS revenue
-         FROM payments
-        WHERE created_at >= now() - interval '30 days'
-        GROUP BY provider`,
-    ),
-    query(
-      `SELECT p.id, p.provider, p.purpose, p.amount, p.status, p.provider_ref, p.created_at, o.pickup_code
-         FROM payments p
-         LEFT JOIN orders o ON o.id = p.order_id
-        WHERE p.provider IN ('cash', 'pass')
-        ORDER BY p.created_at DESC
-        LIMIT 15`,
-    ),
-    query(
-      `SELECT status, count(*)::int AS count
-         FROM sms_log
-        WHERE created_at >= now() - interval '30 days'
-        GROUP BY status`,
-    ),
-    query(
-      `SELECT id, phone, kind, message, status, created_at
-         FROM sms_log
-        ORDER BY created_at DESC
-        LIMIT 15`,
-    ),
+  const [smsCounts, recentSms] = await Promise.all([
+    query(`SELECT status, count(*)::int AS count FROM sms_log WHERE created_at >= now() - interval '30 days' GROUP BY status`),
+    query(`SELECT id, phone, kind, message, status, created_at FROM sms_log ORDER BY created_at DESC LIMIT 15`),
   ]);
-
-  const byProvider = {};
-  for (const p of ['cash', 'pass']) {
-    const r = payMix.rows.find((x) => x.provider === p);
-    byProvider[p] = {
-      paid_count: r?.paid_count || 0,
-      failed_count: r?.failed_count || 0,
-      pending_count: r?.pending_count || 0,
-      revenue: r?.revenue || 0,
-    };
-  }
-
   const smsSummary = { sent: 0, sandbox: 0, failed: 0 };
-  for (const r of smsCounts.rows) {
-    if (r.status in smsSummary) smsSummary[r.status] = r.count;
-  }
-
-  res.json({
-    gateways: gatewayStatus(),
-    sms: smsStatus(),
-    stats_30d: byProvider,
-    recent_payments: recentPay.rows,
-    sms_stats_30d: smsSummary,
-    recent_sms: recentSms.rows,
-    callbacks: {
-      esewa: `${rt('public_api_url').replace(/\/$/, '')}/payments/esewa/callback`,
-    },
-  });
+  for (const r of smsCounts.rows) if (r.status in smsSummary) smsSummary[r.status] = r.count;
+  res.json({ sms: smsStatus(), sms_stats_30d: smsSummary, recent_sms: recentSms.rows });
 }));
 
 studio.put('/integrations', wrap(async (req, res) => {
@@ -144,41 +90,6 @@ studio.post('/integrations/test/:name', wrap(async (req, res) => {
       if (!out.sent) return res.json({ ok: false, message: `NestSMS error: ${out.error || 'Failed to send SMS'}` });
       res.json({ ok: true, message: `NestSMS delivered a live test SMS to ${out.phone}.` });
     } catch (e) { res.json({ ok: false, message: e.message }); }
-  } else if (name === 'esewa') {
-    const missing = esewaMissing();
-    const st = gatewayStatus().esewa;
-    if (st.mode === 'sandbox') {
-      return res.json({
-        ok: true,
-        message: `eSewa is running in ${st.mode.toUpperCase()} mode (EPAYTEST). Official ePay form and signature verification are fully operational.`,
-        status: st,
-      });
-    }
-    if (missing.length) {
-      return res.json({
-        ok: false,
-        message: `eSewa is set to LIVE mode but missing credentials: ${missing.map((k) => DEFS[k]?.label || k).join(', ')}.`,
-        status: st,
-      });
-    }
-    try {
-      const statusBase = esewaStatusUrl();
-      const resp = await fetch(`${statusBase}?product_code=${encodeURIComponent(rt('esewa_merchant_code'))}&total_amount=10&transaction_uuid=TEST-PING`, {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(10000),
-      });
-      res.json({
-        ok: true,
-        message: `Connected to eSewa ePay servers (${statusBase}). Status code: ${resp.status}. Credentials verified.`,
-        status: st,
-      });
-    } catch (e) {
-      res.json({
-        ok: false,
-        message: `eSewa connection error: ${e.message}`,
-        status: st,
-      });
-    }
   } else throw notFound('Unknown test');
 }));
 
@@ -264,7 +175,6 @@ studio.get('/setup', wrap(async (req, res) => {
     one(`SELECT count(*)::int AS n FROM enquiries WHERE status='new'`),
     one(`SELECT password_hash FROM users WHERE id=$1`, [req.user.id]),
   ]);
-  const cashOn = rt('cash_enabled') !== '0';
   const push = pushStatus();
   const companyDone = rt('support_email') !== DEFS.support_email.def && rt('company_name') !== 'Sadhai Coffee';
   const usingDemoPassword = ownerUser?.password_hash ? await bcrypt.compare('Sadhai@123', ownerUser.password_hash) : false;
@@ -276,7 +186,6 @@ studio.get('/setup', wrap(async (req, res) => {
     { key: 'ingredients', title: 'Enter ingredient prices and suppliers', done: ing.unpriced === 0 && ing.no_supplier === 0, detail: ing.unpriced || ing.no_supplier ? `${ing.unpriced} without a price, ${ing.no_supplier} without a supplier` : 'All priced', section: 'inventory' },
     { key: 'team', title: 'Add your team and their hourly rates', done: team.n > 0 && team.unpaid === 0, detail: team.n ? (team.unpaid ? `${team.unpaid} of ${team.n} have no hourly rate` : `${team.n} staff with rates`) : 'No staff yet', section: 'people' },
     { key: 'roster', title: 'Fill and publish this week’s roster', done: ros.n > 0 && ros.open === 0 && ros.unpublished === 0, detail: ros.n ? `${ros.open} open slots, ${ros.unpublished} not published` : 'No shifts planned for the next 7 days', section: 'roster' },
-    { key: 'payments', title: 'Cash at counter checkout', done: cashOn, detail: cashOn ? 'Cash at counter is active across all channels' : 'Cash at counter is turned off', section: 'settings' },
     { key: 'push', title: 'Turn on push notifications', done: !push.dry_run && push.mode !== 'off', detail: push.dry_run ? 'Test mode: add Firebase or browser keys' : 'Sending for real', section: 'settings' },
     { key: 'company', title: 'Add your company details for the legal pages', done: companyDone, detail: companyDone ? 'Saved' : 'Still showing the placeholder name and email', section: 'settings' },
     { key: 'site', title: 'Make the home page yours', done: site.n > 0, detail: site.n ? 'Customised' : 'Using the built-in hero artwork', section: 'site' },

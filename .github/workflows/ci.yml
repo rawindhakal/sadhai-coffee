@@ -24,7 +24,6 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/sadhai_coffee
       JWT_SECRET: ci-secret
       PORT: 4747
-      PAYMENT_MODE: sandbox
       IGNORE_STATION_HOURS: '1'
       PUBLIC_API_URL: http://localhost:4747
     defaults: { run: { working-directory: backend } }

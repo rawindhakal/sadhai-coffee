@@ -30,6 +30,6 @@ Use these to fill in Google Play Console (App content, Data safety) and App Stor
 
 ## Play Console declarations
 
-- Ads: No. News app: No. COVID-19 app: No. Government app: No. Financial features: none (payments are for goods and run through Fonepay).
+- Ads: No. News app: No. COVID-19 app: No. Government app: No. Financial features: none (the app takes no payments; customers pay cash at the counter).
 - Target audience: 16 and over. Not designed for children.
 - App access: provide the review account from `store/RELEASE.md`.

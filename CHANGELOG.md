@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.7.0] - 2026-10-24
+
+### Removed
+- **All online payment gateways (eSewa, Khalti, Fonepay)** from the API, web, kiosk, counter POS and mobile apps, the owner settings and the documents. Orders are paid with cash at the counter or a 10-cup pass; passes are sold for cash at a station counter.
+
+### Changed
+- Orders go straight to the station when placed. Customers cannot cancel; stations can decline with a reason.
+- Old payment rows stay readable as "Online (old)". The provider reconciliation report and settlement entry are gone.
+
+---
+
 ## [1.6.7] - 2026-10-21
 
 ### Added

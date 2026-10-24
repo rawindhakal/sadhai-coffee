@@ -13,9 +13,21 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 3. `node scripts/check-version.mjs` fails if any of those files disagree. CI runs it on every push.
 4. To force very old apps to update, raise `MIN_APP_VERSION` on the API. Apps older than that show an "Please update" screen.
 
+
 ## Unreleased
 
 _Nothing yet._
+
+## v1.7.0 (2026-10-24)
+
+### Removed
+- **All online payment gateways** (eSewa, Khalti and Fonepay), everywhere: the payment library and its callbacks and status checks, the gateway settings and keys, the owner "Payment gateways" and bank reconciliation screens, the QR and redirect screens on the web, the kiosk, the counter POS and the mobile apps, and the gateway text in the legal pages, store listings and docs. Orders are paid with cash at the counter or with a 10-cup pass. 10-cup passes are sold for cash at a station counter.
+
+### Changed
+- Every order goes straight to the station when it is placed (there is no "awaiting payment" step). Customers cannot cancel; the station can decline an order with a reason.
+- Old orders keep their data but show as "Online (old)" in reports. No new order can use an online provider.
+- The Owner "Cash & SMS" section is now "SMS and app" (NestSMS, push, company details). The setup checklist no longer has a payments step.
+- `npm run flows` and `npm run smoke` check that no gateway routes, settings or methods are left (135 checks in flows).
 
 ## v1.6.7 (2026-10-21)
 

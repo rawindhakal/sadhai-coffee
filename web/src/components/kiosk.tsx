@@ -15,7 +15,7 @@ const T: Record<string, [string, string]> = {
   touch: ['Touch to order', 'अर्डर गर्न छुनुहोस्'], who: ['Who is this order for?', 'यो अर्डर कसको नाममा?'], name: ['Your name', 'तपाईंको नाम'], phone: ['Mobile number', 'मोबाइल नम्बर'],
   consent: ['You may use my name and number to call my order and send updates.', 'मेरो अर्डर बोलाउन र जानकारी पठाउन मेरो नाम र नम्बर प्रयोग गर्न सक्नुहुन्छ।'],
   next: ['Continue', 'अगाडि'], review: ['Review order', 'अर्डर हेर्नुहोस्'], pay: ['How will you pay?', 'भुक्तानी कसरी गर्ने?'], counter: ['Pay at the counter', 'काउन्टरमा तिर्ने'],
-  passopt: ['Use my 10-cup pass', 'मेरो १०-कप पास प्रयोग गर्ने'], scan: ['Pay online with QR', 'QR बाट अहिले तिर्ने'], place: ['Place order', 'अर्डर गर्नुहोस्'],
+  passopt: ['Use my 10-cup pass', 'मेरो १०-कप पास प्रयोग गर्ने'], place: ['Place order', 'अर्डर गर्नुहोस्'],
   done: ['Your number', 'तपाईंको नम्बर'], again: ['New order', 'नयाँ अर्डर'], total: ['Total', 'जम्मा'], back: ['Back', 'पछाडि'], cart: ['View order', 'अर्डर हेर्नुहोस्'],
 };
 
@@ -93,12 +93,12 @@ export function Kiosk() {
 
   const offers: any[] = home.offers || [];
 
-  async function place(method: 'counter' | 'pass' | 'online', passCode?: string, provider?: string) {
+  async function place(method: 'counter' | 'pass', passCode?: string) {
     setBusy(true); setError(null);
     try {
       const body: any = {
         items: cart.map((l) => ({ product_id: l.product.id, qty: l.qty, option_ids: l.option_ids })), customer_name: guest.name.trim(), customer_phone: guest.phone,
-        payment: method === 'online' ? provider : method, pass_code: method === 'pass' ? passCode : undefined, consent: true,
+        payment: method, pass_code: method === 'pass' ? passCode : undefined, consent: true,
         station_id: staff!.role === 'station' ? undefined : stationId,
       };
       const out = await api('/kiosk/orders', { method: 'POST', body });

@@ -501,7 +501,7 @@ admin.get('/costing', wrap(async (_req, res) => {
   const rows = await costingTable(target);
   const sales = (await query(
     `SELECT COALESCE(sum(i.line_total),0)::int AS revenue, COALESCE(sum(i.qty * COALESCE(NULLIF(i.cost,0), p.cost)),0)::int AS cost
-       FROM order_items i JOIN orders o ON o.id=i.order_id JOIN products p ON p.id=i.product_id WHERE o.status NOT IN ('cancelled','awaiting_payment') AND o.created_at > now() - interval '30 days'`)).rows[0];
+       FROM order_items i JOIN orders o ON o.id=i.order_id JOIN products p ON p.id=i.product_id WHERE o.status <> 'cancelled' AND o.created_at > now() - interval '30 days'`)).rows[0];
   const movers = (await query(
     `SELECT i.name, h.unit_cost, h.pack_price, h.created_at, lag(h.unit_cost) OVER (PARTITION BY h.ingredient_id ORDER BY h.id) AS before
        FROM ingredient_cost_history h JOIN ingredients i ON i.id=h.ingredient_id ORDER BY h.id DESC LIMIT 8`)).rows.filter((m) => m.before != null && Number(m.before) !== Number(m.unit_cost));

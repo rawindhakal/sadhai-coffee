@@ -4,10 +4,9 @@ import { query, pool } from '../lib/db.js';
 import { wrap, bad, notFound, forbidden, HttpError } from '../lib/http.js';
 import { authenticate, requireRole, verifyAccess } from '../lib/auth.js';
 import { subscribe } from '../lib/hub.js';
-import { createOrder, quote, fullOrder, cancelOrder, rateOrder, confirmPayment, buyPass } from '../lib/orders.js';
+import { createOrder, quote, fullOrder, cancelOrder, rateOrder } from '../lib/orders.js';
 import { getSettings } from '../lib/settings.js';
 import { rt } from '../lib/runtime.js';
-import { verifyEsewa, checkPaymentStatus, esewaFields, esewaFormUrl, providerMode } from '../lib/payments.js';
 
 export const customer = Router();
 
@@ -15,97 +14,13 @@ const itemSchema = z.object({ product_id: z.string().uuid(), qty: z.number().int
 const orderSchema = z.object({
   station_id: z.string().uuid(),
   items: z.array(itemSchema).min(1).max(20),
-  payment_method: z.enum(['cash', 'esewa', 'pass']).default('cash'),
+  payment_method: z.enum(['cash', 'pass']).default('cash'),
   coupon_id: z.string().uuid().optional().nullable(),
   promo_code: z.string().trim().max(30).optional().nullable(),
   note: z.string().max(200).optional(),
   channel: z.enum(['app', 'qr', 'web']).default('app'),
   scheduled_for: z.string().datetime().optional(),
 });
-
-// Auto-submitting HTML form for official eSewa ePay v2 when opened in browser/WebView
-customer.get('/payments/esewa/start', wrap(async (req, res) => {
-  const pid = String(req.query.payment_id || '');
-  const { rows } = await query('SELECT * FROM payments WHERE id=$1 AND provider=$2', [pid, 'esewa']);
-  const p = rows[0];
-  if (!p) throw notFound('eSewa payment not found');
-  const form = p.raw?.epay_form || esewaFields(p);
-  const action = p.raw?.epay_action || esewaFormUrl();
-  const inputs = Object.entries(form)
-    .map(([k, v]) => `<input type="hidden" name="${k.replace(/"/g, '&quot;')}" value="${String(v ?? '').replace(/"/g, '&quot;')}" />`)
-    .join('\n');
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Redirecting to eSewa…</title></head>
-    <body style="font-family:system-ui,sans-serif;background:#1A1410;color:#FAF6F0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
-      <div style="text-align:center;padding:24px;max-width:360px">
-        <div style="display:inline-block;background:#41A124;color:#fff;font-weight:700;padding:6px 16px;border-radius:99px;margin-bottom:14px">eSewa ePay</div>
-        <p style="font-size:18px;font-weight:700;margin:0 0 6px">Connecting to eSewa…</p>
-        <p style="font-size:14px;opacity:0.75;margin:0 0 18px">NPR ${p.amount} · Sadhai Coffee</p>
-        <form id="esewaForm" method="POST" action="${action}">
-          ${inputs}
-          <noscript><button type="submit" style="background:#41A124;color:#fff;border:0;padding:12px 24px;border-radius:8px;font-weight:700">Continue to eSewa</button></noscript>
-        </form>
-      </div>
-      <script>document.getElementById('esewaForm').submit();</script>
-    </body></html>`);
-}));
-
-// eSewa callback after customer completes or cancels payment
-customer.get('/payments/esewa/callback', wrap(async (req, res) => {
-  let pid = String(req.query.payment_id || '');
-  let dataB64 = String(req.query.data || '');
-  if (pid.includes('?data=')) {
-    const parts = pid.split('?data=');
-    pid = parts[0];
-    dataB64 = dataB64 || parts[1];
-  }
-  const outcomeParam = String(req.query.outcome || '').split('?')[0];
-
-  let decoded = null;
-  if (dataB64) {
-    try {
-      decoded = JSON.parse(Buffer.from(dataB64, 'base64').toString('utf8'));
-    } catch {}
-  }
-
-  let { rows } = pid ? await query('SELECT * FROM payments WHERE id=$1', [pid]) : { rows: [] };
-  if (!rows[0] && decoded?.transaction_uuid) {
-    const prn = decoded.transaction_uuid;
-    rows = (await query('SELECT * FROM payments WHERE provider_ref=$1 OR replace(id::text, \'-\', \'\') ILIKE $2', [prn, `%${prn}%`])).rows;
-  }
-  const p = rows[0];
-
-  const web = rt('public_web_url').replace(/\/$/, '');
-  const targetUrl = p?.order_id ? `${web}/order/${p.order_id}` : `${web}/account`;
-
-  if (outcomeParam === 'failed' || (decoded && String(decoded.status || '').toUpperCase() !== 'COMPLETE')) {
-    if (p && p.status === 'pending') {
-      try { await confirmPayment(p.id, { outcome: 'failed', raw: decoded || { outcome: 'failed' } }); } catch {}
-    }
-    return res.redirect(`${targetUrl}?payment=failed`);
-  }
-
-  if (!p) {
-    return res.redirect(`${web}/order?payment=failed&reason=payment_not_found`);
-  }
-
-  if (p.status === 'paid') {
-    return res.redirect(`${targetUrl}?paid=esewa`);
-  }
-
-  try {
-    const v = await verifyEsewa(p, dataB64);
-    if (v.paid) {
-      await confirmPayment(p.id, { ref: v.ref, raw: v.raw, outcome: 'paid' });
-      return res.redirect(`${targetUrl}?paid=esewa`);
-    } else {
-      await confirmPayment(p.id, { outcome: 'failed', raw: v.raw });
-      return res.redirect(`${targetUrl}?payment=failed`);
-    }
-  } catch (err) {
-    return res.redirect(`${targetUrl}?payment=failed&err=${encodeURIComponent(err.message || 'verification_failed')}`);
-  }
-}));
 
 // Validate a promo code from the Offers tab (the discount itself is applied at checkout).
 customer.post('/promos/check', wrap(async (req, res) => {
@@ -134,47 +49,6 @@ customer.get('/events', wrap(async (req, res) => {
 }));
 
 customer.use(authenticate);
-
-// Status of a payment. While it is pending, this checks eSewa and confirms the order if paid.
-customer.get('/payments/:id', wrap(async (req, res) => {
-  const { rows } = await query('SELECT * FROM payments WHERE id=$1', [req.params.id]);
-  let p = rows[0];
-  const mine = p && (p.user_id === req.user.id || req.user.role !== 'customer');
-  if (!mine) throw notFound('Payment not found');
-  if (p.status === 'pending' && p.provider === 'esewa') {
-    try {
-      const c = await checkPaymentStatus(p);
-      if (c.paid) {
-        await confirmPayment(p.id, { ref: c.ref, raw: c.raw, outcome: 'paid' });
-      } else if (c.failed) {
-        await confirmPayment(p.id, { raw: c.raw, outcome: 'failed' });
-      }
-    } catch { /* still waiting; customer or polling can try again */ }
-    p = (await query('SELECT * FROM payments WHERE id=$1', [p.id])).rows[0];
-  }
-  const apiUrl = rt('public_api_url').replace(/\/$/, '');
-  res.json({
-    id: p.id,
-    status: p.status,
-    amount: p.amount,
-    provider: p.provider,
-    mode: p.raw?.sandbox ? 'sandbox' : 'epay',
-    pay_url: p.raw?.pay_url || `${apiUrl}/payments/esewa/start?payment_id=${p.id}`,
-    order: p.order_id ? await fullOrder(p.order_id) : null,
-  });
-}));
-
-// Sandbox manual test confirmation
-customer.post('/payments/:id/confirm', wrap(async (req, res) => {
-  if (providerMode('esewa') !== 'sandbox' && req.user.role !== 'owner') {
-    throw forbidden('Payments are confirmed by the provider in live mode');
-  }
-  const { rows } = await query('SELECT * FROM payments WHERE id=$1', [req.params.id]);
-  const p = rows[0];
-  if (!p || (p.user_id !== req.user.id && req.user.role !== 'owner')) throw notFound('Payment not found');
-  const outcome = req.body?.outcome === 'fail' || req.body?.outcome === 'failed' ? 'failed' : 'paid';
-  res.json(await confirmPayment(p.id, { ref: 'SB-' + Date.now(), outcome }));
-}));
 
 customer.post('/orders/quote', wrap(async (req, res) => {
   const b = orderSchema.parse(req.body);
@@ -234,12 +108,6 @@ customer.get('/passes', wrap(async (req, res) => {
   queue.forEach((p, i) => { p.queue_position = i + 1; p.state = i === 0 ? 'using' : 'next'; });
   for (const p of list) { if (!p.state) p.state = p.status === 'used' ? 'used' : p.status; p.starts_on_first_use = !p.activated_at && p.status === 'active'; }
   res.json(list.map((p) => ({ ...p, total_remaining: queue.reduce((a, q) => a + q.remaining, 0) })));
-}));
-
-customer.post('/passes', requireRole('customer'), wrap(async (req, res) => {
-  const b = z.object({ payment_method: z.enum(['esewa', 'cash']) }).parse(req.body);
-  const out = await buyPass(req.user, b.payment_method);
-  res.status(201).json(out);
 }));
 
 customer.get('/coupons', wrap(async (req, res) => {

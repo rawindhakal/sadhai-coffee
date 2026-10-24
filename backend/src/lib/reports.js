@@ -1,7 +1,7 @@
 import { query } from './db.js';
 import { getSettings } from './settings.js';
 
-const SALE = `o.status NOT IN ('cancelled','awaiting_payment')`;
+const SALE = `o.status <> 'cancelled'`;
 const DAY = `(o.created_at AT TIME ZONE 'Asia/Kathmandu')::date`;
 
 export function range(from, to) {
@@ -144,23 +144,3 @@ export async function repeatRate(stationIds) {
   return r.cohort ? Math.round((r.repeated / r.cohort) * 100) : null;
 }
 
-// Daily sales by provider (what the app says) next to what the provider settled to the bank.
-export async function reconciliation(from, to) {
-  const { start, end } = range(from, to);
-  const { rows } = await query(
-    `WITH sales AS (
-       SELECT p.provider, (p.created_at AT TIME ZONE 'Asia/Kathmandu')::date AS day, sum(p.amount)::int AS app_amount, count(*)::int AS n
-         FROM payments p WHERE p.status='paid' AND p.provider NOT IN ('cash','pass') AND p.created_at >= $1 AND p.created_at < $2 GROUP BY 1,2
-     ), refunds AS (
-       SELECT p.provider, (p.created_at AT TIME ZONE 'Asia/Kathmandu')::date AS day, sum(p.amount)::int AS refunded
-         FROM payments p WHERE p.status='refunded' AND p.provider NOT IN ('cash','pass') AND p.created_at >= $1 AND p.created_at < $2 GROUP BY 1,2
-     )
-     SELECT COALESCE(s.provider, st.provider) AS provider, COALESCE(s.day, st.day) AS day, COALESCE(s.app_amount,0) AS app_amount, COALESCE(s.n,0) AS payments,
-            COALESCE(r.refunded,0) AS refunded, st.amount AS settled,
-            st.amount - (COALESCE(s.app_amount,0)) AS diff
-       FROM sales s FULL JOIN settlements st ON st.provider=s.provider AND st.day=s.day
-       LEFT JOIN refunds r ON r.provider=COALESCE(s.provider, st.provider) AND r.day=COALESCE(s.day, st.day)
-      WHERE COALESCE(s.day, st.day) >= ($1 AT TIME ZONE 'Asia/Kathmandu')::date AND COALESCE(s.day, st.day) < ($2 AT TIME ZONE 'Asia/Kathmandu')::date
-      ORDER BY 2 DESC, 1`, [start, end]);
-  return rows;
-}

@@ -8,15 +8,6 @@ import { config } from './config.js';
  * Secrets are stored encrypted (AES-256-GCM, key from SETTINGS_ENCRYPTION_KEY or JWT_SECRET) and never sent back to the browser.
  */
 export const DEFS = {
-  // payment switches & gateways
-  cash_enabled: { group: 'payments', label: 'Accept Cash at counter', type: 'bool', env: 'CASH_ENABLED', def: '1', help: 'Allow customers to pay with cash when picking up at the counter.' },
-  esewa_enabled: { group: 'payments', label: 'Enable eSewa ePay v2', type: 'bool', env: 'ESEWA_ENABLED', def: '1', help: 'Allow customers to pay online using eSewa (ePay v2).' },
-  esewa_mode: { group: 'payments', label: 'eSewa mode', type: 'enum', options: ['auto', 'live', 'sandbox', 'off'], env: 'ESEWA_MODE', def: 'auto', help: 'Live connects to epay.esewa.com.np; Sandbox connects to rc-epay.esewa.com.np (EPAYTEST); Auto uses Live when custom merchant keys are set.' },
-  esewa_merchant_code: { group: 'payments', label: 'eSewa Merchant Code (Product Code)', env: 'ESEWA_MERCHANT_CODE', def: 'EPAYTEST', help: 'Your merchant / product code from eSewa (default: EPAYTEST for sandbox).' },
-  esewa_secret_key: { group: 'payments', label: 'eSewa Secret Key', secret: true, env: 'ESEWA_SECRET_KEY', def: '8gBm/:&EnhH.1/q', help: 'Your HMAC-SHA256 Secret Key from eSewa (default: 8gBm/:&EnhH.1/q for sandbox).' },
-  esewa_epay_url: { group: 'payments', label: 'eSewa ePay Form URL', type: 'url', env: 'ESEWA_EPAY_URL', def: 'https://rc-epay.esewa.com.np/api/epay/main/v2/form', help: 'eSewa ePay v2 form endpoint (rc-epay for sandbox, epay for live).' },
-  esewa_status_url: { group: 'payments', label: 'eSewa Status Check URL', type: 'url', env: 'ESEWA_STATUS_URL', def: 'https://rc-epay.esewa.com.np/api/epay/transaction/status/', help: 'Server-to-server transaction status check endpoint.' },
-
   // sms (NestSMS)
   sms_enabled: { group: 'sms', label: 'Enable SMS gateway (NestSMS)', type: 'bool', env: 'SMS_ENABLED', def: '1', help: 'Master switch to turn all SMS features on or off across the platform.' },
   sms_mode: { group: 'sms', label: 'SMS mode (NestSMS)', type: 'enum', options: ['auto', 'live', 'sandbox', 'off'], env: 'SMS_MODE', def: 'auto', help: 'Auto sends via NestSMS when your API key is saved, and logs a test SMS in sandbox mode when not. Off disables all SMS.' },
@@ -108,7 +99,7 @@ function validate(key, v) {
   if (d.type === 'enum' && !d.options.includes(s)) throw new Error(`${d.label} must be one of: ${d.options.join(', ')}`);
   if (d.type === 'url') {
     if (!/^https?:\/\/[^\s]+$/.test(s)) throw new Error(`${d.label} must be a web address starting with http:// or https://`);
-    if (key === 'nestsms_api_url' || key === 'esewa_epay_url' || key === 'esewa_status_url') assertSafeOutboundUrl(s, d.label);
+    if (key === 'nestsms_api_url') assertSafeOutboundUrl(s, d.label);
   }
   if (d.type === 'bool') return ['1', 'true', 'yes', 'on', true].includes(v) ? '1' : '0';
   if (d.type === 'json') {

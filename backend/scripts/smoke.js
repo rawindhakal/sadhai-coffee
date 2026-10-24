@@ -93,7 +93,7 @@ ok(couponBack.status === 'active', 'coupon restored when the station declines');
 
 // pass: buy for cash at station counter, then redeem
 const onlinePassAttempt = await call('POST', '/passes', {}, T);
-ok(onlinePassAttempt.status === 400, 'passes are sold for cash at the station counter');
+ok(onlinePassAttempt.status === 404, 'a customer cannot buy a pass online: passes are sold for cash at the station counter');
 const pp = await call('POST', '/station/passes', { phone }, staff.access_token);
 ok(pp.status === 201 && (pp.body.pass?.status === 'active' || pp.body.status === 'active'), 'station sells 10-cup pass for cash');
 const passes = (await call('GET', '/passes', null, T)).body;
@@ -115,7 +115,7 @@ ok(ovo.stations.length === 4 && ovo.totals.revenue > ov.totals.revenue, 'owner o
 ok((await call('GET', '/owner/settings', null, mgr.access_token)).status === 403, 'manager blocked from owner routes');
 ok((await call('GET', '/admin/overview?station_id=' + stations.find((s) => s.code === 'KALANKI').id, null, mgr.access_token)).status === 403, 'manager blocked from other manager station');
 ok((await call('GET', '/station/orders', null, T)).status === 403, 'customer blocked from station routes');
-ok((await call('GET', '/owner/reconciliation', null, owner.access_token)).body.length > 0, 'reconciliation report');
+ok((await call('GET', '/owner/reconciliation', null, owner.access_token)).status === 404, 'there is no provider reconciliation report any more');
 const rep = ovo.pass; ok(rep.sold > 0, 'pass integrity metrics');
 // merch: orderable, not pass-eligible, no beans/cups
 const mug = all.find((p) => p.sku === 'MUG');
@@ -401,26 +401,9 @@ ok((await call('GET', '/admin/overview', null, mgr.access_token)).body.labour.co
 const setup = (await call('GET', '/owner/setup', null, owner.access_token)).body;
 ok(setup.total >= 10 && setup.steps.every((x) => x.title && typeof x.done === 'boolean'), 'setup checklist reports each step');
 
-// official eSewa ePay v2 integration test
-const esewaOrder = (await call('POST', '/orders', { station_id: st.id, items: [item], payment_method: 'esewa' }, T)).body;
-ok(esewaOrder.order?.status === 'awaiting_payment' && esewaOrder.payment?.provider === 'esewa' && esewaOrder.payment?.pay_url, 'esewa order created awaiting payment with pay_url');
-
-const esewaStartHtml = await (await fetch(API + `/payments/esewa/start?payment_id=${esewaOrder.payment.payment_id}`)).text();
-ok(esewaStartHtml.includes('rc-epay.esewa.com.np') && esewaStartHtml.includes('name="signature"'), 'esewa start renders signed ePay v2 HTML form');
-
-const esewaStatusBefore = (await call('GET', `/payments/${esewaOrder.payment.payment_id}`, null, T)).body;
-ok(esewaStatusBefore.status === 'pending' && esewaStatusBefore.provider === 'esewa', 'esewa payment status is pending before payment');
-
-const esewaConfirm = await call('POST', `/payments/${esewaOrder.payment.payment_id}/confirm`, {}, T);
-ok(esewaConfirm.status === 200, 'esewa sandbox test confirmation');
-
-const esewaOrderAfter = (await call('GET', `/orders/${esewaOrder.order.id}`, null, T)).body;
-ok(esewaOrderAfter.status === 'placed' && esewaOrderAfter.payment_status === 'paid', 'order moved to placed and paid after esewa confirmation');
-await decline(esewaOrder.order.id);
-
-const esewaTest = (await call('POST', '/owner/integrations/test/esewa', {}, owner.access_token)).body;
-ok(esewaTest.ok && esewaTest.status.mode === 'sandbox', 'owner esewa test passes in sandbox mode');
-
+// no online payments
+ok((await call('POST', '/orders', { station_id: st.id, items: [item], payment_method: 'esewa' }, T)).status === 400, 'online payment methods are refused');
+ok((await call('GET', '/config')).body.payment_methods.join() === 'cash,pass', 'the public config offers cash and a pass only');
 }
 
 // store compliance: version endpoint, data export, account deletion

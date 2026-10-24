@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
@@ -92,17 +91,10 @@ class _CartScreenState extends State<CartScreen> {
     try {
       final out = await Api.instance.post('/orders', _payload(cart));
       final order = out['order'] as Map;
-      final payment = out['payment'] as Map?;
       if (!mounted) return;
       cart.clear();
       cart.invalidatePasses();
       _askPush();
-      if (payment != null && payment['pay_url'] != null) {
-        final uri = Uri.parse(payment['pay_url'] as String);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
-      }
       if (!mounted) return;
       await Navigator.push(context, MaterialPageRoute(builder: (_) => TrackingScreen(orderId: order['id'])));
       widget.onPlaced();
@@ -234,14 +226,6 @@ class _CartScreenState extends State<CartScreen> {
             showCheckmark: false,
             labelStyle: TextStyle(color: _method == 'cash' ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600),
             onSelected: (_) => setState(() => _method = 'cash'),
-          ),
-          ChoiceChip(
-            label: const Text('eSewa (ePay)'),
-            selected: _method == 'esewa',
-            selectedColor: Brand.cherry,
-            showCheckmark: false,
-            labelStyle: TextStyle(color: _method == 'esewa' ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600),
-            onSelected: (_) => setState(() => _method = 'esewa'),
           ),
         ]),
       ],

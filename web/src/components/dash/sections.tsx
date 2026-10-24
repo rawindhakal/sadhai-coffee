@@ -10,7 +10,7 @@ import { SetupChecklist } from '../studio';
 import { useAuth } from '@/lib/auth';
 
 const qs = (o: Record<string, any>) => { const p = Object.entries(o).filter(([, v]) => v); return p.length ? '?' + p.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&') : ''; };
-const PAY_COLORS: Record<string, string> = { cash: '#5A3322', esewa: '#41A124', pass: '#A81F2A' };
+const PAY_COLORS: Record<string, string> = { cash: '#5A3322', pass: '#A81F2A', online: '#7C97A6' };
 
 /* ============================== Overview ============================== */
 export function OverviewSection() {
@@ -64,7 +64,7 @@ export function OverviewSection() {
               <span className="small muted">{s.cups_per_day} of {s.breakeven_cups} cups a day · {s.breakeven_pct}% of break-even</span>
             </button>))}</div></div>
         <div className="panel"><div className="ph"><h3>How customers pay</h3></div>
-          <Donut format={rs} parts={o.payment_mix.map((m: any) => ({ label: m.provider === 'pass' ? '10-cup pass' : m.provider[0].toUpperCase() + m.provider.slice(1), value: m.revenue || m.orders, color: PAY_COLORS[m.provider] || '#999' }))} /></div>
+          <Donut format={rs} parts={o.payment_mix.map((m: any) => ({ label: m.provider === 'pass' ? '10-cup pass' : m.provider === 'cash' ? 'Cash' : 'Online (old)', value: m.revenue || m.orders, color: PAY_COLORS[m.provider === 'cash' || m.provider === 'pass' ? m.provider : 'online'] }))} /></div>
         <div className="panel"><div className="ph"><h3>Sales by category</h3></div>
           <HBars rows={o.category_mix.map((c: any) => ({ label: c.category, value: c.revenue, sub: `${c.qty.toLocaleString()} sold` }))} format={(n) => rs(n)} /></div>
       </div>

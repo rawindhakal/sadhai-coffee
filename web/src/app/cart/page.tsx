@@ -19,7 +19,7 @@ export default function Cart() {
   const coupons = useData<any[]>(user ? '/coupons' : null, [user?.id]);
   const passes = useData<any[]>(user ? '/passes' : null, [user?.id]);
   const [offer, setOffer] = useState<{ type: 'none' | 'coupon' | 'pass' | 'promo'; id?: string }>({ type: 'none' });
-  const [method, setMethod] = useState<'cash' | 'esewa'>('cash');
+  const [method, setMethod] = useState<'cash'>('cash');
   const [note, setNote] = useState('');
   const [quote, setQuote] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,11 +66,7 @@ export default function Cart() {
       passes.reload();
       coupons.reload();
       cart.clear();
-      if (out.payment?.pay_url) {
-        window.location.href = out.payment.pay_url;
-      } else {
-        router.push(`/order/${out.order.id}`);
-      }
+      router.push(`/order/${out.order.id}`);
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
@@ -138,14 +134,6 @@ export default function Cart() {
                   onClick={() => setMethod('cash')}
                 >
                   {PAY_LABEL.cash}
-                </button>
-                <button
-                  type="button"
-                  className={`btn sm ${method === 'esewa' ? 'primary' : 'ghost'}`}
-                  aria-pressed={method === 'esewa'}
-                  onClick={() => setMethod('esewa')}
-                >
-                  {PAY_LABEL.esewa}
                 </button>
               </div>
             </>

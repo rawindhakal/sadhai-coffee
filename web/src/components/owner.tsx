@@ -888,13 +888,8 @@ export function TeamTab() {
 }
 
 export function FinanceTab() {
-  const [days, setDays] = useState(14);
-  const rec = useData<any[]>(`/owner/reconciliation?from=${sinceDays(days)}`, [days]);
   const passes = useData<any[]>('/owner/passes');
   const ov = useData<any>(`/admin/overview?from=${sinceDays(30)}`);
-  const toast = useToast();
-  const [s, setS] = useState<any>(null);
-  async function enter() { try { await api('/owner/settlements', { method: 'POST', body: { provider: s.provider, day: s.day, amount: Number(s.amount) } }); setS(null); rec.reload(); toast('Settlement saved'); } catch (e: any) { toast(e.message, true); } }
   async function csv() {
     const r = await fetch(`${BASE}/owner/export/orders.csv?from=${sinceDays(30)}`, { headers: { Authorization: `Bearer ${store.get()?.access}` } });
     const url = URL.createObjectURL(await r.blob()); const a = document.createElement('a'); a.href = url; a.download = 'sadhai-orders.csv'; a.click(); URL.revokeObjectURL(url);
@@ -908,30 +903,10 @@ export function FinanceTab() {
         <Stat label="Related-party passes" value={ov.data.pass.related_party} delta="Keep this at zero" tone={ov.data.pass.related_party ? 'bad' : 'good'} />
       </div>}
       <div className="card tablewrap">
-        <div className="row between wrap" style={{ marginBottom: 8 }}><h3>Online sales against bank settlements (eSewa)</h3><div className="row"><RangePicker days={days} setDays={setDays} /><button className="btn sm" onClick={() => setS({ provider: 'esewa', day: sinceDays(2), amount: '' })}>Enter settlement</button></div></div>
-        <p className="small muted" style={{ marginBottom: 8 }}>Reconcile every month. A difference is usually a provider fee or a refund; anything else needs an explanation.</p>
-        {!rec.data ? <Loading /> : !rec.data.length ? <Empty>Nothing to reconcile in this period.</Empty> : <table><thead><tr><th>Day</th><th>Provider</th><th className="num">App says</th><th className="num">Provider paid</th><th className="num">Difference</th></tr></thead>
-          <tbody>{rec.data.map((r, i) => <tr key={i}><td>{fmtDate(r.day)}</td><td style={{ textTransform: 'capitalize' }}>{r.provider}</td><td className="num">{rs(r.app_amount)}</td><td className="num">{r.settled == null ? <span className="chip marigold">Not entered</span> : rs(r.settled)}</td><td className="num" style={{ color: r.diff ? 'var(--cherry)' : undefined, fontWeight: r.diff ? 700 : 400 }}>{r.settled == null ? '–' : r.diff ? rs(r.diff) : 'Matches'}</td></tr>)}</tbody></table>}
-      </div>
-      <div className="card tablewrap">
         <div className="row between"><h3 style={{ marginBottom: 8 }}>Pass register</h3><button className="btn sm" onClick={csv}>Export orders (CSV)</button></div>
         {!passes.data ? <Loading /> : <table><thead><tr><th>Customer</th><th>Bought</th><th className="num">Used</th><th>Status</th><th>Related party</th></tr></thead>
           <tbody>{passes.data.slice(0, 20).map((p) => <tr key={p.id}><td>{p.name}<div className="small muted">{p.phone}</div></td><td>{fmtDate(p.purchased_at)} · {rs(p.price_paid)}</td><td className="num">{p.used_cups} / {p.total_cups}</td><td>{p.status}</td><td><input type="checkbox" style={{ width: 20, minHeight: 20 }} checked={p.related_party} aria-label="Related party" onChange={async (e) => { await api(`/owner/passes/${p.id}`, { method: 'PATCH', body: { related_party: e.target.checked } }); passes.reload(); }} /></td></tr>)}</tbody></table>}
       </div>
-      {s && (
-        <Modal title="Provider settlement" onClose={() => setS(null)}>
-          <div className="col">
-            <Field label="Provider">
-              <select value={s.provider} onChange={(e) => setS({ ...s, provider: e.target.value })}>
-                <option value="esewa">eSewa</option>
-              </select>
-            </Field>
-            <Field label="Sales day"><input type="date" value={s.day} onChange={(e) => setS({ ...s, day: e.target.value })} /></Field>
-            <Field label="Amount credited to the bank (Rs)"><input type="number" value={s.amount} onChange={(e) => setS({ ...s, amount: e.target.value })} /></Field>
-            <button className="btn primary" disabled={s.amount === ''} onClick={enter}>Save</button>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }

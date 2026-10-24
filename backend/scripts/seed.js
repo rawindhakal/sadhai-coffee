@@ -255,7 +255,7 @@ await q(`UPDATE users SET active=true WHERE true`);
 const menuWeights = [['AMR', 26], ['LAT', 16], ['CAP', 13], ['CHL', 14], ['ICL', 9], ['CLB', 6], ['ESP', 5], ['MOC', 4], ['GPO', 3], ['SCB', 4], ['GUR', 5], ['CRO', 4], ['BUN', 3]];
 const hourW = [[7, 6], [8, 14], [9, 12], [10, 8], [11, 7], [12, 9], [13, 8], [14, 6], [15, 8], [16, 9], [17, 8], [18, 5], [19, 3]];
 const stationBase = [150, 120, 130, 100];
-const payW = [['cash', 38], ['esewa', 62]];
+const payW = [['cash', 100]];
 const counters = new Map();
 
 async function insertOrder({ st, user, at, lines, channel, method, status = 'picked_up', discount = 0, label = null, pass_id = null, coupon_id = null, rating = null, note = null, who = null }) {
@@ -336,7 +336,7 @@ for (const [i, cu] of customers.slice(0, 14).entries()) {
     `INSERT INTO passes(user_id,total_cups,used_cups,price_paid,status,purchased_at,expires_at,related_party,code,activated_at) VALUES ($1,10,$2,900,$3,$4,$5,$6,$7,$8) RETURNING id`,
     [cu.u.id, used, used >= 10 ? 'used' : 'active', when, new Date(when.getTime() + 30 * DAY), i === 13, `SP-DEMO-${1000 + i}`, used > 0 ? when : null],
   )).rows[0];
-  await q(`INSERT INTO payments(user_id,pass_id,station_id,purpose,provider,amount,status,created_at,settled_at) VALUES ($1,$2,$3,'pass',$4,900,'paid',$5,$5)`, [cu.u.id, pass.id, stations[cu.home].id, wpick([['esewa', 4], ['cash', 3]]), when]);
+  await q(`INSERT INTO payments(user_id,pass_id,station_id,purpose,provider,amount,status,created_at,settled_at) VALUES ($1,$2,$3,'pass',$4,900,'paid',$5,$5)`, [cu.u.id, pass.id, stations[cu.home].id, 'cash', when]);
   if (cu.u.id === demo.id) await q(`UPDATE passes SET used_cups=4, status='active', purchased_at=now() - interval '6 days', expires_at=now() + interval '24 days' WHERE id=$1`, [pass.id]);
 }
 

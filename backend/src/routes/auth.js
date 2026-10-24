@@ -232,7 +232,7 @@ me.delete('/', wrap(async (req, res) => {
   if (req.user.role !== 'customer') throw bad('Staff accounts are removed by the owner under Team.');
   const u = (await query('SELECT * FROM users WHERE id=$1', [req.user.id])).rows[0];
   if (!(await bcrypt.compare(password, u.password_hash))) throw new HttpError(401, 'Your password is wrong');
-  const live = (await query(`SELECT count(*)::int AS n FROM orders WHERE user_id=$1 AND status IN ('awaiting_payment','placed','preparing','ready')`, [u.id])).rows[0].n;
+  const live = (await query(`SELECT count(*)::int AS n FROM orders WHERE user_id=$1 AND status IN ('placed','preparing','ready')`, [u.id])).rows[0].n;
   if (live) throw new HttpError(409, 'You have an order in progress. Pick it up or cancel it, then delete your account.', 'order_in_progress');
   await tx(async (db) => {
     // Ensure phone_hash remains permanently in claimed_phones before pseudonymising phone so delete+recreate can never re-claim offers
