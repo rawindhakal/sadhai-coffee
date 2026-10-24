@@ -12,7 +12,7 @@ const GET = [
   ['cup', 'Standard recipes', 'Every drink is made the same way at every counter, with a recipe card for your team.'],
   ['users', 'Staff tools', 'Rosters, duties, check-in and hours for your team, if you want them.'],
   ['chart', 'A live dashboard', 'Sales, orders, stock and cash counts as they happen, and one clear statement every month.'],
-  ['mega', 'Customers sent to you', 'Offers, passes, referrals and push notifications bring regulars through your door.'],
+  ['mega', 'Customers sent to you', 'Offers, passes and referrals bring regulars through your door.'],
 ];
 
 export default function PartnersPage() {

@@ -13,8 +13,6 @@ import { labour } from '../lib/roster.js';
 import { range as dateRange } from '../lib/reports.js';
 import { costingTable, recipeBreakdown, effectiveUnitCost } from '../lib/costing.js';
 import { DEFAULT_SETTINGS, getSettings, validateSettingValue } from '../lib/settings.js';
-import { audienceUsers, deviceCounts, processCampaign, runAutomations } from '../lib/campaigns.js';
-import { pushStatus } from '../lib/push.js';
 import { extras, liveBoard, alerts, customerInsights, customerDetail, search } from '../lib/insights.js';
 
 // Shared by managers (their stations) and owners (all stations).
@@ -251,7 +249,7 @@ admin.get('/marketing/welcome-referrals', wrap(async (_req, res) => {
       (SELECT count(*)::int FROM claimed_phones) AS tracked_phones`),
     query(`SELECT r.id, r.status, r.created_at, r.rewarded_at, r.qualifying_amount,
                   u1.name AS referrer_name, u1.phone AS referrer_phone,
-                  u2.name AS referee_name, u2.phone AS referee_phone, u2.phone_verified AS referee_verified
+                  u2.name AS referee_name, u2.phone AS referee_phone
              FROM referrals r
              JOIN users u1 ON u1.id = r.referrer_id
              JOIN users u2 ON u2.id = r.referee_id
@@ -436,64 +434,6 @@ admin.get('/partner-statement', wrap(async (req, res) => {
   res.json(out.filter((s) => s.station.operator_type === 'partner' || ids.length === 1));
 }));
 admin.get('/scorecard', wrap(async (req, res) => res.json(await scorecard(await scoped(req), req.query.from, req.query.to))));
-
-/* ---- push notifications console ---- */
-const audienceSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('all') }), z.object({ type: z.literal('inactive_14d') }), z.object({ type: z.literal('pass_expiring') }),
-  z.object({ type: z.literal('station_visitors'), station_id: z.string().uuid() }), z.object({ type: z.literal('phone'), phone: z.string() }),
-]);
-async function checkAudience(user, a) {
-  if (user.role === 'manager') {
-    if (a.type === 'station_visitors') await assertStationAccess(user, a.station_id);
-    else if (a.type !== 'phone') throw forbidden('Managers can message customers of their own stations, or one customer by phone.');
-  }
-}
-admin.get('/push/status', wrap(async (_req, res) => {
-  const [dev, week] = await Promise.all([
-    query(`SELECT platform, count(*)::int AS n FROM push_tokens WHERE active GROUP BY 1`),
-    query(`SELECT status, count(*)::int AS n FROM push_deliveries WHERE created_at > now() - interval '7 days' GROUP BY 1`),
-  ]);
-  res.json({ provider: pushStatus(), devices: dev.rows, deliveries_7d: week.rows });
-}));
-admin.post('/push/preview', wrap(async (req, res) => {
-  const a = audienceSchema.parse(req.body);
-  await checkAudience(req.user, a);
-  const ids = await audienceUsers(a);
-  res.json({ customers: ids.length, ...(await deviceCounts(ids)) });
-}));
-admin.get('/push/campaigns', wrap(async (req, res) => {
-  const { rows } = await query(
-    `SELECT c.*, u.name AS created_by_name,
-            count(d.id) FILTER (WHERE d.status IN ('sent','dry_run'))::int AS delivered, count(d.id) FILTER (WHERE d.status IN ('failed','invalid_token'))::int AS failed,
-            count(d.id) FILTER (WHERE d.status='dry_run')::int AS dry_run
-       FROM push_campaigns c LEFT JOIN users u ON u.id=c.created_by LEFT JOIN push_deliveries d ON d.campaign_id=c.id
-      ${req.user.role === 'manager' ? 'WHERE c.created_by=$1' : 'WHERE $1::uuid IS NOT NULL'} GROUP BY c.id, u.name ORDER BY c.created_at DESC LIMIT 40`, [req.user.id]);
-  res.json(rows);
-}));
-admin.post('/push/campaigns', wrap(async (req, res) => {
-  const b = z.object({ title: z.string().trim().min(3).max(60), body: z.string().trim().max(140).optional(), audience: audienceSchema, send_at: z.string().datetime().optional() }).parse(req.body);
-  await checkAudience(req.user, b.audience);
-  const { rows } = await query(
-    `INSERT INTO push_campaigns(title, body, audience, scheduled_for, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-    [b.title, b.body || null, JSON.stringify(b.audience), b.send_at || new Date().toISOString(), req.user.id],
-  );
-  await audit(req.user.id, 'push.campaign', 'push_campaign', rows[0].id, { title: b.title, audience: b.audience, send_at: b.send_at });
-  let result = null;
-  if (!b.send_at || new Date(b.send_at) <= new Date()) result = await processCampaign(rows[0].id);
-  res.status(201).json({ ...(await query('SELECT * FROM push_campaigns WHERE id=$1', [rows[0].id])).rows[0], result });
-}));
-admin.delete('/push/campaigns/:id', wrap(async (req, res) => {
-  const c = (await query('SELECT * FROM push_campaigns WHERE id=$1', [req.params.id])).rows[0];
-  if (!c) throw notFound('Campaign not found');
-  if (req.user.role === 'manager' && c.created_by !== req.user.id) throw forbidden();
-  const r = await query(`UPDATE push_campaigns SET status='cancelled' WHERE id=$1 AND status='scheduled' RETURNING id`, [c.id]);
-  if (!r.rowCount) throw conflict('Only scheduled messages can be cancelled');
-  res.json({ ok: true });
-}));
-admin.post('/push/automations/run', wrap(async (req, res) => {
-  if (req.user.role !== 'owner') throw forbidden('Owner only');
-  res.json(await runAutomations({ ignoreQuietHours: true }));
-}));
 
 /* ---- recipes and costing (read: managers and owner; edit: owner) ---- */
 admin.get('/costing', wrap(async (_req, res) => {

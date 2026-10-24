@@ -18,6 +18,20 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.8.0 (2026-10-24)
+
+### Removed
+- **SMS (NestSMS) and phone verification, push notifications (Firebase and browser)**: the libraries, routes, settings, owner screens, web and mobile code, database tables and columns, and their tests. Customers still get live order updates and an inbox in the app.
+- Marketing automations that only existed to send push (pass reminders, win-back, offer and drop pings), the "send a message" box and the broadcast route.
+- Unused pieces of the home page editor (hills, timer ring, steps, story, people) and the old landing page code. Saved values for them are deleted on migrate.
+- Routes nothing used: customer cancel, public menu and active drops, central moves, a duplicate ingredient route, the partner patch route and the old product recipe route.
+
+### Changed
+- **Settings** has exactly: prices and rules, app and company (web address, API address, oldest app version, store links, company name and emails), data backup, and the home page editor. Nothing in it is unused.
+- **The home page editor matches the home page**: main picture, headline and line under it in English and Nepali, two button labels, the scrolling banner, menu pictures, and the partner and investor pages, with a preview of the real layout.
+- **One rule for sales**: a sale is an order that has been handed over. The overview, live board, station day total, partner statement, scorecard and customer spend all use it (`backend/src/lib/sales.js`). Orders still in the queue show as "Waiting to be collected" with their amount, and the station sees the cash it still has to collect.
+- The setup checklist links open the right screens and no longer has payment or push steps.
+
 ## v1.7.0 (2026-10-24)
 
 ### Removed

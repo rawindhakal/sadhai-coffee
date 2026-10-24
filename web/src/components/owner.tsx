@@ -916,10 +916,8 @@ export function GrowthTab() {
   const { data: o } = useData<any>(`/admin/overview?from=${sinceDays(days)}`, [days]);
   const set = useData<any>('/owner/settings');
   const toast = useToast();
-  const [msg, setMsg] = useState({ title: '', body: '', segment: 'all' });
   if (!o) return <Loading />;
   const g = o.growth;
-  async function send() { try { const r = await api('/owner/broadcast', { method: 'POST', body: msg }); toast(`Sent to ${r.sent} customers`); setMsg({ title: '', body: '', segment: 'all' }); } catch (e: any) { toast(e.message, true); } }
   return (
     <div className="col" style={{ gap: 20 }}>
       <RangePicker days={days} setDays={setDays} />
@@ -934,14 +932,6 @@ export function GrowthTab() {
         <p className="small muted" style={{ marginTop: 8 }}>Stop any rung whose payback is longer than {set.data?.offer_payback_max_days ?? 30} days.</p>
       </div>
       <div className="card tablewrap"><h3 style={{ marginBottom: 8 }}>Payment mix</h3><table><thead><tr><th>Method</th><th className="num">Orders</th><th className="num">Sales</th></tr></thead><tbody>{o.payment_mix.map((m: any) => <tr key={m.provider}><td>{m.provider}</td><td className="num">{m.orders}</td><td className="num">{rs(m.revenue)}</td></tr>)}</tbody></table></div>
-      <div className="card col">
-        <h3>Send a message</h3>
-        <p className="small muted">One push a day at most per customer. Plain copy, no guilt: “Your Americano, Rs 99 until Sunday.”</p>
-        <Field label="Title"><input maxLength={80} value={msg.title} onChange={(e) => setMsg({ ...msg, title: e.target.value })} /></Field>
-        <Field label="Message"><input maxLength={200} value={msg.body} onChange={(e) => setMsg({ ...msg, body: e.target.value })} /></Field>
-        <Field label="Who"><select value={msg.segment} onChange={(e) => setMsg({ ...msg, segment: e.target.value })}><option value="all">All customers</option><option value="inactive_14d">Not ordered in 14 days</option></select></Field>
-        <button className="btn primary" disabled={msg.title.length < 3} onClick={send}>Send</button>
-      </div>
     </div>
   );
 }

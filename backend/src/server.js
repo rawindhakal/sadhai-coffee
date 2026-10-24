@@ -1,7 +1,7 @@
 import { createApp } from './app.js';
 import { config } from './lib/config.js';
 import { pool } from './lib/db.js';
-import { startScheduler } from './lib/campaigns.js';
+import { startScheduler } from './lib/scheduler.js';
 import { loadRuntime, rt } from './lib/runtime.js';
 
 await loadRuntime();

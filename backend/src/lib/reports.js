@@ -1,7 +1,7 @@
 import { query } from './db.js';
 import { getSettings } from './settings.js';
 
-const SALE = `o.status <> 'cancelled'`;
+import { SALE, IN_PROGRESS } from './sales.js';
 const DAY = `(o.created_at AT TIME ZONE 'Asia/Kathmandu')::date`;
 
 export function range(from, to) {
@@ -96,8 +96,11 @@ export async function overview(stationIds, from, to) {
   const pr = prep.rows[0];
   const ps = pass.rows[0];
 
+  const inProgress = (await query(`SELECT count(*)::int AS orders, COALESCE(sum(o.total),0)::int AS amount FROM orders o WHERE o.station_id = ANY($1) AND ${IN_PROGRESS}`, [stationIds])).rows[0];
+
   return {
     range: { from: start, to: end, days },
+    in_progress: inProgress,
     totals: {
       ...t,
       gross_margin: t.revenue - t.food_cost,

@@ -8,24 +8,9 @@ import { config } from './config.js';
  * Secrets are stored encrypted (AES-256-GCM, key from SETTINGS_ENCRYPTION_KEY or JWT_SECRET) and never sent back to the browser.
  */
 export const DEFS = {
-  // sms (NestSMS)
-  sms_enabled: { group: 'sms', label: 'Enable SMS gateway (NestSMS)', type: 'bool', env: 'SMS_ENABLED', def: '1', help: 'Master switch to turn all SMS features on or off across the platform.' },
-  sms_mode: { group: 'sms', label: 'SMS mode (NestSMS)', type: 'enum', options: ['auto', 'live', 'sandbox', 'off'], env: 'SMS_MODE', def: 'auto', help: 'Auto sends via NestSMS when your API key is saved, and logs a test SMS in sandbox mode when not. Off disables all SMS.' },
-  nestsms_api_url: { group: 'sms', label: 'NestSMS API address', type: 'url', env: 'NESTSMS_API_URL', def: 'https://api.nestsms.com/api/v1/sms/send', help: 'Endpoint from your NestSMS developer portal (nestsms.com).' },
-  nestsms_api_key: { group: 'sms', label: 'NestSMS API key / token', secret: true, env: 'NESTSMS_API_KEY', def: '', help: 'Bearer token or API key from your NestSMS dashboard.' },
-  nestsms_sender_id: { group: 'sms', label: 'NestSMS sender ID', env: 'NESTSMS_SENDER_ID', def: 'Sadhai', help: 'Approved sender mask / ID registered with NestSMS.' },
-  sms_otp_enabled: { group: 'sms', label: 'Enable SMS OTP phone verification', type: 'bool', env: 'SMS_OTP_ENABLED', def: '1', help: 'Allow customers to verify their phone number via 6-digit SMS code.' },
-  sms_order_ready: { group: 'sms', label: 'Send SMS when order is ready for pickup', type: 'bool', env: 'SMS_ORDER_READY', def: '0', help: 'Texts the customer’s mobile number when their coffee is marked Ready.' },
-  sms_welcome_enabled: { group: 'sms', label: 'Send SMS when welcome or referral coupon unlocks', type: 'bool', env: 'SMS_WELCOME_ENABLED', def: '0', help: 'Texts the customer when a welcome or referral reward is added to their account.' },
-  // push
-  push_mode: { group: 'push', label: 'Push notifications', type: 'enum', options: ['auto', 'off'], env: 'PUSH_MODE', def: 'auto', help: 'Auto sends for real when keys are set and logs a test delivery when they are not. Off stops all push.' },
-  fcm_service_account_json: { group: 'push', label: 'Firebase service account (JSON)', secret: true, type: 'json', env: 'FCM_SERVICE_ACCOUNT_JSON', def: '', help: 'Firebase, Project settings, Service accounts, Generate new private key. Paste the whole file.' },
-  vapid_public_key: { group: 'push', label: 'Browser push public key', env: 'VAPID_PUBLIC_KEY', def: '', help: 'Use “Generate keys” if you do not have a pair.' },
-  vapid_private_key: { group: 'push', label: 'Browser push private key', secret: true, env: 'VAPID_PRIVATE_KEY', def: '' },
-  vapid_subject: { group: 'push', label: 'Browser push contact', env: 'VAPID_SUBJECT', def: 'mailto:support@sadhaicoffee.com', help: 'An email as mailto:you@yourdomain.' },
   // app and web addresses
-  public_web_url: { group: 'app', label: 'Website address', type: 'url', env: 'PUBLIC_WEB_URL', def: 'http://localhost:3000', help: 'Where customers open the web app. Used in links and for payment returns.' },
-  public_api_url: { group: 'app', label: 'API address', type: 'url', env: 'PUBLIC_API_URL', def: '', help: 'The public address of this server, used for payment callbacks and uploaded images.' },
+  public_web_url: { group: 'app', label: 'Website address', type: 'url', env: 'PUBLIC_WEB_URL', def: 'http://localhost:3000', help: 'Where customers open the web app. Used in links.' },
+  public_api_url: { group: 'app', label: 'API address', type: 'url', env: 'PUBLIC_API_URL', def: '', help: 'The public address of this server, used for uploaded images.' },
   min_app_version: { group: 'app', label: 'Oldest app version allowed', env: 'MIN_APP_VERSION', def: '1.0.0', help: 'Apps older than this show an update screen.' },
   play_store_url: { group: 'app', label: 'Google Play link', type: 'url', env: 'PLAY_STORE_URL', def: '' },
   app_store_url: { group: 'app', label: 'App Store link', type: 'url', env: 'APP_STORE_URL', def: '' },
@@ -99,7 +84,6 @@ function validate(key, v) {
   if (d.type === 'enum' && !d.options.includes(s)) throw new Error(`${d.label} must be one of: ${d.options.join(', ')}`);
   if (d.type === 'url') {
     if (!/^https?:\/\/[^\s]+$/.test(s)) throw new Error(`${d.label} must be a web address starting with http:// or https://`);
-    if (key === 'nestsms_api_url') assertSafeOutboundUrl(s, d.label);
   }
   if (d.type === 'bool') return ['1', 'true', 'yes', 'on', true].includes(v) ? '1' : '0';
   if (d.type === 'json') {
@@ -109,7 +93,6 @@ function validate(key, v) {
     return JSON.stringify(j);
   }
   if (key === 'min_app_version' && !/^\d+\.\d+\.\d+$/.test(s)) throw new Error('Use a version like 1.2.0');
-  if (key === 'vapid_subject' && !/^(mailto:|https:\/\/)/.test(s)) throw new Error('Start with mailto: or https://');
   return s.slice(0, 20000);
 }
 

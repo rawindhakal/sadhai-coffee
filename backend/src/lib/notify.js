@@ -1,6 +1,5 @@
 import { query } from './db.js';
 import { publish } from './hub.js';
-import { sendToUser } from './push.js';
 
 export async function notify(userId, { kind = 'info', title, body = null, data = null }, db = { query }) {
   if (!userId) return;
@@ -9,8 +8,6 @@ export async function notify(userId, { kind = 'info', title, body = null, data =
     [userId, kind, title, body, data],
   );
   publish(`user:${userId}`, 'notification', rows[0]);
-  // Phone and browser push, fire and forget so a slow provider never delays an order.
-  sendToUser(userId, { kind, title, body, data: { ...(data || {}), notification_id: rows[0].id } }).catch((e) => console.error('push failed', e.message));
 }
 
 export async function audit(actorId, action, entity, entityId, meta = null, db = { query }) {

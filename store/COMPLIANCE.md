@@ -13,7 +13,6 @@ How the app meets the Google Play and Apple App Store rules that apply to it. "D
 | **Permission is optional** (Apple 5.1.1(iv)) | The app works without location: choose a station by hand | Done |
 | **Apple privacy manifest** | `mobile/ios/Runner/PrivacyInfo.xcprivacy` (no tracking, collected data types, UserDefaults reason) | Done. Plugins ship their own manifests |
 | **App Privacy labels / Play Data safety** | `store/DATA-SAFETY.md` has the answers to enter | You: enter them in the consoles |
-| **Push notifications permission** (Apple 4.5.4, Android 13) | Asked only after the customer agrees in our own dialog (after the first order) or flips the switch in Account. Order and pass messages are always sent; offers are one a day at most, can be turned off, and are never sent between 21:00 and 07:00 automatically. Tokens are removed on sign-out and account deletion | Done |
 | **No tracking, no ads SDKs, no advertising ID** | None are included | Done |
 | **Export compliance (encryption)** | `ITSAppUsesNonExemptEncryption = false` (only standard HTTPS) | Done |
 | **HTTPS only in release** | Android release has cleartext off (debug manifest allows local http). iOS ATS is on, with only local-network allowed for development | Done. You: point `API_URL` at an https domain |

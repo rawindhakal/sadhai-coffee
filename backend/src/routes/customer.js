@@ -4,7 +4,7 @@ import { query, pool } from '../lib/db.js';
 import { wrap, bad, notFound, forbidden, HttpError } from '../lib/http.js';
 import { authenticate, requireRole, verifyAccess } from '../lib/auth.js';
 import { subscribe } from '../lib/hub.js';
-import { createOrder, quote, fullOrder, cancelOrder, rateOrder } from '../lib/orders.js';
+import { createOrder, quote, fullOrder, rateOrder } from '../lib/orders.js';
 import { getSettings } from '../lib/settings.js';
 import { rt } from '../lib/runtime.js';
 
@@ -85,9 +85,6 @@ customer.get('/orders/:id', wrap(async (req, res) => {
   res.json({ ...o, ahead, eta_seconds: (ahead + 1) * 90 });
 }));
 
-customer.post('/orders/:id/cancel', wrap(async (req, res) => {
-  res.json(await cancelOrder(req.params.id, req.user, req.body?.reason || 'Cancelled by customer'));
-}));
 
 customer.post('/orders/:id/rate', wrap(async (req, res) => {
   const b = z.object({ rating: z.number().int().min(1).max(5), note: z.string().max(300).optional() }).parse(req.body);
@@ -121,7 +118,7 @@ customer.get('/coupons', wrap(async (req, res) => {
 
 customer.get('/referrals', wrap(async (req, res) => {
   const [uRes, rowsRes, monthRes, lifeRes, s] = await Promise.all([
-    query('SELECT referral_code, phone_verified FROM users WHERE id=$1', [req.user.id]),
+    query('SELECT referral_code FROM users WHERE id=$1', [req.user.id]),
     query(`SELECT r.status, r.created_at, r.rewarded_at, r.qualifying_amount, u.name FROM referrals r JOIN users u ON u.id=r.referee_id WHERE r.referrer_id=$1 ORDER BY r.created_at DESC`, [req.user.id]),
     query(`SELECT count(*)::int AS n FROM referrals WHERE referrer_id=$1 AND status='rewarded' AND rewarded_at >= date_trunc('month', now())`, [req.user.id]),
     query(`SELECT count(*)::int AS n FROM referrals WHERE referrer_id=$1 AND status='rewarded'`, [req.user.id]),
@@ -130,7 +127,6 @@ customer.get('/referrals', wrap(async (req, res) => {
   const u = uRes.rows[0];
   res.json({
     code: u?.referral_code || '',
-    phone_verified: !!u?.phone_verified,
     friends: rowsRes.rows,
     rewarded_this_month: monthRes.rows[0].n,
     rewarded_lifetime: lifeRes.rows[0].n,
@@ -140,7 +136,6 @@ customer.get('/referrals', wrap(async (req, res) => {
     min_spend: Number(s.referral_min_spend) || 180,
     cup_max: Number(s.referral_cup_max) || 180,
     reward_pct: Number(s.referral_reward_pct) || 50,
-    require_verified_phone: !!Number(s.offer_require_verified_phone),
   });
 }));
 

@@ -21,9 +21,30 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
-    version: '1.7.0',
+    version: '1.8.0',
     date: '24 October 2026',
     badge: 'Latest',
+    highlight: 'Simpler settings, a home page you can edit, and one rule for sales',
+    changes: [
+      {
+        category: 'Changed',
+        items: [
+          { title: 'One rule for sales', desc: 'A sale is an order that has been handed over. Every report agrees, and orders still in the queue show as waiting to be collected.' },
+          { title: 'Home page editor matches the home page', desc: 'Change the main picture, headline, buttons, banner, menu pictures and the partner and investor pages, with a preview.' },
+          { title: 'Settings hold only what is used', desc: 'Prices and rules, app and company details, and data backup.' },
+        ],
+      },
+      {
+        category: 'Fixed',
+        items: [
+          { title: 'SMS and push notifications removed', desc: 'They are gone from the server, the website and the apps for now. Order updates still appear live and in the inbox.' },
+        ],
+      },
+    ],
+  },
+  {
+    version: '1.7.0',
+    date: '24 October 2026',
     highlight: 'No online payments: cash at the counter or a 10-cup pass',
     changes: [
       {

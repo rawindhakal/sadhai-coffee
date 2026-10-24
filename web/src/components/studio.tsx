@@ -5,9 +5,7 @@ import { Empty, ErrorNote, Field, Meter, Modal, useData, useToast } from './ui';
 import { Seg, Skeleton } from './dash/kit';
 import { useDash } from './dash/shell';
 import { Icon } from './icons';
-import { HeroScene } from './hero';
 import { productArt } from '@/lib/art';
-import { STEP_ART, STORY_ART, PEOPLE_ART, HERO_DEFAULTS } from '@/lib/site-content';
 
 /* ============================================================================
    Settings: business rules, staff and pay rules, and every integration key.
@@ -24,7 +22,6 @@ const RULES: { title: string; note?: string; fields: F[] }[] = [
     { key: 'max_weekly_hours', label: 'Most hours the auto-roster plans for one person in a week' }, { key: 'min_rest_hours', label: 'Rest between shifts (hours)' }, { key: 'orders_per_staff_shift', label: 'Orders one person handles in a 6-hour shift', hint: 'Decides how many people a shift needs.' },
     { key: 'checkin_early_minutes', label: 'Staff can start a shift this many minutes early' }, { key: 'checkin_grace_minutes', label: 'Grace for late or early check-in (minutes)', hint: 'Within this, pay is for the scheduled time.' },
     { key: 'ssf_employee_pct', label: 'Social security taken from pay', unit: '%', step: 0.5 }, { key: 'ssf_employer_pct', label: 'Social security paid by the business on top', unit: '%', step: 0.5 }] },
-  { title: 'Automatic messages', note: 'Switch each automatic push on or off.', fields: [{ key: 'auto_pass_expiry', label: 'Pass ending soon', toggle: true }, { key: 'auto_pass_low', label: 'Pass nearly used up', toggle: true }, { key: 'auto_winback', label: 'Win-back note for quiet regulars', toggle: true }, { key: 'auto_offers', label: 'New offer of the day', toggle: true }, { key: 'auto_drops', label: 'New monthly drop', toggle: true }, { key: 'auto_shift_reminder', label: 'Shift reminder for staff the evening before', toggle: true }, { key: 'promo_push_daily_cap', label: 'Marketing messages per customer per day' }] },
 ];
 
 export function RulesPanel() {
@@ -50,309 +47,52 @@ export function RulesPanel() {
 }
 
 const GROUPS: Record<string, { title: string; note: string }> = {
-  sms: { title: 'NestSMS & Phone Verification Gateway', note: 'Connect NestSMS (api.nestsms.com) for phone OTP verification, Order-Ready alerts, and Welcome/Referral SMS rewards.' },
-  push: { title: 'Push notifications', note: 'Firebase sends to Android and iPhone. Browser push uses a key pair. With neither, push runs in test mode.' },
   app: { title: 'Addresses and app versions', note: 'Where customers reach you and which app versions may still run.' },
   company: { title: 'Company details', note: 'Shown on the privacy policy, terms and support pages.' },
 };
 
+/** The few settings that are not business rules: web addresses, app versions and company details. */
 export function IntegrationsPanel() {
   const { data, reload, error } = useData<any[]>('/owner/integrations');
-  const ov = useData<any>('/owner/integrations/overview');
   const toast = useToast();
-  const [gwTab, setGwTab] = useState<'overview' | 'sms' | 'other'>('overview');
   const [edit, setEdit] = useState<Record<string, string | null>>({});
-  const [open, setOpen] = useState<Record<string, boolean>>({});
-  const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [testPhone, setTestPhone] = useState('');
-  const [result, setResult] = useState<{ title: string; ok?: boolean; message: string } | null>(null);
-
   if (!data) return <><ErrorNote error={error} /><Skeleton h={80} n={4} /></>;
-
-  const itemMap = Object.fromEntries(data.map((i) => [i.key, i]));
-  const valOf = (key: string) => (key in edit ? edit[key] : itemMap[key]?.value ?? '');
   const dirty = (g: string) => data.filter((i) => i.group === g && i.key in edit).length;
-
   async function save(g: string) {
-    const values = Object.fromEntries(data.filter((i) => i.group === g && i.key in edit).map((i) => [i.key, edit[i.key]]));
+    const values = Object.fromEntries(data!.filter((i) => i.group === g && i.key in edit).map((i) => [i.key, edit[i.key]]));
     try {
       await api('/owner/integrations', { method: 'PUT', body: { values } });
       setEdit((e) => Object.fromEntries(Object.entries(e).filter(([k]) => !(k in values))));
-      setOpen({});
       reload();
-      ov.reload();
-      toast('Settings saved');
-    } catch (e: any) {
-      toast(e.message, true);
-    }
+      toast('Saved');
+    } catch (e: any) { toast(e.message, true); }
   }
-
-  async function quickSave(values: Record<string, string | null>, msg = 'Updated') {
-    const firstKey = Object.keys(values)[0];
-    setBusyKey(firstKey);
-    try {
-      await api('/owner/integrations', { method: 'PUT', body: { values } });
-      reload();
-      ov.reload();
-      toast(msg);
-    } catch (e: any) {
-      toast(e.message, true);
-    } finally {
-      setBusyKey(null);
-    }
-  }
-
-  async function test(name: string, title: string, extraBody: Record<string, any> = {}) {
-    setBusyKey(`test_${name}`);
-    try {
-      const r = await api(`/owner/integrations/test/${name}`, { method: 'POST', body: extraBody });
-      setResult({ title, ok: r.ok, message: r.message });
-      ov.reload();
-    } catch (e: any) {
-      setResult({ title, ok: false, message: e.message });
-    } finally {
-      setBusyKey(null);
-    }
-  }
-
-  async function vapid() {
-    const has = data.find((i) => i.key === 'vapid_public_key')?.is_set;
-    if (has && !confirm('Replacing the browser push keys stops push on every browser that turned it on. Replace them?')) return;
-    try {
-      await api('/owner/integrations/vapid', { method: 'POST', body: { replace: !!has } });
-      reload();
-      toast('New browser push keys saved');
-    } catch (e: any) {
-      toast(e.message, true);
-    }
-  }
-
-  function renderGroupFields(g: string) {
-    const items = data!.filter((i) => i.group === g);
-    return (
-      <div className="col" style={{ gap: 14 }}>
-        {items.map((i) => (
-          <div key={i.key} className="grid" style={{ gridTemplateColumns: 'minmax(220px, 1fr) 2fr', gap: 14, alignItems: 'start', padding: '10px 0', borderBottom: '1px solid var(--line)' }}>
-            <div>
-              <strong>{i.label}</strong>
-              {i.help && <p className="small muted" style={{ marginTop: 2 }}>{i.help}</p>}
-              <span className={`chip ${i.source === 'dashboard' ? 'hill' : ''}`} style={{ marginTop: 6 }}>
-                {i.source === 'dashboard' ? 'Saved in dashboard' : i.source === 'server environment' ? 'Server env' : 'Default'}
-              </span>
-            </div>
-            <div>
-              {i.secret ? (
-                open[i.key] || !i.is_set ? (
-                  <div className="row">
-                    {i.type === 'json' ? (
-                      <textarea rows={4} placeholder="Paste JSON key here" value={(edit[i.key] as string) ?? ''} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label} />
-                    ) : (
-                      <input type="password" autoComplete="off" placeholder="Paste secret key" value={(edit[i.key] as string) ?? ''} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label} />
-                    )}
-                    {i.is_set && (
-                      <button className="btn ghost sm" onClick={() => { setOpen({ ...open, [i.key]: false }); const { [i.key]: _x, ...rest } = edit; setEdit(rest); }}>
-                        Cancel
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="row between wrap">
-                    <code style={{ background: 'var(--surface-sunk)', padding: '8px 12px', borderRadius: 8 }}>{i.masked}</code>
-                    <span className="row">
-                      <button className="btn sm" onClick={() => setOpen({ ...open, [i.key]: true })}>Change key</button>
-                      <button className="btn sm ghost" onClick={() => setEdit({ ...edit, [i.key]: null })}>{i.key in edit ? 'Will be removed' : 'Remove'}</button>
-                    </span>
-                  </div>
-                )
-              ) : i.type === 'enum' ? (
-                <select value={(edit[i.key] as string) ?? i.value} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label}>
-                  {i.options.map((o: string) => <option key={o} value={o}>{o.toUpperCase()}</option>)}
-                </select>
-              ) : i.type === 'bool' ? (
-                <label className="row" style={{ cursor: 'pointer', gap: 10 }}>
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    style={{ width: 22, minHeight: 22 }}
-                    checked={((edit[i.key] as string) ?? i.value) === '1'}
-                    onChange={(e) => setEdit({ ...edit, [i.key]: e.target.checked ? '1' : '0' })}
-                  />
-                  <strong>{((edit[i.key] as string) ?? i.value) === '1' ? 'Enabled (ON)' : 'Disabled (OFF)'}</strong>
-                </label>
-              ) : (
-                <input value={(edit[i.key] as string) ?? i.value ?? ''} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label} />
-              )}
-              {i.updated_at && <p className="small muted" style={{ marginTop: 4 }}>Last changed {fmtDateTime(i.updated_at)}{i.updated_by ? ` by ${i.updated_by}` : ''}</p>}
-            </div>
-          </div>
-        ))}
-        <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn primary" disabled={!dirty(g)} onClick={() => save(g)}>
-            {dirty(g) ? `Save ${dirty(g)} change${dirty(g) > 1 ? 's' : ''}` : 'All changes saved'}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const smsStats = ov.data?.sms_stats_30d || { sent: 0, sandbox: 0, failed: 0 };
-
   return (
     <div className="col" style={{ gap: 16 }}>
-      <div className="panel" style={{ background: 'linear-gradient(135deg, var(--surface-raised) 0%, var(--surface) 100%)', borderWidth: 2 }}>
-        <div className="row between wrap" style={{ gap: 12 }}>
-          <div>
-            <div className="row" style={{ gap: 8 }}>
-              <span className="chip hill">SMS and App Control Center</span>
-            </div>
-            <h3 style={{ marginTop: 6 }}>SMS, Push and App Settings</h3>
-            <p className="small muted" style={{ maxWidth: 740 }}>
-              Sadhai takes no online payments: orders are paid with cash at pickup or a 10-cup pass. Manage NestSMS phone verification, order-ready SMS, push notifications and app settings here.
-            </p>
-          </div>
-          <div className="row wrap" style={{ gap: 8 }}>
-            <button className="btn sm" onClick={() => test('nestsms', 'NestSMS Check')} disabled={busyKey === 'test_nestsms'}>Test NestSMS</button>
-          </div>
-        </div>
-        <div style={{ marginTop: 14 }}>
-          <Seg
-            value={gwTab}
-            onChange={setGwTab}
-            options={[
-              { id: 'overview', label: 'Overview' },
-              { id: 'sms', label: 'NestSMS & OTP' },
-              { id: 'other', label: 'Push, App & Company' },
-            ]}
-          />
-        </div>
-      </div>
-
-      {gwTab === 'overview' && (
-        <div className="col" style={{ gap: 16 }}>
-          <div className="panel col" style={{ gap: 14, borderLeft: `5px solid ${valOf('sms_enabled') === '1' ? '#0284C7' : 'var(--line)'}` }}>
-            <div className="row between wrap">
-              <div>
-                <div className="row" style={{ gap: 8 }}>
-                  <span className="chip" style={{ background: 'rgba(2, 132, 199, 0.1)', color: '#0284C7', fontWeight: 700 }}>NestSMS Gateway</span>
-                  <span className={`chip ${valOf('sms_mode') === 'live' ? 'hill' : 'marigold'}`}>
-                    {valOf('sms_mode') === 'live' ? 'LIVE' : 'SANDBOX'}
-                  </span>
-                  {ov.data?.sms?.configured && <span className="chip hill">API Key Set</span>}
-                </div>
-                <h3 style={{ marginTop: 6 }}>SMS & OTP Features Control</h3>
-                <p className="small muted">
-                  Switch the entire NestSMS gateway or individual SMS triggers (Phone OTP, Order Ready, Welcome/Referral coupon alerts) ON or OFF.
-                </p>
-              </div>
-              <div className="row" style={{ gap: 8 }}>
-                <label className="row card flat" style={{ padding: '6px 12px', cursor: 'pointer', gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    style={{ width: 20, minHeight: 20 }}
-                    checked={valOf('sms_enabled') === '1'}
-                    onChange={(e) => quickSave({ sms_enabled: e.target.checked ? '1' : '0' }, `NestSMS Master Switch turned ${e.target.checked ? 'ON' : 'OFF'}`)}
-                  />
-                  <strong>Master SMS: {valOf('sms_enabled') === '1' ? 'ON' : 'OFF'}</strong>
-                </label>
-                <button className="btn sm" onClick={() => setGwTab('sms')}>Configure NestSMS →</button>
-              </div>
-            </div>
-
-            <div className="grid g4" style={{ gap: 10 }}>
-              {[
-                { key: 'sms_otp_enabled', title: 'Phone OTP Verification', desc: 'Required to claim Welcome & Referral rewards without abuse' },
-                { key: 'sms_order_ready', title: 'Order Ready SMS', desc: 'Texts customer when their drink is marked Ready at station' },
-                { key: 'sms_welcome_enabled', title: 'Welcome & Referral SMS', desc: 'Texts customer when a free cup or referral coupon unlocks' },
-              ].map((f) => {
-                const on = valOf(f.key) === '1';
-                return (
-                  <label key={f.key} className="card flat col" style={{ gap: 6, cursor: 'pointer', borderColor: on ? '#0284C7' : 'var(--line)' }}>
-                    <div className="row between">
-                      <strong>{f.title}</strong>
-                      <input
-                        type="checkbox"
-                        role="switch"
-                        style={{ width: 20, minHeight: 20 }}
-                        checked={on}
-                        onChange={(e) => quickSave({ [f.key]: e.target.checked ? '1' : '0' }, `${f.title} turned ${e.target.checked ? 'ON' : 'OFF'}`)}
-                      />
-                    </div>
-                    <span className="small muted">{f.desc}</span>
-                  </label>
-                );
-              })}
-              <div className="card flat col" style={{ gap: 4 }}>
-                <div className="small muted">30-Day SMS Activity</div>
-                <strong style={{ fontSize: 18 }}>{smsStats.sent || 0} Sent · {smsStats.sandbox || 0} Sandbox</strong>
-                <span className="small muted">{smsStats.failed || 0} failed</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {gwTab === 'sms' && (
-        <div className="panel col" style={{ gap: 16 }}>
-          <div className="ph">
-            <div>
-              <span className="chip" style={{ background: 'rgba(2,132,199,0.1)', color: '#0284C7', fontWeight: 700 }}>NestSMS Nepal</span>
-              <h3 style={{ marginTop: 4 }}>{GROUPS.sms.title}</h3>
-              <p className="small muted" style={{ maxWidth: 680 }}>{GROUPS.sms.note}</p>
-            </div>
-            <div className="row wrap" style={{ gap: 8 }}>
-              <input
-                placeholder="Test phone (e.g. 9800000000)"
-                value={testPhone}
-                onChange={(e) => setTestPhone(e.target.value)}
-                style={{ width: 210, minHeight: 38 }}
-              />
-              <button
-                className="btn sm primary"
-                disabled={busyKey === 'test_nestsms'}
-                onClick={() => test('nestsms', 'NestSMS Dispatch Test', testPhone.trim() ? { phone: testPhone.trim() } : {})}
-              >
-                Send Test SMS
-              </button>
-            </div>
-          </div>
-          {renderGroupFields('sms')}
-        </div>
-      )}
-
-      {gwTab === 'other' && (
-        <div className="col" style={{ gap: 16 }}>
-          {(['push', 'app', 'company'] as const).map((g) => (
-            <div key={g} className="panel col" style={{ gap: 14 }}>
-              <div className="ph">
+      {(['company', 'app'] as const).map((g) => (
+        <div key={g} className="panel">
+          <div className="ph"><div><h3>{GROUPS[g].title}</h3><p className="small muted">{GROUPS[g].note}</p></div></div>
+          <div className="col" style={{ gap: 14 }}>
+            {data.filter((i) => i.group === g).map((i) => (
+              <div key={i.key} className="grid" style={{ gridTemplateColumns: 'minmax(220px, 1fr) 2fr', gap: 14, alignItems: 'start', padding: '10px 0', borderBottom: '1px solid var(--hairline)' }}>
+                <div><strong>{i.label}</strong>{i.help && <p className="small muted" style={{ marginTop: 2 }}>{i.help}</p>}</div>
                 <div>
-                  <h3>{GROUPS[g].title}</h3>
-                  <p className="small muted" style={{ maxWidth: 680 }}>{GROUPS[g].note}</p>
+                  {i.type === 'bool' ? (
+                    <label className="row" style={{ cursor: 'pointer', gap: 10 }}>
+                      <input type="checkbox" role="switch" style={{ width: 22, minHeight: 22 }} checked={((edit[i.key] as string) ?? i.value) === '1'} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.checked ? '1' : '0' })} />
+                      <strong>{((edit[i.key] as string) ?? i.value) === '1' ? 'On' : 'Off'}</strong>
+                    </label>
+                  ) : (
+                    <input value={(edit[i.key] as string) ?? i.value ?? ''} onChange={(e) => setEdit({ ...edit, [i.key]: e.target.value })} aria-label={i.label} />
+                  )}
+                  {i.updated_at && <p className="small muted" style={{ marginTop: 4 }}>Last changed {fmtDateTime(i.updated_at)}{i.updated_by ? ` by ${i.updated_by}` : ''}</p>}
                 </div>
-                {g === 'push' && (
-                  <div className="row wrap">
-                    <button className="btn sm" onClick={() => test('fcm', 'Check Firebase key')}>Check Firebase key</button>
-                    <button className="btn sm" onClick={() => test('push', 'Send me a test push')}>Send test push</button>
-                    <button className="btn sm ghost" onClick={vapid}>Generate browser keys</button>
-                  </div>
-                )}
               </div>
-              {renderGroupFields(g)}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {result && (
-        <Modal title={result.title} onClose={() => setResult(null)}>
-          <div className="col" style={{ gap: 12 }}>
-            <p className={result.ok ? 'ok' : 'err'} style={{ fontSize: 16, fontWeight: 700 }}>
-              {result.ok ? '✓ Verification Passed' : '⚠ Needs Attention'}
-            </p>
-            <p>{result.message}</p>
+            ))}
+            <div className="row"><button className="btn primary" disabled={!dirty(g)} onClick={() => save(g)}>{dirty(g) ? `Save ${dirty(g)} change${dirty(g) > 1 ? 's' : ''}` : 'All changes saved'}</button></div>
           </div>
-        </Modal>
-      )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -366,7 +106,7 @@ export function SettingsHub() {
         onChange={setTab}
         options={[
           { id: 'rules', label: 'Prices and rules' },
-          { id: 'keys', label: 'Integrations and keys' },
+          { id: 'keys', label: 'App and company' },
           { id: 'data', label: 'Data & Backup' },
         ]}
       />
@@ -777,7 +517,7 @@ function ObjList({ label, items, fields, onChange, make, max = 8 }: { label: str
 export function SiteEditor() {
   const site = useData<any>('/owner/site');
   const toast = useToast();
-  const [tab, setTab] = useState<'hero' | 'steps' | 'people' | 'story' | 'marquee' | 'partners' | 'investors' | 'menu'>('hero');
+  const [tab, setTab] = useState<'hero' | 'marquee' | 'partners' | 'investors' | 'menu'>('hero');
   const [draft, setDraft] = useState<any>({});
   useEffect(() => { if (site.data) setDraft(JSON.parse(JSON.stringify(site.data.content))); }, [site.data]);
   if (!site.data || !draft.hero) return <Skeleton h={90} n={4} />;
@@ -793,21 +533,14 @@ export function SiteEditor() {
   const h = draft.hero;
   return (
     <div className="col" style={{ gap: 16 }}>
-      <Seg value={tab} onChange={setTab} options={[{ id: 'hero', label: 'Hero' }, { id: 'steps', label: 'How it works' }, { id: 'people', label: 'People' }, { id: 'story', label: 'Our story' }, { id: 'marquee', label: 'Banner text' }, { id: 'partners', label: 'Partner page' }, { id: 'investors', label: 'Investor page' }, { id: 'menu', label: 'Menu pictures' }]} />
-      <p className="small muted">Changes go live on the website, the kiosk and the apps as soon as you save. The Sadhai logo is fixed and cannot be changed here, so it stays the same everywhere.</p>
+      <Seg value={tab} onChange={setTab} options={[{ id: 'hero', label: 'Hero' }, { id: 'marquee', label: 'Banner text' }, { id: 'partners', label: 'Partner page' }, { id: 'investors', label: 'Investor page' }, { id: 'menu', label: 'Menu pictures' }]} />
+      <p className="small muted">Changes go live on the website as soon as you save. The Sadhai logo is fixed and cannot be changed here, so it stays the same everywhere.</p>
 
       {tab === 'hero' && (
         <div className="cols c-21">
           <div className="panel">
-            <div className="ph"><h3>Hero pictures</h3></div>
-            <div className="grid g2">
-              <ImagePicker label="Sun and sky" hint="Sits behind everything. Wide, transparent PNG or SVG works best." slot={h.layers.sun} fallback={HERO_DEFAULTS.sun} onChange={(s) => set('hero', { ...h, layers: { ...h.layers, sun: s } })} />
-              <ImagePicker label="Far mountains" hint="Moves slowly." slot={h.layers.far} fallback={HERO_DEFAULTS.far} onChange={(s) => set('hero', { ...h, layers: { ...h.layers, far: s } })} />
-              <ImagePicker label="Middle hills" slot={h.layers.mid} fallback={HERO_DEFAULTS.mid} onChange={(s) => set('hero', { ...h, layers: { ...h.layers, mid: s } })} />
-              <ImagePicker label="Front hills" hint="Moves fastest. Keep the bottom edge solid." slot={h.layers.near} fallback={HERO_DEFAULTS.near} onChange={(s) => set('hero', { ...h, layers: { ...h.layers, near: s } })} />
-              <ImagePicker label="Main hero picture" hint="The big picture on the home page. A real photo of your team or a customer works best. Portrait, about 4 by 5." slot={h.portrait} fallback="/img/person-barista.svg" wide onChange={(s) => set('hero', { ...h, portrait: s })} />
-              <ImagePicker label="Cup in the timer ring" slot={h.timer_cup} fallback={HERO_DEFAULTS.cup} onChange={(s) => set('hero', { ...h, timer_cup: s })} />
-            </div>
+            <div className="ph"><h3>Home page top</h3></div>
+            <ImagePicker label="Main picture" hint="The big picture beside the headline. A real photo of your team or a customer works best. Portrait, about 4 by 5." slot={h.portrait} fallback="/img/person-barista.svg" wide onChange={(s) => set('hero', { ...h, portrait: s })} />
             <div className="grid g2" style={{ marginTop: 16 }}>
               <Field label="Headline (English)"><input value={h.headline_en} maxLength={80} onChange={(e) => set('hero', { ...h, headline_en: e.target.value })} /></Field>
               <Field label="Headline (Nepali)"><input value={h.headline_ne} maxLength={120} onChange={(e) => set('hero', { ...h, headline_ne: e.target.value })} /></Field>
@@ -815,35 +548,23 @@ export function SiteEditor() {
               <Field label="Line under it (Nepali)"><input value={h.sub_ne} maxLength={200} onChange={(e) => set('hero', { ...h, sub_ne: e.target.value })} /></Field>
               <Field label="Main button"><input value={h.primary_cta} maxLength={30} onChange={(e) => set('hero', { ...h, primary_cta: e.target.value })} /></Field>
               <Field label="Second button"><input value={h.secondary_cta} maxLength={30} onChange={(e) => set('hero', { ...h, secondary_cta: e.target.value })} /></Field>
-              <Field label="Small note"><input value={h.note} maxLength={100} onChange={(e) => set('hero', { ...h, note: e.target.value })} /></Field>
-            </div>
-            <div className="row wrap" style={{ marginTop: 12 }}>
-              <label className="row"><input type="checkbox" style={{ width: 22, minHeight: 22 }} checked={h.show_timer} onChange={(e) => set('hero', { ...h, show_timer: e.target.checked })} />Show the 90-second ring</label>
-              <label className="row"><input type="checkbox" style={{ width: 22, minHeight: 22 }} checked={h.parallax} onChange={(e) => set('hero', { ...h, parallax: e.target.checked })} />Move the hills with the mouse and scroll</label>
             </div>
             <Footer s="hero" />
           </div>
           <div className="panel">
             <div className="ph"><h3>Preview</h3></div>
-            <div style={{ position: 'relative', height: 280, overflow: 'hidden', borderRadius: 16, background: 'linear-gradient(var(--surface), var(--surface-sunk))' }}>
-              <HeroScene layers={h.layers} parallax={false} />
-              <div style={{ position: 'absolute', left: 16, top: 16, right: 16 }}><div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 30, lineHeight: 1, letterSpacing: '-0.03em', maxWidth: 260 }}>{h.headline_en}</div><div className="small" style={{ marginTop: 6 }}>{h.sub_en}</div></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 14, alignItems: 'center', padding: 16, borderRadius: 16, background: 'linear-gradient(var(--surface), var(--surface-sunk))' }}>
+              <div className="col" style={{ gap: 8 }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 26, lineHeight: 1.05, letterSpacing: '-0.03em' }}>{h.headline_en}</div>
+                <div className="small muted">{h.sub_en}</div>
+                <div className="row wrap" style={{ gap: 6 }}><span className="btn primary sm">{h.primary_cta}</span><span className="btn sm">{h.secondary_cta}</span></div>
+              </div>
+              <div style={{ aspectRatio: '4 / 5', borderRadius: '999px 999px 16px 16px', overflow: 'hidden', background: 'var(--marigold)' }}><img src={h.portrait?.url || '/img/person-barista.svg'} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div>
             </div>
-            <p className="small muted" style={{ marginTop: 8 }}>The same hills appear on the home page, the kiosk idle screen and the apps.</p>
+            <p className="small muted" style={{ marginTop: 8 }}>This is the top of the home page. The menu, prices, the pass and the counters below it come live from your system.</p>
           </div>
         </div>
       )}
-
-      {tab === 'steps' && <div className="panel"><div className="ph"><h3>How it works</h3></div><div className="col" style={{ gap: 16 }}>{draft.steps.map((s: any, i: number) => (
-        <div key={i} className="card flat grid g2"><div className="col"><Field label={`Step ${i + 1} title (English)`}><input value={s.title_en} onChange={(e) => set('steps', draft.steps.map((x: any, j: number) => (j === i ? { ...x, title_en: e.target.value } : x)))} /></Field><Field label="Title (Nepali)"><input value={s.title_ne} onChange={(e) => set('steps', draft.steps.map((x: any, j: number) => (j === i ? { ...x, title_ne: e.target.value } : x)))} /></Field><Field label="Text"><textarea value={s.text} onChange={(e) => set('steps', draft.steps.map((x: any, j: number) => (j === i ? { ...x, text: e.target.value } : x)))} /></Field></div>
-          <ImagePicker label="Picture" slot={s.art} fallback={STEP_ART[i]} wide onChange={(a) => set('steps', draft.steps.map((x: any, j: number) => (j === i ? { ...x, art: a } : x)))} /></div>))}</div><Footer s="steps" /></div>}
-
-      {tab === 'people' && <div className="panel"><div className="ph"><h3>The people of Sadhai</h3><p className="small muted">Four pictures and captions on the home page. Upload real photos, with permission from the people in them.</p></div><div className="col" style={{ gap: 16 }}>{(draft.people || []).map((s: any, i: number) => (
-        <div key={i} className="card flat grid g2"><div className="col"><Field label="Small label"><input value={s.role} onChange={(e) => set('people', draft.people.map((x: any, j: number) => (j === i ? { ...x, role: e.target.value } : x)))} /></Field><Field label="Headline"><input value={s.title} onChange={(e) => set('people', draft.people.map((x: any, j: number) => (j === i ? { ...x, title: e.target.value } : x)))} /></Field><Field label="Text"><textarea value={s.text} onChange={(e) => set('people', draft.people.map((x: any, j: number) => (j === i ? { ...x, text: e.target.value } : x)))} /></Field></div>
-          <ImagePicker label="Picture" slot={s.art} fallback={PEOPLE_ART[i]} wide onChange={(a) => set('people', draft.people.map((x: any, j: number) => (j === i ? { ...x, art: a } : x)))} /></div>))}</div><Footer s="people" /></div>}
-      {tab === 'story' && <div className="panel"><div className="ph"><h3>From hill to cup</h3></div><div className="col" style={{ gap: 16 }}>{draft.story.map((s: any, i: number) => (
-        <div key={i} className="card flat grid g2"><div className="col"><Field label="Label"><input value={s.tag} onChange={(e) => set('story', draft.story.map((x: any, j: number) => (j === i ? { ...x, tag: e.target.value } : x)))} /></Field><Field label="Heading"><input value={s.title} onChange={(e) => set('story', draft.story.map((x: any, j: number) => (j === i ? { ...x, title: e.target.value } : x)))} /></Field><Field label="Text"><textarea value={s.text} onChange={(e) => set('story', draft.story.map((x: any, j: number) => (j === i ? { ...x, text: e.target.value } : x)))} /></Field></div>
-          <ImagePicker label="Picture" slot={s.art} fallback={STORY_ART[i]} wide onChange={(a) => set('story', draft.story.map((x: any, j: number) => (j === i ? { ...x, art: a } : x)))} /></div>))}</div><Footer s="story" /></div>}
 
       {tab === 'marquee' && <div className="panel"><div className="ph"><h3>Scrolling banner</h3></div><Field label="Text" hint="Separate phrases with a dot (·)."><textarea value={draft.marquee} onChange={(e) => set('marquee', e.target.value)} maxLength={300} /></Field><Footer s="marquee" /></div>}
 

@@ -34,6 +34,7 @@ export function StationWorkspace({ stationId, forcedTab }: { stationId?: string;
         <Stat label="Waiting" value={s.queue.waiting} /><Stat label="Making" value={s.queue.making} /><Stat label="Ready" value={s.queue.ready} />
         <Stat label="Cups today" value={s.today.cups} delta={`${Math.round((s.today.cups / s.station.breakeven_cups) * 100)}% of break-even`} />
       </div>
+      <p className="small muted" style={{ margin: '0 0 8px' }}>Sales today <strong>{rs(s.today.revenue)}</strong> from {s.today.orders} handed-over orders. Still to collect in cash: <strong>{rs(s.queue.cash_to_collect || 0)}</strong>.</p>
       {!forcedTab && <Tabs value={tab} onChange={setTab} tabs={[{ id: 'queue', label: 'Queue' }, { id: 'pos', label: 'New order' }, { id: 'menu', label: 'Sold out' }, { id: 'stock', label: 'Stock' }, { id: 'close', label: 'Close day' }, { id: 'recipes', label: 'Recipes' }, { id: 'shift', label: 'My shift' }]} />}
       {tab === 'queue' && <Queue q={q} target={s.station.prep_target_seconds} onChange={summary.reload} />}
       {tab === 'pos' && <Pos q={q} stationId={stationId} onDone={() => { summary.reload(); setTab('queue'); }} />}

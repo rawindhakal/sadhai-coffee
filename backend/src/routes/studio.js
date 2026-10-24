@@ -2,17 +2,14 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import express from 'express';
-import webpush from 'web-push';
 import { z } from 'zod';
 import { query } from '../lib/db.js';
 import { wrap, bad, notFound } from '../lib/http.js';
 import { authenticate, requireRole } from '../lib/auth.js';
 import { audit } from '../lib/notify.js';
 import { DEFS, describeRuntime, setRuntime, rt } from '../lib/runtime.js';
-import { pushStatus, sendToUser, testFcm } from '../lib/push.js';
 import { SITE_DEFAULTS, loadSite, mediaUrl } from '../lib/site.js';
 import { getSettings } from '../lib/settings.js';
-import { sendSms, smsStatus, nestsmsMissing } from '../lib/sms.js';
 import { todayNpt, addDays } from '../lib/roster.js';
 
 /** Owner-only: integration keys, pictures and website content. */
@@ -21,16 +18,6 @@ studio.use(authenticate, requireRole('owner'));
 
 /* ---------------- integrations and keys ---------------- */
 studio.get('/integrations', wrap(async (_req, res) => res.json(await describeRuntime())));
-
-studio.get('/integrations/overview', wrap(async (_req, res) => {
-  const [smsCounts, recentSms] = await Promise.all([
-    query(`SELECT status, count(*)::int AS count FROM sms_log WHERE created_at >= now() - interval '30 days' GROUP BY status`),
-    query(`SELECT id, phone, kind, message, status, created_at FROM sms_log ORDER BY created_at DESC LIMIT 15`),
-  ]);
-  const smsSummary = { sent: 0, sandbox: 0, failed: 0 };
-  for (const r of smsCounts.rows) if (r.status in smsSummary) smsSummary[r.status] = r.count;
-  res.json({ sms: smsStatus(), sms_stats_30d: smsSummary, recent_sms: recentSms.rows });
-}));
 
 studio.put('/integrations', wrap(async (req, res) => {
   const values = z.record(z.union([z.string(), z.boolean(), z.null()])).parse(req.body?.values || {});
@@ -43,54 +30,6 @@ studio.put('/integrations', wrap(async (req, res) => {
   }
   if (changed.length) await audit(req.user.id, 'integrations.update', 'settings', null, { keys: changed }); // key names only, never values
   res.json({ ok: true, changed, settings: await describeRuntime() });
-}));
-
-studio.post('/integrations/vapid', wrap(async (req, res) => {
-  if (rt('vapid_public_key') && !req.body?.replace) throw bad('Browser push keys already exist. Replacing them signs every browser out of push, so confirm to continue.');
-  const k = webpush.generateVAPIDKeys();
-  await setRuntime('vapid_public_key', k.publicKey, req.user.id);
-  await setRuntime('vapid_private_key', k.privateKey, req.user.id);
-  await audit(req.user.id, 'integrations.vapid', 'settings', null, { replaced: !!req.body?.replace });
-  res.json({ ok: true, public_key: k.publicKey });
-}));
-
-// Each test says plainly what works and what is missing.
-studio.post('/integrations/test/:name', wrap(async (req, res) => {
-  const name = req.params.name;
-  if (name === 'fcm') {
-    try { res.json({ ok: true, message: `Firebase accepted the key for project ${(await testFcm()).project_id}.` }); } catch (e) { res.json({ ok: false, message: e.message }); }
-  } else if (name === 'push') {
-    const mine = (await query('SELECT count(*)::int AS n FROM push_tokens WHERE user_id=$1 AND active', [req.user.id])).rows[0].n;
-    const out = await sendToUser(req.user.id, { kind: 'system', title: 'Test from Sadhai', body: 'If you can read this, push notifications work.' });
-    const st = pushStatus();
-    res.json({ ok: true, message: !mine ? 'You have no registered device. Turn notifications on in your Account (web) or in the app, then test again.' : st.dry_run ? `Test mode: ${out.dry} delivery logged, nothing was really sent. Add Firebase or browser keys to send for real.` : `Sent ${out.sent} and failed ${out.failed}.`, status: st });
-  } else if (name === 'nestsms') {
-    const missing = nestsmsMissing();
-    const st = smsStatus();
-    const u = (await query('SELECT phone FROM users WHERE id=$1', [req.user.id])).rows[0];
-    const targetPhone = req.body?.phone || u?.phone;
-    if (!targetPhone) return res.json({ ok: false, message: 'Enter a phone number to send the test SMS.' });
-    try {
-      const out = await sendSms({
-        phone: targetPhone,
-        message: 'Sadhai Coffee: NestSMS gateway test successful. Your OTP & order notifications are ready.',
-        purpose: 'test',
-        userId: req.user.id,
-        force: true,
-      });
-      if (out.dry_run) {
-        return res.json({
-          ok: true,
-          message: missing.length
-            ? `Sandbox mode: test SMS logged for ${out.phone}. Add ${missing.map((k) => DEFS[k].label).join(', ')} to send live SMS via NestSMS.`
-            : `Sandbox mode: test SMS logged for ${out.phone}. Switch SMS mode to Live or Auto to send via NestSMS.`,
-          status: st,
-        });
-      }
-      if (!out.sent) return res.json({ ok: false, message: `NestSMS error: ${out.error || 'Failed to send SMS'}` });
-      res.json({ ok: true, message: `NestSMS delivered a live test SMS to ${out.phone}.` });
-    } catch (e) { res.json({ ok: false, message: e.message }); }
-  } else throw notFound('Unknown test');
 }));
 
 /* ---------------- pictures ---------------- */
@@ -128,17 +67,13 @@ const mid = z.string().uuid().nullable();
 const sections = {
   hero: z.object({
     headline_en: z.string().max(80), headline_ne: z.string().max(120), sub_en: z.string().max(140), sub_ne: z.string().max(200),
-    primary_cta: z.string().max(30), secondary_cta: z.string().max(30), note: z.string().max(100),
-    layers: z.object({ sun: mid, far: mid, mid, near: mid }), timer_cup: mid, portrait: mid.optional().default(null), show_timer: z.boolean(), parallax: z.boolean(),
+    primary_cta: z.string().max(30), secondary_cta: z.string().max(30),
+    portrait: mid.nullable().default(null),
   }),
-  steps: z.array(z.object({ title_en: z.string().max(60), title_ne: z.string().max(80), text: z.string().max(240), art: mid })).length(3),
-  people: z.array(z.object({ role: z.string().max(40), title: z.string().max(80), text: z.string().max(240), art: mid })).length(4),
-  story: z.array(z.object({ tag: z.string().max(20), title: z.string().max(90), text: z.string().max(240), art: mid })).length(3),
   marquee: z.string().max(300),
   partners: z.object({
     headline: z.string().max(80), intro: z.string().max(400), requirements: z.array(z.string().max(160)).max(10),
-    steps: z.array(z.object({ title: z.string().max(60), text: z.string().max(240) })).max(8), faqs: z.array(z.object({ q: z.string().max(140), a: z.string().max(500) })).max(12), contact_note: z.string().max(200),
-  }),
+    }),
   investors: z.object({
     headline: z.string().max(90), intro: z.string().max(400), why: z.array(z.string().max(300)).max(8), model: z.array(z.string().max(200)).max(8),
     metrics: z.array(z.object({ label: z.string().max(40), value: z.string().max(30), note: z.string().max(100).optional() })).max(8),
@@ -175,19 +110,17 @@ studio.get('/setup', wrap(async (req, res) => {
     one(`SELECT count(*)::int AS n FROM enquiries WHERE status='new'`),
     one(`SELECT password_hash FROM users WHERE id=$1`, [req.user.id]),
   ]);
-  const push = pushStatus();
   const companyDone = rt('support_email') !== DEFS.support_email.def && rt('company_name') !== 'Sadhai Coffee';
   const usingDemoPassword = ownerUser?.password_hash ? await bcrypt.compare('Sadhai@123', ownerUser.password_hash) : false;
   const steps = [
-    { key: 'security', title: 'Change the default owner password', done: !usingDemoPassword, detail: usingDemoPassword ? 'Still using the demo seed password (Sadhai@123) — change it before going live' : 'Custom owner password set', section: 'people' },
+    { key: 'security', title: 'Change the default owner password', done: !usingDemoPassword, detail: usingDemoPassword ? 'Still using the demo seed password (Sadhai@123) — change it before going live' : 'Custom owner password set', section: 'staff' },
     { key: 'stations', title: 'Add your stations and give each a manager and staff', done: st.n > 0 && st.incomplete === 0, detail: st.n ? (st.incomplete ? `${st.incomplete} of ${st.n} still need a manager or staff` : `${st.n} stations ready`) : 'No stations yet', section: 'stations' },
     { key: 'menu', title: 'Check the menu and the three drink prices', done: menu.n >= 5, detail: `${menu.n} items on the menu`, section: 'rules' },
     { key: 'recipes', title: 'Give every item its standard recipe', done: rec.missing === 0, detail: rec.missing ? `${rec.missing} items have no recipe` : 'All items have a recipe', section: 'recipes' },
     { key: 'ingredients', title: 'Enter ingredient prices and suppliers', done: ing.unpriced === 0 && ing.no_supplier === 0, detail: ing.unpriced || ing.no_supplier ? `${ing.unpriced} without a price, ${ing.no_supplier} without a supplier` : 'All priced', section: 'inventory' },
-    { key: 'team', title: 'Add your team and their hourly rates', done: team.n > 0 && team.unpaid === 0, detail: team.n ? (team.unpaid ? `${team.unpaid} of ${team.n} have no hourly rate` : `${team.n} staff with rates`) : 'No staff yet', section: 'people' },
-    { key: 'roster', title: 'Fill and publish this week’s roster', done: ros.n > 0 && ros.open === 0 && ros.unpublished === 0, detail: ros.n ? `${ros.open} open slots, ${ros.unpublished} not published` : 'No shifts planned for the next 7 days', section: 'roster' },
-    { key: 'push', title: 'Turn on push notifications', done: !push.dry_run && push.mode !== 'off', detail: push.dry_run ? 'Test mode: add Firebase or browser keys' : 'Sending for real', section: 'settings' },
-    { key: 'company', title: 'Add your company details for the legal pages', done: companyDone, detail: companyDone ? 'Saved' : 'Still showing the placeholder name and email', section: 'settings' },
+    { key: 'team', title: 'Add your team and their hourly rates', done: team.n > 0 && team.unpaid === 0, detail: team.n ? (team.unpaid ? `${team.unpaid} of ${team.n} have no hourly rate` : `${team.n} staff with rates`) : 'No staff yet', section: 'staff' },
+    { key: 'roster', title: 'Fill and publish this week’s roster', done: ros.n > 0 && ros.open === 0 && ros.unpublished === 0, detail: ros.n ? `${ros.open} open slots, ${ros.unpublished} not published` : 'No shifts planned for the next 7 days', section: 'staff' },
+    { key: 'company', title: 'Add your company details for the legal pages', done: companyDone, detail: companyDone ? 'Saved' : 'Still showing the placeholder name and email', section: 'rules' },
     { key: 'site', title: 'Make the home page yours', done: site.n > 0, detail: site.n ? 'Customised' : 'Using the built-in hero artwork', section: 'site' },
   ];
   res.json({ steps, done: steps.filter((s) => s.done).length, total: steps.length, enquiries: enq.n });

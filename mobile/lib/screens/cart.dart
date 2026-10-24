@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
 import 'offers.dart' show PromoBox;
-import '../push.dart';
 import 'customer.dart';
 import 'home.dart' show Stepper2;
 
@@ -94,28 +92,12 @@ class _CartScreenState extends State<CartScreen> {
       if (!mounted) return;
       cart.clear();
       cart.invalidatePasses();
-      _askPush();
       if (!mounted) return;
       await Navigator.push(context, MaterialPageRoute(builder: (_) => TrackingScreen(orderId: order['id'])));
       widget.onPlaced();
     } on ApiException catch (e) {
       setState(() => _error = e.message);
     } finally { if (mounted) setState(() => _busy = false); }
-  }
-
-  // The first time someone orders, offer a ping when it is ready. The system permission prompt only appears if they say yes.
-  Future<void> _askPush() async {
-    if (!PushService.configured || await PushService.alreadyAsked || !mounted) return;
-    final yes = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
-      title: const Text('Get a ping when it is ready?'),
-      content: const Text('We will send one notification when your coffee is ready, and nothing you did not ask for. You can change this any time in Account.'),
-      actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Not now')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Yes, tell me'))],
-    ));
-    if (yes == true) {
-      await PushService.enable();
-    } else {
-      (await SharedPreferences.getInstance()).setBool('push.asked', true);
-    }
   }
 
   Widget _opt(bool on, String label, VoidCallback tap, {String? hint}) => InkWell(

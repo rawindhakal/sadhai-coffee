@@ -4,7 +4,6 @@ import { publish } from './hub.js';
 import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
 import { PAYMENT_METHODS } from './payments.js';
-import { sendSms } from './sms.js';
 import { rtBool } from './runtime.js';
 import crypto from 'node:crypto';
 import { stockNeeds, recipeBreakdown } from './costing.js';
@@ -223,12 +222,6 @@ async function discountFor(db, user, input, lines, subtotal, stationId) {
   }
   if (input.coupon_id) {
     if (!user) throw bad('Sign in to use a coupon');
-    if (s.offer_require_verified_phone) {
-      const { rows: uRows } = await db.query('SELECT phone_verified FROM users WHERE id=$1', [user.id]);
-      if (!uRows[0]?.phone_verified) {
-        throw bad('Verify your mobile number via SMS in Offers or Account before redeeming a coupon');
-      }
-    }
     const { rows } = await db.query(`SELECT * FROM coupons WHERE id=$1 AND user_id=$2 FOR UPDATE`, [input.coupon_id, user.id]);
     const c = rows[0];
     if (!c || c.status !== 'active' || new Date(c.expires_at) < new Date()) throw conflict('That coupon is no longer valid', 'coupon_invalid');
@@ -603,36 +596,12 @@ export async function advanceOrder(orderId, next, actor, { code, override } = {}
       picked_up: { title: 'Enjoy your coffee', body: 'You earned beans for this order. Tell us how it was.' },
     }[next];
     if (msg) await notify(order.user_id, { kind: 'order', ...msg, data: { order_id: order.id } });
-    const targetPhone = order.user_phone || order.customer_phone;
-    if (next === 'ready' && rtBool('sms_order_ready') && targetPhone) {
-      sendSms({
-        phone: targetPhone,
-        message: `Sadhai Coffee: Order ${order.pickup_code} is ready at ${order.station_name || 'the counter'}. Handover code: ${order.handover_code || '—'}.`,
-        purpose: 'order_ready',
-        userId: order.user_id,
-      }).catch(() => {});
-    }
     if (res.welcome) {
       await notify(order.user_id, { kind: 'info', title: 'Welcome reward unlocked!', body: res.welcome.body });
-      if (rtBool('sms_welcome_enabled') && targetPhone) {
-        sendSms({
-          phone: targetPhone,
-          message: `Sadhai Coffee: ${res.welcome.body}`,
-          purpose: 'welcome_reward',
-          userId: order.user_id,
-        }).catch(() => {});
-      }
     }
     if (res.referral) {
       for (const r of res.referral) {
         await notify(r.user_id, { kind: 'info', title: 'Referral reward unlocked', body: r.body });
-        if (rtBool('sms_welcome_enabled')) {
-          query('SELECT phone FROM users WHERE id=$1', [r.user_id]).then(({ rows }) => {
-            if (rows[0]?.phone) {
-              sendSms({ phone: rows[0].phone, message: `Sadhai Coffee: ${r.body}`, purpose: 'referral_reward', userId: r.user_id }).catch(() => {});
-            }
-          }).catch(() => {});
-        }
       }
     }
   }
@@ -645,7 +614,6 @@ export async function advanceOrder(orderId, next, actor, { code, override } = {}
  * 2. Referee must have a pending referral row (`referrals.status = 'pending'`).
  * 3. Qualifying order MUST be a real paid order (`payment_status = 'paid'`, `payment_method` cash — NOT a pass order),
  *    with NO coupon/promo discount (`discount = 0`) and `total >= referral_min_spend`.
- * 4. If `offer_require_verified_phone = 1`, referee phone must be verified (`phone_verified = true`).
  * 5. Referrer must not have exceeded `referral_cap_month` this calendar month or `referral_lifetime_cap` all-time.
  * 6. If `referrer_require_paid_order = 1`, referrer must have completed at least 1 paid order (`total > 0`) themselves (prevents shell accounts farming referrals).
  * 7. Issued coupons are single-cup, drinks-only, base-price capped (`free_max = referral_cup_max`, `pct = referral_reward_pct`), with `min_spend = referral_min_spend`.
@@ -665,9 +633,8 @@ async function rewardReferral(db, userId, order) {
   if (Number(order.subtotal || order.total || 0) < minSpend) return null;
 
   // Verify referee phone & check claimed_phones anti-recreate guard
-  const referee = (await db.query('SELECT phone, phone_verified FROM users WHERE id=$1', [userId])).rows[0];
+  const referee = (await db.query('SELECT phone FROM users WHERE id=$1', [userId])).rows[0];
   if (!referee) return null;
-  if (Number(s.offer_require_verified_phone) && !referee.phone_verified) return null;
 
   const pHash = hashPhone(referee.phone);
   const claimed = (await db.query('SELECT referral_claimed FROM claimed_phones WHERE phone_hash=$1 FOR UPDATE', [pHash])).rows[0];
@@ -837,9 +804,8 @@ export async function issueSignupLadder(userId, db = { query }, { onSignup = tru
   const triggerAfterFirstPaid = Number(s.welcome_trigger ?? 1) === 1;
   if (onSignup && triggerAfterFirstPaid) return 0;
 
-  const u = (await db.query('SELECT phone, phone_verified FROM users WHERE id=$1', [userId])).rows[0];
+  const u = (await db.query('SELECT phone FROM users WHERE id=$1', [userId])).rows[0];
   if (!u?.phone) return 0;
-  if (Number(s.offer_require_verified_phone) && !u.phone_verified && onSignup) return 0;
 
   const pHash = hashPhone(u.phone);
   const claimed = (await db.query('SELECT welcome_claimed FROM claimed_phones WHERE phone_hash=$1 FOR UPDATE', [pHash])).rows[0];

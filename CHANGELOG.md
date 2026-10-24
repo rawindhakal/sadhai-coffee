@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.8.0] - 2026-10-24
+
+### Removed
+- SMS (NestSMS), phone verification and push notifications (Firebase and browser), with their settings, screens, tables and tests. Unused home page editor parts and unused API routes.
+
+### Changed
+- Settings now hold only what the app uses. The home page editor matches the real home page.
+- A sale is an order that has been handed over, in every report. Orders still in the queue show as waiting to be collected.
+
+---
+
 ## [1.7.0] - 2026-10-24
 
 ### Removed

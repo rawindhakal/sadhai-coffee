@@ -85,7 +85,7 @@ const pct = refAfter.find((c) => c.kind === 'pct');
 const o2 = (await call('POST', '/orders', { station_id: st.id, items: [{ ...item, qty: 2 }], payment_method: 'cash', coupon_id: pct.id }, T)).body;
 ok(o2.order.status === 'placed' && o2.order.payment_method === 'cash' && o2.order.payment_status === 'unpaid', 'cash order is placed immediately for counter payment');
 ok(o2.order.discount === Math.floor(o2.order.subtotal * 0.3) || o2.order.discount === 30, '30% coupon applied');
-ok((await call('POST', `/orders/${o2.order.id}/cancel`, {}, T)).status === 409, 'a placed order cannot be cancelled by the customer');
+ok((await call('POST', `/orders/${o2.order.id}/cancel`, {}, T)).status === 404, 'there is no customer cancel: a placed order goes straight to the barista');
 const cancel = (await call('POST', `/station/orders/${o2.order.id}/status`, { status: 'cancelled', reason: 'Out of milk' }, staff.access_token));
 ok(cancel.status === 200 && cancel.body.status === 'cancelled', 'the station can decline a placed order');
 const couponBack = (await call('GET', '/coupons', null, T)).body.find((c) => c.id === pct.id);
@@ -127,7 +127,7 @@ ok(mq.status === 200 && mq.body.total === 450, 'merch quote Rs 450');
 // manager offers: guardrails + live effect
 const kal = stations.find((s) => s.code === 'KALANKI');
 const mgr2 = await login('9800000003');
-const cold = (await call('GET', `/stations/${kal.id}/menu`)).body.categories.flatMap((c) => c.products).find((p) => p.sku === 'CLB');
+const cold = (await call('GET', `/stations/${kal.id}/home`)).body.categories.flatMap((c) => c.products).find((p) => p.sku === 'CLB');
 ok(cold.offer && cold.price === 120, 'station offer: cold brew 20% off at Kalanki (Rs 150 to Rs 120)');
 const below = await call('POST', '/admin/offers', { title: 'Too cheap', scope: 'product', product_id: cold.id, offer_price: 10, station_id: kal.id, hours: 4 }, mgr2.access_token);
 ok(below.status === 400, 'manager cannot price below food cost');
@@ -137,7 +137,7 @@ const good = await call('POST', '/admin/offers', { title: 'Latte 15% off', scope
 ok(good.status === 201, 'manager creates offer for own station');
 const otherSt = await call('POST', '/admin/offers', { title: 'Nope', scope: 'all_drinks', pct: 10, station_id: st.id, hours: 4 }, mgr2.access_token);
 ok(otherSt.status === 403, 'manager cannot create offers for another manager station');
-const kalMenu2 = (await call('GET', `/stations/${kal.id}/menu`)).body.categories.flatMap((c) => c.products).find((p) => p.sku === 'LAT');
+const kalMenu2 = (await call('GET', `/stations/${kal.id}/home`)).body.categories.flatMap((c) => c.products).find((p) => p.sku === 'LAT');
 ok(kalMenu2.price === 85, 'new offer is live on the menu immediately (latte Rs 100 less 15%)');
 await call('PATCH', `/admin/offers/${good.body.id}`, { active: false }, mgr2.access_token);
 
@@ -183,24 +183,9 @@ ok((await call('GET', `/kiosk/orders/${o3.order.id}`, null, staff.access_token))
 const qk = (await call('GET', '/station/orders', null, staff.access_token)).body;
 ok(qk.some((o) => o.id === k1.body.order.id && o.customer_name === 'Kiosk Guest'), 'kiosk order shows on the station queue with the guest name');
 
-// push notifications (dry-run without Firebase credentials)
-ok((await call('POST', '/me/push-token', { token: 'dev-android-token-1234567890', platform: 'android', app_version: '1.2.0' }, T)).status === 201, 'device token registered');
+// station moves the pass order along
 await call('POST', `/station/orders/${k2.body.order.id}/status`, { status: 'preparing' }, staff.access_token);
 await call('POST', `/station/orders/${k2.body.order.id}/status`, { status: 'ready' }, staff.access_token);
-await new Promise((r) => setTimeout(r, 500));
-const pst = (await call('GET', '/admin/push/status', null, owner.access_token)).body;
-ok(pst.devices.some((d) => d.platform === 'android') && pst.deliveries_7d.some((d) => d.status === 'dry_run' || d.status === 'sent'), 'order-ready notification went to the registered device');
-const pv = (await call('POST', '/admin/push/preview', { type: 'phone', phone }, owner.access_token)).body;
-ok(pv.customers === 1 && pv.devices >= 1, 'push audience preview');
-const camp = await call('POST', '/admin/push/campaigns', { title: 'Americano, Rs 99 today', body: 'Order ahead.', audience: { type: 'phone', phone } }, owner.access_token);
-ok(camp.status === 201 && camp.body.status === 'sent' && camp.body.result.sent === 1, 'owner sends a push campaign now');
-ok((await call('POST', '/admin/push/campaigns', { title: 'Everyone', audience: { type: 'all' } }, mgr.access_token)).status === 403, 'manager cannot message all customers');
-ok((await call('POST', '/admin/push/campaigns', { title: 'Later', audience: { type: 'phone', phone }, send_at: new Date(Date.now() + 3600e3).toISOString() }, owner.access_token)).body.status === 'scheduled', 'campaigns can be scheduled');
-const camp2 = await call('POST', '/admin/push/campaigns', { title: 'Second today', audience: { type: 'phone', phone } }, owner.access_token);
-ok(camp2.body.result.sent === 0, 'daily promo cap stops a second marketing push');
-await call('PATCH', '/me', { notif_offers: false }, T);
-const auto = (await call('POST', '/admin/push/automations/run', {}, owner.access_token)).body;
-ok(typeof auto.pass_expiry === 'number', 'automations run');
 await call('POST', `/station/orders/${k2.body.order.id}/status`, { status: 'picked_up', code: k2.body.order.handover_code }, staff.access_token);
 
 // recipes, costing and central inventory
@@ -255,7 +240,7 @@ ok(mx.stations.length === 4 && mx.ingredients.length > 10, 'stock matrix: every 
 {
 // ---------- v1.3: price tiers, standard recipes, owner settings and keys, pictures, enquiries ----------
 const setRes = await call('PUT', '/owner/settings', { price_hot: 110 }, owner.access_token);
-ok(setRes.status === 200 && (await call('GET', `/stations/${st.id}/menu`)).body.categories.flatMap((c) => c.products).find((p) => p.sku === 'AMR').price === 110, 'changing the hot price reprices every hot drink');
+ok(setRes.status === 200 && (await call('GET', `/stations/${st.id}/home`)).body.categories.flatMap((c) => c.products).find((p) => p.sku === 'AMR').price === 110, 'changing the hot price reprices every hot drink');
 await call('PUT', '/owner/settings', { price_hot: 100 }, owner.access_token);
 const ovr = await call('PUT', `/admin/stations/${st.id}/products/${americano.id}`, { price_override: 90 }, owner.access_token);
 ok(ovr.status === 400, 'a tiered drink cannot have a per-station price');
@@ -264,18 +249,20 @@ const amrCard = cards.find((c) => c.sku === 'AMR');
 ok(amrCard && amrCard.lines.some((l) => l.name.startsWith('Coffee') && l.qty === 16) && amrCard.recipe_method && !JSON.stringify(cards).includes('unit_cost'), 'recipe cards show the standard recipe and no costs');
 
 const ints = (await call('GET', '/owner/integrations', null, owner.access_token)).body;
-const esk = ints.find((i) => i.key === 'nestsms_api_key');
-ok(esk.secret && esk.value === null, 'secrets are never sent to the browser');
-ok((await call('GET', '/owner/integrations', null, mgr.access_token)).status === 403, 'only the owner can see integrations');
-ok((await call('PUT', '/owner/integrations', { values: { sms_mode: 'maybe' } }, owner.access_token)).status === 400, 'invalid setting values are refused');
-ok((await call('PUT', '/owner/integrations', { values: { nestsms_api_url: 'http://169.254.169.254/latest/meta-data/' } }, owner.access_token)).status === 400, 'SSRF private/metadata URL is refused');
-const put = await call('PUT', '/owner/integrations', { values: { nestsms_api_key: 'live_secret_key_abcd1234', support_email: 'help@sadhai.test' } }, owner.access_token);
-const kh = put.body.settings.find((i) => i.key === 'nestsms_api_key');
-ok(put.status === 200 && kh.is_set && kh.masked.endsWith('1234') && !JSON.stringify(put.body).includes('abcd1234') && kh.source === 'dashboard', 'owner saves a key from the dashboard; it comes back masked');
+ok(ints.length > 0 && ints.every((i) => ['app', 'company'].includes(i.group)), 'the owner settings hold only app and company details');
+ok(!ints.some((i) => /sms|push|vapid|fcm|esewa|khalti|fonepay|payment/i.test(i.key)), 'no SMS, push or payment settings are left');
+ok((await call('GET', '/owner/integrations', null, mgr.access_token)).status === 403, 'only the owner can see these settings');
+ok((await call('PUT', '/owner/integrations', { values: { min_app_version: 'new' } }, owner.access_token)).status === 400, 'invalid setting values are refused');
+ok((await call('PUT', '/owner/integrations', { values: { sms_mode: 'live' } }, owner.access_token)).status === 400, 'an SMS setting is refused: it no longer exists');
+const put = await call('PUT', '/owner/integrations', { values: { support_email: 'help@sadhai.test' } }, owner.access_token);
+ok(put.status === 200 && put.body.settings.find((i) => i.key === 'support_email').source === 'dashboard', 'owner saves a company detail from the dashboard');
 ok((await call('GET', '/config')).body.site.support_email === 'help@sadhai.test', 'company details are live in the public config');
-ok((await call('POST', '/owner/integrations/vapid', {}, owner.access_token)).status === 400, 'existing browser push keys are not replaced without confirmation');
-await call('PUT', '/owner/integrations', { values: { nestsms_api_key: null, support_email: null } }, owner.access_token);
-ok(!(await call('GET', '/owner/integrations', null, owner.access_token)).body.find((i) => i.key === 'nestsms_api_key').is_set, 'clearing a key removes it');
+await call('PUT', '/owner/integrations', { values: { support_email: null } }, owner.access_token);
+ok((await call('GET', '/config')).body.site.support_email !== 'help@sadhai.test', 'clearing a detail restores the default');
+for (const gone of ['/auth/otp/send', '/me/verify-phone/send', '/me/push-token', '/admin/push/status', '/owner/integrations/vapid', '/owner/integrations/overview']) {
+  const st = (await call(gone.startsWith('/auth') ? 'POST' : 'GET', gone, gone.startsWith('/auth') ? {} : null, owner.access_token)).status;
+  ok(st === 404, `${gone} no longer exists`);
+}
 ok((await call('GET', `/me?access_token=${T}`)).status === 401, 'query string access_token is rejected on non-SSE routes');
 const badRestore = await call('POST', '/owner/data/restore', { password: 'Sadhai@123', backup: { app: 'sadhai-coffee', tables: { categories: [{ id: '00000000-0000-0000-0000-000000000001', 'bad_col);--': 'x' }] } } }, owner.access_token);
 ok(badRestore.status === 400, 'owner data restore rejects unknown/invalid SQL column names');
@@ -291,19 +278,17 @@ ok((await call('POST', '/owner/media', { filename: 'x.png', mime: 'image/png', d
 const img = await fetch(up.body.url.replace(/^https?:\/\/[^/]+/, API));
 ok(img.status === 200 && img.headers.get('content-type') === 'image/png' && img.headers.get('cross-origin-resource-policy') === 'cross-origin', 'uploaded pictures are served publicly');
 const site0 = (await call('GET', '/owner/site', null, owner.access_token)).body;
-const heroNew = { ...site0.content.hero, headline_en: 'Coffee, the Sadhai way', layers: { sun: up.body.id, far: null, mid: null, near: null }, timer_cup: null };
-ok((await call('PUT', '/owner/site/hero', heroNew, owner.access_token)).status === 200, 'owner edits the hero text and a layer');
+const heroNew = { ...site0.content.hero, headline_en: 'Coffee, the Sadhai way', portrait: up.body.id };
+ok((await call('PUT', '/owner/site/hero', heroNew, owner.access_token)).status === 200, 'owner edits the hero text and picture');
 const site1 = (await call('GET', '/site')).body;
-ok(site1.hero.headline_en === 'Coffee, the Sadhai way' && site1.hero.layers.sun?.url && site1.hero.layers.far === null, 'the public site shows the new hero and falls back to built-in art for the rest');
+ok(site1.hero.headline_en === 'Coffee, the Sadhai way' && site1.hero.portrait?.url && site1.hero.layers === undefined && site1.hero.timer_cup === undefined, 'the public site shows the new hero, and only the fields the home page uses');
 ok((await call('PUT', '/owner/site/hero', heroNew, mgr.access_token)).status === 403, 'managers cannot edit the site');
 await call('DELETE', '/owner/site/hero', null, owner.access_token);
 ok((await call('GET', '/site')).body.hero.headline_en === 'Good coffee, every day.', 'resetting restores the default hero');
-const ppl = (await call('GET', '/site')).body.people;
-ok(Array.isArray(ppl) && ppl.length === 4 && ppl.every((x) => x.title && x.art === null), 'the home page has four people cards by default');
-const pplNew = ppl.map((x, i) => ({ role: x.role, title: i === 1 ? 'Our baristas' : x.title, text: x.text, art: null }));
-ok((await call('PUT', '/owner/site/people', pplNew, owner.access_token)).status === 200 && (await call('GET', '/site')).body.people[1].title === 'Our baristas', 'owner edits the people cards');
-ok((await call('PUT', '/owner/site/people', pplNew.slice(0, 3), owner.access_token)).status === 400, 'the people cards must be exactly four');
-await call('DELETE', '/owner/site/people', null, owner.access_token);
+const site2 = (await call('GET', '/site')).body;
+ok(site2.steps === undefined && site2.story === undefined && site2.people === undefined, 'the home page content has no unused sections');
+ok(Object.keys(site2.hero).sort().join() === 'headline_en,headline_ne,portrait,primary_cta,secondary_cta,sub_en,sub_ne', 'the hero has exactly the fields the home page shows');
+ok((await call('PUT', '/owner/site/steps', [], owner.access_token)).status === 404, 'there is no editor for sections the home page does not have');
 
 const enq = await call('POST', '/enquiries', { kind: 'partner', name: 'Tara Cafe', email: 'tara@example.com', org: 'Tara Cafe', city: 'Pokhara', message: 'Interested', consent: true }, null);
 ok(enq.status === 201, 'partner enquiry accepted');
@@ -399,7 +384,7 @@ const ovw = (await call('GET', '/admin/overview', null, owner.access_token)).bod
 ok(ovw.labour.hours > 100 && ovw.labour.cost > 0 && ovw.labour.sales_per_hour > 0, 'overview shows labour hours, cost and sales per labour hour');
 ok((await call('GET', '/admin/overview', null, mgr.access_token)).body.labour.cost === null, 'managers see hours but not labour cost');
 const setup = (await call('GET', '/owner/setup', null, owner.access_token)).body;
-ok(setup.total >= 10 && setup.steps.every((x) => x.title && typeof x.done === 'boolean'), 'setup checklist reports each step');
+ok(setup.total >= 9 && setup.steps.every((x) => x.title && typeof x.done === 'boolean'), 'setup checklist reports each step');
 
 // no online payments
 ok((await call('POST', '/orders', { station_id: st.id, items: [item], payment_method: 'esewa' }, T)).status === 400, 'online payment methods are refused');

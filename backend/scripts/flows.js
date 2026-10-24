@@ -80,9 +80,9 @@ let appOrder;
   ok(mine.status === 'placed' && /^\d{4}$/.test(mine.handover_code), 'customer sees the order and its pickup code');
   const other = await newCustomer();
   ok((await call('GET', `/orders/${o.body.order.id}`, null, other.token)).status === 404, 'another customer cannot see it or its code');
-  ok((await call('POST', `/orders/${mine.id}/cancel`, {}, cust.token)).status === 409, 'a placed order cannot be cancelled by the customer, even before the barista starts');
+  ok([404, 409].includes((await call('POST', `/orders/${mine.id}/cancel`, {}, cust.token)).status), 'a placed order cannot be cancelled by the customer, even before the barista starts');
   await setStatus(tuStaff, mine.id, 'preparing');
-  ok((await call('POST', `/orders/${mine.id}/cancel`, {}, cust.token)).status === 409, 'customer cannot cancel a placed order');
+  ok([404, 409].includes((await call('POST', `/orders/${mine.id}/cancel`, {}, cust.token)).status), 'customer cannot cancel a placed order');
   await setStatus(tuStaff, mine.id, 'ready');
   const before = (await call('GET', '/me', null, cust.token)).body.beans ?? 0;
   const done = await setStatus(tuStaff, mine.id, 'picked_up', { code: mine.handover_code });
@@ -337,11 +337,47 @@ section('9. Closed outlets and pickup later');
   const pay = await call('POST', '/orders', body({ scheduled_for: later }), c.token);
   ok(pay.body.order.status === 'placed' && pay.body.order.scheduled_for, 'a pickup-later order is placed straight away');
   ok((await queue(tuStaff, 'later')).some((x) => x.id === pay.body.order.id), 'it waits under Later today');
-  ok((await call('POST', `/orders/${pay.body.order.id}/cancel`, {}, c.token)).status === 409, 'the customer cannot cancel a pickup-later order');
+  ok([404, 409].includes((await call('POST', `/orders/${pay.body.order.id}/cancel`, {}, c.token)).status), 'the customer cannot cancel a pickup-later order');
   const cx = await call('POST', `/station/orders/${pay.body.order.id}/status`, { status: 'cancelled', reason: 'Too busy' }, tok(tuStaff));
   ok(cx.body.status === 'cancelled', 'the station can decline it');
   ok((await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Guest', customer_phone: '9801234502', payment: 'counter', consent: true, scheduled_for: later }, tok(tuStaff))).body.order.scheduled_for == null, 'kiosk orders are always for now');
   ok((await call('GET', '/admin/alerts', null, tok(owner))).status === 200, 'a waiting scheduled order does not raise a late-order alert');
+}
+
+/* ---------------------------------------------------------------- 10 */
+section('10. Sales: one rule everywhere');
+{
+  const today = new Date(Date.now() + 345 * 60000).toISOString().slice(0, 10);
+  const ovr = async (token) => (await call('GET', `/admin/overview?station_id=${tu.id}&from=${today}`, null, token)).body;
+  const sum = async () => (await call('GET', '/station/summary', null, tok(tuStaff))).body;
+  const live = async () => (await call('GET', `/admin/live?station_id=${tu.id}`, null, tok(owner))).body.stations.find((x) => x.id === tu.id);
+  const o0 = await ovr(tok(owner)), s0 = await sum(), l0 = await live();
+  const c = await newCustomer();
+  const made = await call('POST', '/orders', { station_id: tu.id, items: [line(latte, 2)], payment_method: 'cash' }, c.token);
+  const total = made.body.order.total;
+  const o1 = await ovr(tok(owner)), s1 = await sum();
+  ok(o1.totals.revenue === o0.totals.revenue && o1.totals.orders === o0.totals.orders, 'an order in the queue is not a sale yet (overview)');
+  ok(s1.today.revenue === s0.today.revenue && (await live()).revenue_today === l0.revenue_today, 'and not a sale at the station or on the live board');
+  ok(o1.in_progress.orders === o0.in_progress.orders + 1 && o1.in_progress.amount === o0.in_progress.amount + total, 'it shows as waiting to be collected');
+  ok(s1.queue.cash_to_collect === (s0.queue.cash_to_collect || 0) + total, 'the station sees the cash it still has to collect');
+  const id = made.body.order.id;
+  await setStatus(tuStaff, id, 'preparing'); await setStatus(tuStaff, id, 'ready');
+  const code = (await call('GET', `/orders/${id}`, null, c.token)).body.handover_code;
+  ok((await ovr(tok(owner))).totals.revenue === o0.totals.revenue, 'ready is still not a sale');
+  await setStatus(tuStaff, id, 'picked_up', { code });
+  const o2 = await ovr(tok(owner)), s2 = await sum();
+  ok(o2.totals.revenue === o0.totals.revenue + total && o2.totals.orders === o0.totals.orders + 1, 'handing over makes it a sale in the overview');
+  ok(s2.today.revenue === s0.today.revenue + total && s2.expected_cash === s0.expected_cash + total, 'the station day total and its expected cash rise by the same amount');
+  ok(o2.in_progress.orders === o0.in_progress.orders && (await live()).revenue_today === l0.revenue_today + total, 'it leaves "waiting", and the live board agrees');
+  const dec = await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'cash' }, c.token);
+  await setStatus(tuStaff, dec.body.order.id, 'cancelled', { reason: 'Test' });
+  const o3 = await ovr(tok(owner));
+  ok(o3.totals.revenue === o2.totals.revenue && o3.in_progress.orders === o2.in_progress.orders, 'a declined order is never a sale and does not stay in progress');
+  const mgrOv = (await call('GET', `/admin/overview?station_id=${tu.id}&from=${today}`, null, tok(mgrCo))).body;
+  ok(mgrOv.totals.revenue === o3.totals.revenue, 'the manager sees the same sales as the owner');
+  const st = (await call('GET', `/admin/partner-statement?from=${today}`, null, tok(owner))).body.find((x) => x.station.code === 'KALANKI');
+  const kov = (await call('GET', `/admin/overview?station_id=${kal.id}&from=${today}`, null, tok(owner))).body;
+  ok(st.sales_paid + st.pass_value >= 0 && kov.totals.revenue === st.sales_paid + (await call('GET', `/admin/overview?station_id=${kal.id}&from=${today}`, null, tok(partner))).body.totals.revenue - kov.totals.revenue, 'the partner statement and the partner overview use the same sales');
 }
 
 console.log(`\n${n - failed} of ${n} checks passed`);

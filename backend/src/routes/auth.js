@@ -8,17 +8,14 @@ import { wrap, bad, normalizePhone, HttpError } from '../lib/http.js';
 import { authenticate, signAccess, issueRefresh, hashToken } from '../lib/auth.js';
 import { issueSignupLadder, hashPhone } from '../lib/orders.js';
 import { getSettings } from '../lib/settings.js';
-import { sendPhoneOtp, verifyPhoneOtp } from '../lib/sms.js';
 import { notify } from '../lib/notify.js';
 
 export const auth = Router();
 const limiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many attempts. Try again in a minute.' } });
-const otpLimiter = rateLimit({ windowMs: 10 * 60_000, limit: 8, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many OTP requests. Please wait a few minutes.' } });
 
 const publicUser = (u) => ({
   id: u.id, name: u.name, phone: u.phone, email: u.email, role: u.role, station_id: u.station_id, lang: u.lang,
-  referral_code: u.referral_code, beans: u.beans, notif_offers: u.notif_offers, warehouse: !!u.warehouse,
-  phone_verified: !!u.phone_verified,
+  referral_code: u.referral_code, beans: u.beans, warehouse: !!u.warehouse,
 });
 
 const genCode = (name) => `${name.replace(/[^A-Za-z]/g, '').slice(0, 4).toUpperCase().padEnd(4, 'S')}${crypto.randomInt(100, 999)}`;
@@ -33,21 +30,8 @@ const registerSchema = z.object({
   password: z.string().min(6).max(72),
   email: z.string().email().optional().or(z.literal('')),
   referral_code: z.string().trim().max(20).optional(),
-  otp_code: z.string().trim().optional(),
   lang: z.enum(['en', 'ne']).optional(),
 });
-
-auth.post('/otp/send', otpLimiter, wrap(async (req, res) => {
-  const b = z.object({ phone: z.string(), purpose: z.enum(['register', 'verify', 'reset']).optional() }).parse(req.body);
-  const out = await sendPhoneOtp(b.phone, b.purpose || 'verify');
-  res.json(out);
-}));
-
-auth.post('/otp/verify', otpLimiter, wrap(async (req, res) => {
-  const b = z.object({ phone: z.string(), code: z.string().min(4).max(8) }).parse(req.body);
-  const out = await verifyPhoneOtp(b.phone, b.code);
-  res.json(out);
-}));
 
 auth.post('/register', limiter, wrap(async (req, res) => {
   const b = registerSchema.parse(req.body);
@@ -55,12 +39,6 @@ auth.post('/register', limiter, wrap(async (req, res) => {
   const pHash = hashPhone(phone);
   const ipHash = crypto.createHash('sha256').update(String(req.ip || 'unknown')).digest('hex').slice(0, 32);
   const hash = await bcrypt.hash(b.password, 10);
-
-  let phoneVerified = false;
-  if (b.otp_code) {
-    await verifyPhoneOtp(phone, b.otp_code);
-    phoneVerified = true;
-  }
 
   const { user, issuedWelcome, referralLinked } = await tx(async (db) => {
     const exists = await db.query('SELECT 1 FROM users WHERE phone=$1', [phone]);
@@ -88,9 +66,9 @@ auth.post('/register', limiter, wrap(async (req, res) => {
     }
 
     const { rows } = await db.query(
-      `INSERT INTO users(phone, name, email, password_hash, lang, referral_code, referred_by, phone_verified, phone_verified_at, signup_ip_hash)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [phone, b.name, b.email || null, hash, b.lang || 'en', code, referrer?.id || null, phoneVerified, phoneVerified ? new Date() : null, ipHash],
+      `INSERT INTO users(phone, name, email, password_hash, lang, referral_code, referred_by, signup_ip_hash)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [phone, b.name, b.email || null, hash, b.lang || 'en', code, referrer?.id || null, ipHash],
     );
 
     // Ensure phone is permanently recorded in claimed_phones
@@ -185,31 +163,10 @@ me.get('/', wrap(async (req, res) => {
   res.json({ ...publicUser(rows[0]), station });
 }));
 
-me.post('/verify-phone/send', otpLimiter, wrap(async (req, res) => {
-  const u = (await query('SELECT phone, phone_verified FROM users WHERE id=$1', [req.user.id])).rows[0];
-  if (!u) throw bad('Account not found');
-  if (u.phone_verified) return res.json({ ok: true, already_verified: true });
-  const out = await sendPhoneOtp(u.phone, 'verify', req.user.id);
-  res.json(out);
-}));
-
-me.post('/verify-phone/confirm', otpLimiter, wrap(async (req, res) => {
-  const { code } = z.object({ code: z.string().min(4).max(8) }).parse(req.body);
-  const u = (await query('SELECT phone FROM users WHERE id=$1', [req.user.id])).rows[0];
-  if (!u) throw bad('Account not found');
-  await verifyPhoneOtp(u.phone, code, req.user.id);
-  await tx(async (db) => {
-    await db.query('UPDATE users SET phone_verified=true, phone_verified_at=now() WHERE id=$1', [req.user.id]);
-    await issueSignupLadder(req.user.id, db, { onSignup: true });
-  });
-  const updated = (await query('SELECT * FROM users WHERE id=$1', [req.user.id])).rows[0];
-  res.json({ ok: true, user: publicUser(updated) });
-}));
-
 me.patch('/', wrap(async (req, res) => {
   const b = z.object({
     name: z.string().trim().min(2).max(60).optional(), email: z.string().email().optional(), lang: z.enum(['en', 'ne']).optional(),
-    push_token: z.string().max(400).optional(), notif_offers: z.boolean().optional(), current_password: z.string().optional(), new_password: z.string().min(6).max(72).optional(),
+    current_password: z.string().optional(), new_password: z.string().min(6).max(72).optional(),
   }).parse(req.body);
   if (b.new_password) {
     const u = (await query('SELECT password_hash FROM users WHERE id=$1', [req.user.id])).rows[0];
@@ -218,8 +175,8 @@ me.patch('/', wrap(async (req, res) => {
     await query('UPDATE refresh_tokens SET revoked=true WHERE user_id=$1', [req.user.id]);
   }
   await query(
-    `UPDATE users SET name=COALESCE($2,name), email=COALESCE($3,email), lang=COALESCE($4,lang), push_token=COALESCE($5,push_token), notif_offers=COALESCE($6,notif_offers) WHERE id=$1`,
-    [req.user.id, b.name, b.email, b.lang, b.push_token, b.notif_offers],
+    `UPDATE users SET name=COALESCE($2,name), email=COALESCE($3,email), lang=COALESCE($4,lang) WHERE id=$1`,
+    [req.user.id, b.name, b.email, b.lang],
   );
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
   res.json(publicUser(rows[0]));
@@ -245,12 +202,11 @@ me.delete('/', wrap(async (req, res) => {
       );
     }
     await db.query(
-      `UPDATE users SET name='Deleted customer', phone=$2, email=NULL, password_hash=$3, push_token=NULL, referral_code=NULL, active=false, lang='en' WHERE id=$1`,
+      `UPDATE users SET name='Deleted customer', phone=$2, email=NULL, password_hash=$3, referral_code=NULL, active=false, lang='en' WHERE id=$1`,
       [u.id, `deleted:${u.id}`, await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 6)],
     );
     await db.query('DELETE FROM refresh_tokens WHERE user_id=$1', [u.id]);
     await db.query('DELETE FROM notifications WHERE user_id=$1', [u.id]);
-    await db.query('DELETE FROM push_tokens WHERE user_id=$1', [u.id]);
     await db.query(`UPDATE coupons SET status='expired' WHERE user_id=$1 AND status='active'`, [u.id]);
     await db.query(`UPDATE passes SET status='expired' WHERE user_id=$1 AND status='active'`, [u.id]);
     await db.query(`UPDATE orders SET customer_name=NULL, note=NULL, rating_note=NULL WHERE user_id=$1`, [u.id]);
@@ -262,7 +218,7 @@ me.delete('/', wrap(async (req, res) => {
 // A copy of everything we hold about the signed-in customer.
 me.get('/export', wrap(async (req, res) => {
   const [user, orders, coupons, passes, referrals] = await Promise.all([
-    query('SELECT id, name, phone, email, lang, beans, referral_code, phone_verified, created_at FROM users WHERE id=$1', [req.user.id]),
+    query('SELECT id, name, phone, email, lang, beans, referral_code, created_at FROM users WHERE id=$1', [req.user.id]),
     query(`SELECT o.pickup_code, o.status, o.total, o.discount, o.payment_method, o.created_at, s.name AS station,
                   (SELECT json_agg(json_build_object('item', i.name, 'qty', i.qty, 'price', i.unit_price)) FROM order_items i WHERE i.order_id=o.id) AS items
              FROM orders o JOIN stations s ON s.id=o.station_id WHERE o.user_id=$1 ORDER BY o.created_at`, [req.user.id]),
@@ -273,20 +229,3 @@ me.get('/export', wrap(async (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="sadhai-my-data.json"');
   res.json({ exported_at: new Date().toISOString(), profile: user.rows[0], orders: orders.rows, coupons: coupons.rows, passes: passes.rows, referrals: referrals.rows });
 }));
-
-// Device registration for push notifications. A token belongs to one user: signing in on a shared phone moves it.
-me.post('/push-token', wrap(async (req, res) => {
-  const b = z.object({ token: z.string().min(10).max(4000), platform: z.enum(['android', 'ios', 'web']), device_label: z.string().max(80).optional(), app_version: z.string().max(20).optional() }).parse(req.body);
-  await query(
-    `INSERT INTO push_tokens(user_id, platform, token, device_label, app_version) VALUES ($1,$2,$3,$4,$5)
-     ON CONFLICT (token) DO UPDATE SET user_id=$1, platform=$2, device_label=$4, app_version=$5, active=true, last_seen_at=now()`,
-    [req.user.id, b.platform, b.token, b.device_label || null, b.app_version || null],
-  );
-  res.status(201).json({ ok: true });
-}));
-me.delete('/push-token', wrap(async (req, res) => {
-  const { token } = z.object({ token: z.string() }).parse(req.body);
-  await query('DELETE FROM push_tokens WHERE token=$1 AND user_id=$2', [token, req.user.id]);
-  res.json({ ok: true });
-}));
-

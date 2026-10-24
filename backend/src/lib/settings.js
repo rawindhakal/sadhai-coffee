@@ -37,8 +37,6 @@ export const DEFAULT_SETTINGS = {
   // Global anti-loss & anti-breach guardrails
   offer_single_cup_only: 1,       // coupons discount at most 1 drink base price (never whole cart, merch, food, or add-ons)
   offer_no_stacking: 1,           // coupons & promo codes cannot stack on top of Offer of the Day or Limited Drops
-  offer_require_verified_phone: 0,// require NestSMS OTP verification before redeeming welcome/referral coupons
-  promo_push_daily_cap: 1,
   offer_payback_max_days: 30,
   target_food_cost_pct: 35,
   variance_alert_value: 500,
@@ -57,12 +55,6 @@ export const DEFAULT_SETTINGS = {
   preorder_enabled: 1,            // let customers choose a pickup time later today
   preorder_min_minutes: 15,       // earliest pickup, from now
   preorder_prep_minutes: 10,      // a scheduled order reaches the bar this long before pickup
-  auto_shift_reminder: 1,
-  auto_pass_expiry: 1,
-  auto_pass_low: 1,
-  auto_winback: 1,
-  auto_offers: 1,
-  auto_drops: 1,
 };
 
 /** Hard parameter bounds so an accidental typo or bad input can never put the company into loss. */
@@ -98,8 +90,6 @@ const BOUNDS = {
   referral_cap_lifetime: [1, 100],
   offer_single_cup_only: [0, 1],
   offer_no_stacking: [0, 1],
-  offer_require_verified_phone: [0, 1],
-  promo_push_daily_cap: [0, 5],
   offer_payback_max_days: [1, 90],
   target_food_cost_pct: [10, 80],
   variance_alert_value: [50, 50000],

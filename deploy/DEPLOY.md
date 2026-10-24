@@ -17,15 +17,15 @@ Do these on the server, as the user that runs the app. Take a backup first. **Ne
 5. **Build the web app** with the production address:
    ```bash
    cd ../web && npm ci
-   NEXT_PUBLIC_API_URL=https://api.sadhaicoffee.com npm run build
+   NEXT_PUBLIC_API_URL=https://sadhaicoffee.com/api npm run build
    ```
 6. **Restart** the API and the web app the way they are run (`pm2 restart all`, `docker compose up -d --build`, or `systemctl restart ...`).
 7. **Check.**
    ```bash
-   curl -s https://api.sadhaicoffee.com/config | head -c 400     # payment_methods should be ["cash","pass"]
+   curl -s https://sadhaicoffee.com/api/config | head -c 400     # payment_methods should be ["cash","pass"]
    curl -s -o /dev/null -w '%{http_code}\n' https://sadhaicoffee.com/
    ```
-   Then sign in as the owner: Settings, "SMS and app" should show no payment settings, and a test order placed from the web goes straight to the station queue.
+   Then sign in as the owner: Settings, "App and company" should show only addresses and company details, and a test order placed from the web goes straight to the station queue.
 
 ## Old payment keys
 `npm run migrate` also deletes any gateway keys saved from the owner dashboard. In `backend/.env`, delete any `ESEWA_*`, `KHALTI_*`, `FONEPAY_*`, `PAYMENT_MODE` and `CASH_ENABLED` lines; they are ignored now.

@@ -297,10 +297,6 @@ export function WelcomeReferralsTab({ isOwner }: { isOwner: boolean }) {
                   <option value={0}>Immediately on registration</option>
                 </select>
               </Field>
-              <label className="row card flat" style={{ justifyContent: 'space-between' }}>
-                <span>Require NestSMS verified phone to redeem</span>
-                <input type="checkbox" disabled={!isOwner} style={{ width: 22, minHeight: 22 }} checked={!!s.offer_require_verified_phone} onChange={(e) => setNum('offer_require_verified_phone', e.target.checked ? 1 : 0)} />
-              </label>
               <Field label="1st cup discount (%)" hint="50% covers margin; 100% = free up to cap">
                 <input type="number" disabled={!isOwner} min={0} max={100} value={s.first_cup_discount_pct} onChange={(e) => setNum('first_cup_discount_pct', Number(e.target.value))} />
               </Field>

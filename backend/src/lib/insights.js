@@ -1,7 +1,7 @@
 import { query } from './db.js';
 import { range } from './reports.js';
 
-const SALE = `o.status <> 'cancelled'`;
+import { SALE } from './sales.js';
 const CUPS = `(SELECT sum(i.qty) FROM order_items i JOIN products pk ON pk.id=i.product_id WHERE i.order_id=o.id AND pk.kind='drink')`;
 
 export async function periodTotals(stationIds, start, end) {
@@ -49,8 +49,8 @@ export async function liveBoard(stationIds) {
     `SELECT st.id, st.name, st.code, st.is_open, st.accepting_orders, st.operator_type, st.partner_name, st.prep_target_seconds, st.breakeven_cups,
             count(o.id) FILTER (WHERE o.status='placed')::int AS waiting, count(o.id) FILTER (WHERE o.status='preparing')::int AS making, count(o.id) FILTER (WHERE o.status='ready')::int AS ready,
             COALESCE(max(extract(epoch FROM (now() - o.created_at))) FILTER (WHERE o.status IN ('placed','preparing')),0)::int AS oldest_seconds,
-            (SELECT COALESCE(sum(oo.total),0)::int FROM orders oo WHERE oo.station_id=st.id AND oo.created_at >= ${today} AND oo.status <> 'cancelled') AS revenue_today,
-            (SELECT COALESCE(sum((SELECT sum(i.qty) FROM order_items i JOIN products pk ON pk.id=i.product_id WHERE i.order_id=oo.id AND pk.kind='drink')),0)::int FROM orders oo WHERE oo.station_id=st.id AND oo.created_at >= ${today} AND oo.status <> 'cancelled') AS cups_today,
+            (SELECT COALESCE(sum(oo.total),0)::int FROM orders oo WHERE oo.station_id=st.id AND oo.created_at >= ${today} AND oo.status = 'picked_up') AS revenue_today,
+            (SELECT COALESCE(sum((SELECT sum(i.qty) FROM order_items i JOIN products pk ON pk.id=i.product_id WHERE i.order_id=oo.id AND pk.kind='drink')),0)::int FROM orders oo WHERE oo.station_id=st.id AND oo.created_at >= ${today} AND oo.status = 'picked_up') AS cups_today,
             (SELECT COALESCE(avg(extract(epoch FROM (oo.ready_at - COALESCE(oo.accepted_at, oo.created_at)))),0)::int FROM orders oo WHERE oo.station_id=st.id AND oo.ready_at > now() - interval '1 hour') AS make_seconds_1h,
             (SELECT count(*)::int FROM orders oo WHERE oo.station_id=st.id AND oo.created_at > now() - interval '1 hour' AND oo.status <> 'cancelled') AS orders_1h
        FROM stations st LEFT JOIN orders o ON o.station_id=st.id AND o.status IN ('placed','preparing','ready')

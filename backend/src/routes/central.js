@@ -276,10 +276,6 @@ central.get('/valuation', wrap(async (_req, res) => {
   const stationsValue = st.rows.reduce((a, r) => a + r.value, 0);
   res.json({ central: c.rows[0].value, stations: st.rows, stations_total: stationsValue, total: c.rows[0].value + stationsValue });
 }));
-central.get('/moves', wrap(async (req, res) => {
-  const { rows } = await query(`SELECT m.*, i.name, i.unit, u.name AS by FROM central_moves m JOIN ingredients i ON i.id=m.ingredient_id LEFT JOIN users u ON u.id=m.created_by WHERE ($1::uuid IS NULL OR m.ingredient_id=$1) ORDER BY m.id DESC LIMIT 100`, [req.query.ingredient_id || null]);
-  res.json(rows);
-}));
 
 /* ========================================================================
    Stations and managers: ask for stock, confirm what arrived, count shelves.

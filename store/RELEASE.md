@@ -10,7 +10,7 @@
 
 **Config to change before going live**
 - `web/src/lib/site.ts` (or the `NEXT_PUBLIC_*` env vars): company name, address, support and privacy emails.
-- Mobile: build with `--dart-define=API_URL=https://api.sadhaicoffee.com --dart-define=WEB_URL=https://sadhaicoffee.com` plus the five Firebase values in `store/PUSH.md` if you want push.
+- Mobile: build with `--dart-define=API_URL=https://sadhaicoffee.com/api --dart-define=WEB_URL=https://sadhaicoffee.com`.md` if you want push.
 - API: `IGNORE_STATION_HOURS=0`, strong `JWT_SECRET`, `CORS_ORIGINS`, `PUBLIC_API_URL`, `PUBLIC_WEB_URL`, `PLAY_STORE_URL`, `APP_STORE_URL`, `MIN_APP_VERSION`.
 
 **Android (Google Play)**

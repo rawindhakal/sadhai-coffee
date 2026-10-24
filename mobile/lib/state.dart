@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show SnackBar, Text;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
-import 'push.dart' show messengerKey;
+import 'messenger.dart';
 
 class CartLine {
   CartLine({required this.product, required this.qty, required this.optionIds, required this.optionNames, required this.unit});

@@ -1,6 +1,6 @@
 {
   "name": "sadhai-api",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,6 @@
     "seed": "node scripts/seed.js",
     "setup": "npm run migrate && node scripts/seed.js --force",
     "smoke": "node scripts/smoke.js",
-    "vapid": "node -e \"const k=require('web-push').generateVAPIDKeys();console.log('VAPID_PUBLIC_KEY='+k.publicKey+'\\nVAPID_PRIVATE_KEY='+k.privateKey)\"",
     "flows": "node scripts/flows.js",
     "seed:force": "node scripts/seed.js --force"
   },
@@ -24,7 +23,6 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "pg": "^8.12.0",
-    "web-push": "^3.6.7",
     "zod": "^3.23.8"
   }
 }

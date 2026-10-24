@@ -9,7 +9,7 @@ Everything below is available on the web (`/owner`, `/manager`, `/station`) and 
 
 ## Owner: first day
 
-1. **Settings and keys**: company details, SMS (NestSMS), Firebase and web push keys. Secrets are stored encrypted and shown masked. Every key has a *Test* button.
+1. **Settings**: drink prices and rules, then *App and company* (web addresses, oldest allowed app version, company name and emails for the legal pages). There are no SMS, push or payment keys; Sadhai uses none of them.
 2. **Home page and pictures**: replace every hero layer, section picture, partner and investor page text and product picture. Anything left empty falls back to the built-in artwork.
 3. **Stations**, **Managers**, **Staff and pay**: add the cafes, their managers, and each staff member with an hourly rate.
 4. The *Get Sadhai ready* checklist on the overview tracks what is still missing.

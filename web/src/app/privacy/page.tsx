@@ -15,7 +15,6 @@ export default function Privacy() {
         <tr><td>Orders, items, pickup number, ratings and notes</td><td>Make and hand over your order, support, refunds, loyalty and our accounts</td><td>Required to order</td></tr>
         <tr><td>Payment method (cash or pass) and the amount</td><td>Record what you paid and balance the counter's cash. We take no online payments, so we never see or store a card, wallet or bank login</td><td>Required to pay</td></tr>
         <tr><td>Approximate or precise location, only while you use “Use my location”</td><td>Sort stations by distance. Your coordinates are sent with that one request and are not saved or logged</td><td>Optional. You can pick a station by hand</td></tr>
-        <tr><td>Notification token and device type (if you allow notifications)</td><td>Send push notifications: your order is ready, your pass is ending, and offers if you have not opted out. Offers are limited to one a day and can be turned off in Profile</td><td>Optional</td></tr>
         <tr><td>Name and mobile number typed at a self-order kiosk</td><td>Call your order and, if the number belongs to a Sadhai account, link the order to it. You are asked to agree on the kiosk screen</td><td>Required to use the kiosk. You can order at the counter instead</td></tr>
         <tr><td>Staff only: shifts, check-in and check-out times, hourly rate and payslips</td><td>Plan the roster and pay people correctly. Only that person, the managers of their station and the owner can see it</td><td>Required to work a shift</td></tr>
         <tr><td>Passes, coupons, referral code and bean balance</td><td>Run the offers you have earned</td><td>Part of your account</td></tr>
@@ -31,14 +30,14 @@ export default function Privacy() {
       </ul>
 
       <h2>How long we keep it</h2>
-      <p>Account data is kept while your account is open. If you delete your account we erase your name, phone, email, notification token and messages and expire unused coupons and passes. We keep order and payment records, with your identity removed, for as long as tax and accounting law in Nepal requires. Orders placed at a kiosk without an account keep the name and number typed at the kiosk; email us and we will remove them from those records.</p>
+      <p>Account data is kept while your account is open. If you delete your account we erase your name, phone, email and messages and expire unused coupons and passes. We keep order and payment records, with your identity removed, for as long as tax and accounting law in Nepal requires. Orders placed at a kiosk without an account keep the name and number typed at the kiosk; email us and we will remove them from those records.</p>
 
       <h2>Your choices and rights</h2>
       <ul>
         <li><strong>Delete your account</strong> inside the app (Account, Profile, Delete my account) or on <a href="/delete-account">this page</a>.</li>
         <li><strong>Download your data</strong> from Profile, Download my data.</li>
         <li><strong>Correct your details</strong> in Profile, or ask us.</li>
-        <li><strong>Turn off location or notifications</strong> in your phone settings at any time. The app keeps working.</li>
+        <li><strong>Turn off location</strong> in your phone settings at any time. The app keeps working.</li>
         <li>Contact <a href={`mailto:${SITE.privacyEmail}`}>{SITE.privacyEmail}</a> for any other request.</li>
       </ul>
 

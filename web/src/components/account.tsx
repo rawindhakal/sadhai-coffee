@@ -6,7 +6,6 @@ import { useAuth, useEvents, useRequireRole } from '@/lib/auth';
 import { Empty, ErrorNote, Field, Loading, Modal, Status, Tabs, useData, useToast } from './ui';
 import { CustomerShell } from './customer';
 import { useI18n } from '@/lib/i18n';
-import { disableWebPush, enableWebPush, pushState } from '@/lib/push';
 
 export function AccountView() {
   const user = useRequireRole('customer');
@@ -154,11 +153,6 @@ export function ReferralTab() {
           </>
         )}
       </div>
-      {data.require_verified_phone && !data.phone_verified && (
-        <div style={{ marginTop: 12 }}>
-          <PhoneVerifyBanner onVerified={reload} />
-        </div>
-      )}
       {data.friends.length > 0 && (
         <div className="col" style={{ marginTop: 16 }}>
           {data.friends.map((f: any, i: number) => (
@@ -172,74 +166,6 @@ export function ReferralTab() {
         </div>
       )}
     </>
-  );
-}
-
-function PhoneVerifyBanner({ onVerified }: { onVerified?: () => void }) {
-  const { user, setUser } = useAuth();
-  const cfg = useData<any>('/config');
-  const toast = useToast();
-  const [sent, setSent] = useState(false);
-  const [code, setCode] = useState('');
-  const [devCode, setDevCode] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  if ((user as any)?.phone_verified) return null;
-  if (cfg.data?.sms && (cfg.data.sms.enabled === false || cfg.data.sms.otp_enabled === false)) return null;
-
-  async function sendOtp() {
-    setBusy(true);
-    try {
-      const r = await api('/me/verify-phone/send', { method: 'POST', body: {} });
-      setSent(true);
-      if (r.dev_code) setDevCode(r.dev_code);
-      toast('Verification code sent via SMS');
-    } catch (e: any) {
-      toast(e.message, true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function confirmOtp() {
-    setBusy(true);
-    try {
-      const r = await api('/me/verify-phone/confirm', { method: 'POST', body: { code } });
-      if (r.user) setUser({ ...user!, ...r.user });
-      toast('Phone number verified!');
-      onVerified?.();
-    } catch (e: any) {
-      toast(e.message, true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="card flat col" style={{ gap: 8, borderColor: 'var(--marigold)' }}>
-      <div className="row between wrap">
-        <div>
-          <strong>Verify your mobile number ({user?.phone})</strong>
-          <p className="small muted">Verify with a 6-digit SMS code to unlock welcome &amp; referral coupons.</p>
-        </div>
-        {!sent && <button type="button" className="btn sm primary" disabled={busy} onClick={sendOtp}>{busy ? 'Sending…' : 'Send SMS code'}</button>}
-      </div>
-      {sent && (
-        <div className="row wrap" style={{ gap: 8 }}>
-          <input
-            inputMode="numeric"
-            maxLength={6}
-            placeholder="6-digit OTP code"
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-            style={{ width: 160 }}
-          />
-          <button type="button" className="btn sm primary" disabled={busy || code.length < 4} onClick={confirmOtp}>Verify</button>
-          <button type="button" className="btn sm ghost" disabled={busy} onClick={sendOtp}>Resend</button>
-          {devCode && <span className="chip marigold">Sandbox OTP: {devCode}</span>}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -287,8 +213,7 @@ export function Profile() {
   return (
     <form className="card col" onSubmit={save} style={{ gap: 16 }}>
       <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-      <Field label="Mobile number" hint={(user as any)?.phone_verified ? '✓ Verified via SMS' : 'Unverified'}><input value={user!.phone} disabled /></Field>
-      {!(user as any)?.phone_verified && <PhoneVerifyBanner />}
+      <Field label="Mobile number"><input value={user!.phone} disabled /></Field>
       <Field label="Language"><select value={lang} onChange={(e) => setLang(e.target.value as any)}><option value="en">English</option><option value="ne">नेपाली</option></select></Field>
       <h4>Change password</h4>
       <Field label="Current password"><input type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" /></Field>
@@ -296,33 +221,9 @@ export function Profile() {
       <ErrorNote error={err} />
       <div className="row"><button className="btn primary">Save</button><button type="button" className="btn ghost" onClick={() => logout().then(() => (location.href = '/'))}>Sign out</button></div>
       <hr style={{ border: 0, borderTop: '1px solid var(--hairline)', width: '100%' }} />
-      <Notifications />
-      <hr style={{ border: 0, borderTop: '1px solid var(--hairline)', width: '100%' }} />
       <h4>Your data</h4>
       <div className="row wrap"><button type="button" className="btn sm" onClick={async () => { const d = await api('/me/export'); const u = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = u; a.download = 'sadhai-my-data.json'; a.click(); URL.revokeObjectURL(u); }}>Download my data</button><a className="btn sm ghost" href="/privacy">Privacy policy</a><a className="btn sm ghost" href="/terms">Terms</a><a className="btn sm danger" href="/delete-account">Delete my account</a></div>
     </form>
   );
 }
 
-/** Push on this browser, and the choice to hear about offers. Order updates always come through. */
-function Notifications() {
-  const { user, setUser } = useAuth();
-  const toast = useToast();
-  const [state, setState] = useState<string>('off');
-  const [busy, setBusy] = useState(false);
-  useEffect(() => { pushState().then(setState); }, []);
-  async function toggle() {
-    setBusy(true);
-    try { if (state === 'on') await disableWebPush(); else await enableWebPush(); setState(await pushState()); toast(state === 'on' ? 'Notifications are off on this browser' : 'Notifications are on'); } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
-  }
-  async function offers(v: boolean) { try { const u = await api('/me', { method: 'PATCH', body: { notif_offers: v } }); setUser({ ...user!, ...u }); } catch (e: any) { toast(e.message, true); } }
-  return (
-    <div className="col" style={{ gap: 10 }}>
-      <h4>Notifications</h4>
-      <div className="row between wrap"><span className="small">Tell me when my coffee is ready{state === 'unsupported' ? ' (not supported in this browser)' : state === 'blocked' ? ' (blocked in your browser settings)' : ''}</span>
-        <button type="button" className={`btn sm ${state === 'on' ? 'ghost' : 'primary'}`} disabled={busy || state === 'unsupported' || state === 'blocked'} onClick={toggle}>{state === 'on' ? 'Turn off on this browser' : 'Turn on'}</button></div>
-      <label className="row small"><input type="checkbox" style={{ width: 20, minHeight: 20 }} checked={(user as any)?.notif_offers !== false} onChange={(e) => offers(e.target.checked)} />Send me offers and news (one a day at most)</label>
-      <p className="small muted">Order and pass messages are always sent, because you need them.</p>
-    </div>
-  );
-}

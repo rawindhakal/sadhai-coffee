@@ -3,10 +3,6 @@ import { useEffect, useState } from 'react';
 import { api } from './api';
 
 // Built-in artwork used wherever the owner has not uploaded a picture.
-export const HERO_DEFAULTS = { sun: '/img/hero-sun.svg', far: '/img/hero-far.svg', mid: '/img/hero-mid.svg', near: '/img/hero-near.svg', cup: '/img/cup-hot.svg' };
-export const PEOPLE_ART = ['/img/person-farmer.svg', '/img/person-barista.svg', '/img/person-commuter.svg', '/img/person-owner.svg'];
-export const STEP_ART = ['/img/scene-kiosk.svg', '/img/scene-roastery.svg', '/img/scene-farm.svg'];
-export const STORY_ART = ['/img/scene-farm.svg', '/img/scene-roastery.svg', '/img/scene-kiosk.svg'];
 
 let cache: any = null;
 let inflight: Promise<any> | null = null;

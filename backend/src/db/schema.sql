@@ -400,55 +400,6 @@ ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_channel_check;
 ALTER TABLE orders ADD CONSTRAINT orders_channel_check CHECK (channel IN ('app','qr','counter','web','kiosk'));
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_phone text;
 
-ALTER TABLE users ADD COLUMN IF NOT EXISTS notif_offers boolean NOT NULL DEFAULT true;
-
-CREATE TABLE IF NOT EXISTS push_tokens (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  platform text NOT NULL CHECK (platform IN ('android','ios','web')),
-  token text NOT NULL UNIQUE,
-  device_label text,
-  app_version text,
-  active boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  last_seen_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS push_tokens_user_idx ON push_tokens(user_id) WHERE active;
-
-CREATE TABLE IF NOT EXISTS push_campaigns (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  title text NOT NULL,
-  body text,
-  audience jsonb NOT NULL,
-  status text NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','sending','sent','cancelled','failed')),
-  scheduled_for timestamptz NOT NULL DEFAULT now(),
-  sent_at timestamptz,
-  recipients int NOT NULL DEFAULT 0,
-  created_by uuid REFERENCES users(id),
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS push_deliveries (
-  id bigserial PRIMARY KEY,
-  campaign_id uuid REFERENCES push_campaigns(id) ON DELETE SET NULL,
-  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
-  token_id uuid,
-  platform text,
-  kind text,
-  title text,
-  status text NOT NULL CHECK (status IN ('sent','failed','dry_run','invalid_token','skipped')),
-  error text,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS push_deliveries_campaign_idx ON push_deliveries(campaign_id);
-CREATE INDEX IF NOT EXISTS push_deliveries_created_idx ON push_deliveries(created_at);
-
-CREATE TABLE IF NOT EXISTS auto_push_log (
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  key text NOT NULL,
-  sent_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_id, key)
-);
 
 -- ---- v1.2: recipe costing, central inventory, purchasing, transfers, stock counts ----
 CREATE TABLE IF NOT EXISTS suppliers (
@@ -753,8 +704,6 @@ ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('customer','station','manager','owner','partner'));
 
 -- ---- v1.6.6: Multi-gateway QR (Fonepay, eSewa, Khalti), NestSMS & Anti-abuse Marketing ----
-ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified boolean NOT NULL DEFAULT false;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at timestamptz;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_ip_hash text;
 
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS min_spend int NOT NULL DEFAULT 0;
@@ -784,31 +733,6 @@ ALTER TABLE claimed_phones ADD COLUMN IF NOT EXISTS welcome_claimed boolean NOT 
 ALTER TABLE claimed_phones ADD COLUMN IF NOT EXISTS referral_claimed boolean NOT NULL DEFAULT false;
 ALTER TABLE claimed_phones ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
--- NestSMS OTP verification table
-CREATE TABLE IF NOT EXISTS phone_verifications (
-  phone text PRIMARY KEY,
-  code_hash text NOT NULL,
-  attempts int NOT NULL DEFAULT 0,
-  sent_count int NOT NULL DEFAULT 1,
-  window_started_at timestamptz NOT NULL DEFAULT now(),
-  expires_at timestamptz NOT NULL,
-  verified_at timestamptz
-);
-
--- NestSMS delivery log
-CREATE TABLE IF NOT EXISTS sms_log (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid REFERENCES users(id) ON DELETE SET NULL,
-  phone text NOT NULL,
-  kind text NOT NULL DEFAULT 'transactional',
-  message text NOT NULL,
-  status text NOT NULL DEFAULT 'sent',
-  provider_response jsonb,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS sms_log_created_idx ON sms_log(created_at DESC);
-
-
 -- ---- v1.7: no online payments ----
 -- Orders are paid with cash or a pass. Older rows may still say esewa, khalti or fonepay, and 'awaiting_payment'; they stay readable in reports.
 -- Online payments are no longer accepted by the API, and the settlements table is kept only for old history.
@@ -824,3 +748,14 @@ UPDATE payments SET status = 'failed' WHERE status = 'pending' AND provider NOT 
 UPDATE orders SET status = 'cancelled', payment_status = 'unpaid', cancel_reason = 'Online payment is no longer available' WHERE status = 'awaiting_payment';
 UPDATE passes SET status = 'expired' WHERE status = 'pending';
 DELETE FROM app_secrets WHERE key LIKE 'esewa%' OR key LIKE 'khalti%' OR key LIKE 'fonepay%' OR key IN ('payment_mode', 'cash_enabled');
+
+-- ---- v1.8: no SMS and no push notifications ----
+-- Phone verification, SMS and push notifications were removed. Drop their tables and columns (safe to run again).
+DROP TABLE IF EXISTS push_deliveries, push_campaigns, push_tokens, auto_push_log, sms_log, phone_verifications CASCADE;
+ALTER TABLE users DROP COLUMN IF EXISTS push_token, DROP COLUMN IF EXISTS notif_offers, DROP COLUMN IF EXISTS phone_verified, DROP COLUMN IF EXISTS phone_verified_at;
+DELETE FROM app_secrets WHERE key LIKE 'sms%' OR key LIKE 'nestsms%' OR key LIKE 'fcm%' OR key LIKE 'vapid%' OR key = 'push_mode';
+DELETE FROM settings WHERE key IN ('offer_require_verified_phone', 'promo_push_daily_cap', 'auto_shift_reminder', 'auto_pass_expiry', 'auto_pass_low', 'auto_winback', 'auto_offers', 'auto_drops');
+
+-- The home page no longer has a hills scene, steps, story or people cards; drop what was saved for them.
+DELETE FROM site_content WHERE key IN ('steps', 'story', 'people');
+UPDATE site_content SET value = value - 'layers' - 'timer_cup' - 'show_timer' - 'parallax' - 'note' WHERE key = 'hero';

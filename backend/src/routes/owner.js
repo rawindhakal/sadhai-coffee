@@ -441,23 +441,6 @@ owner.put('/products/:id/options', wrap(async (req, res) => {
   });
   res.json({ ok: true });
 }));
-owner.put('/products/:id/recipe', wrap(async (req, res) => {
-  const items = z.array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() })).parse(req.body);
-  await tx(async (db) => {
-    await db.query('DELETE FROM recipes WHERE product_id=$1', [req.params.id]);
-    for (const r of items) await db.query('INSERT INTO recipes(product_id,ingredient_id,qty) VALUES ($1,$2,$3)', [req.params.id, r.ingredient_id, r.qty]);
-  });
-  res.json({ ok: true });
-}));
-owner.post('/ingredients', wrap(async (req, res) => {
-  const b = z.object({ name: z.string().min(2), unit: z.string().min(1), unit_cost: z.number().min(0).default(0) }).parse(req.body);
-  const ing = await tx(async (db) => {
-    const r = (await db.query('INSERT INTO ingredients(name,unit,unit_cost) VALUES ($1,$2,$3) RETURNING *', [b.name, b.unit, b.unit_cost])).rows[0];
-    await db.query('INSERT INTO station_inventory(station_id, ingredient_id, qty, reorder_level) SELECT id, $1, 0, 0 FROM stations', [r.id]);
-    return r;
-  });
-  res.status(201).json(ing);
-}));
 
 /* ---- drops ---- */
 owner.post('/drops', wrap(async (req, res) => {
@@ -591,20 +574,6 @@ owner.patch('/passes/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-/* ---- broadcast (one push a day at most) ---- */
-owner.post('/broadcast', wrap(async (req, res) => {
-  const b = z.object({ title: z.string().min(3).max(80), body: z.string().max(200).optional(), segment: z.enum(['all', 'inactive_14d']).default('all') }).parse(req.body);
-  const cap = (await getSettings()).promo_push_daily_cap;
-  const { rows } = await query(
-    `SELECT u.id FROM users u WHERE u.role='customer' AND u.active
-       AND (SELECT count(*) FROM notifications n WHERE n.user_id=u.id AND n.kind='promo' AND n.created_at > now() - interval '24 hours') < $1
-       AND ($2='all' OR NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id=u.id AND o.created_at > now() - interval '14 days'))`, [cap, b.segment],
-  );
-  for (const r of rows) await notify(r.id, { kind: 'promo', title: b.title, body: b.body });
-  await audit(req.user.id, 'broadcast', 'notification', null, { ...b, sent: rows.length });
-  res.json({ sent: rows.length });
-}));
-
 /* ---- export ---- */
 owner.get('/export/orders.csv', wrap(async (req, res) => {
   const { start, end } = range(req.query.from, req.query.to);
@@ -620,12 +589,6 @@ owner.get('/export/orders.csv', wrap(async (req, res) => {
 }));
 
 /* ---- partner cafes ---- */
-owner.patch('/stations/:id/partner', wrap(async (req, res) => {
-  const b = z.object({ operator_type: z.enum(['company', 'partner']), partner_name: z.string().max(80).optional(), partner_phone: z.string().max(20).optional(), revenue_share_pct: z.number().int().min(0).max(100) }).parse(req.body);
-  await query('UPDATE stations SET operator_type=$2, partner_name=$3, partner_phone=$4, revenue_share_pct=$5 WHERE id=$1', [req.params.id, b.operator_type, b.partner_name, b.partner_phone, b.revenue_share_pct]);
-  await audit(req.user.id, 'station.partner', 'station', req.params.id, b);
-  res.json({ ok: true });
-}));
 owner.get('/partners', wrap(async (req, res) => {
   const { rows } = await query(`SELECT id FROM stations WHERE active AND operator_type='partner' ORDER BY name`);
   res.json(await Promise.all(rows.map((r) => statement(r.id, req.query.from, req.query.to))));

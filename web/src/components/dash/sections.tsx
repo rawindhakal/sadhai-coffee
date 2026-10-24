@@ -34,7 +34,8 @@ export function OverviewSection() {
   return (
     <div className="col" style={{ gap: 16 }}>
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-        <Kpi label="Sales" value={rs(t.revenue)} delta={pctDelta(t.revenue, p.revenue)} spark={sp('revenue')} />
+        <Kpi label="Sales" value={rs(t.revenue)} delta={pctDelta(t.revenue, p.revenue)} spark={sp('revenue')} hint="Orders handed over and paid" />
+        {o.in_progress && <Kpi label="Waiting to be collected" value={o.in_progress.orders.toLocaleString()} hint={`${rs(o.in_progress.amount)} not yet sales`} onClick={() => go('live')} />}
         <Kpi label="Orders" value={t.orders.toLocaleString()} delta={pctDelta(t.orders, p.orders)} spark={sp('orders')} onClick={() => go('orders')} />
         <Kpi label="Cups" value={t.cups.toLocaleString()} delta={pctDelta(t.cups, p.cups)} spark={sp('cups')} hint={`${t.cups_per_day} a day`} />
         <Kpi label="Average ticket" value={rs(t.avg_ticket)} delta={pctDelta(t.avg_ticket, p.avg_ticket)} />

@@ -1,30 +1,13 @@
 import { query } from './db.js';
 import { rt } from './runtime.js';
 
-/** Editable website, kiosk and app content. A null picture means "use the built-in artwork". */
+/** Editable website content: the home page hero and banner, and the partner and investor pages. A null picture means "use the built-in artwork". */
 export const SITE_DEFAULTS = {
   hero: {
     headline_en: 'Good coffee, every day.', headline_ne: 'सधैं राम्रो कफी।',
     sub_en: 'Grown in the hills. Ready in 90 seconds.', sub_ne: 'पहाडमा फलेको, ९० सेकेन्डमा तयार।',
-    primary_cta: 'Order ahead', secondary_cta: 'Get a free first cup', note: 'The price you see is the price you pay.',
-    layers: { sun: null, far: null, mid: null, near: null }, timer_cup: null, portrait: null, show_timer: true, parallax: true,
+    primary_cta: 'Order ahead', secondary_cta: 'Create an account', portrait: null,
   },
-  steps: [
-    { title_en: 'Pick a counter', title_ne: 'नजिकको काउन्टर छान्नुहोस्', text: 'Share your location (free, on your phone) and we sort the nearest counters by walking time.', art: null },
-    { title_en: 'Order and pay', title_ne: 'अर्डर र भुक्तानी', text: 'Add a coffee in one tap. Pay with your pass or cash at the counter.', art: null },
-    { title_en: 'Walk in, 90 seconds', title_ne: 'भित्र आउनुहोस्, ९० सेकेन्ड', text: 'Your pickup number lights up when it is ready. Fresh Nepali beans, poured while you walk up.', art: null },
-  ],
-  people: [
-    { role: 'The hands on the hill', title: 'Farmers in Gulmi, Syangja and Kaski', text: 'Families who pick each ripe cherry by hand on mid-hill terraces. We name the district on the bag.', art: null },
-    { role: 'Behind the counter', title: 'Baristas who know your order', text: 'A small team at every counter, trained on one standard recipe so a drink tastes the same everywhere.', art: null },
-    { role: 'On the way to work', title: 'Commuters, students, nurses', text: 'People who want a good cup in 90 seconds, at a bus stop, a hospital gate or a campus entrance.', art: null },
-    { role: 'Our cafe partners', title: 'Cafe owners across Kathmandu', text: 'Neighbourhood cafes that keep their own counter and team, and bring Sadhai coffee and orders through the door.', art: null },
-  ],
-  story: [
-    { tag: 'Grown', title: 'In the hills of Gulmi, Syangja and Kaski', text: 'Nepali farmers pick cherries by hand on mid-hill terraces. We name the district on the bag.', art: null },
-    { tag: 'Roasted', title: 'By Sevya Coffee Processing', text: 'Roasted weekly in Nepal, planned from what you actually order, so beans stay fresh.', art: null },
-    { tag: 'Poured', title: 'At a counter near you', text: 'A pickup counter in a cafe, a hospital gate or a bus stand. Small team, one promise: 90 seconds.', art: null },
-  ],
   partners: {
     headline: 'Run Sadhai at your cafe',
     intro: 'Keep your counter and your team. We bring the app, the beans, the standard recipes and the customers. You keep a share of every sale and see every order and statement as it happens.',
@@ -67,18 +50,19 @@ export async function loadSite(section) {
   const merged = {};
   for (const k of Object.keys(SITE_DEFAULTS)) {
     const d = SITE_DEFAULTS[k], v = saved[k]?.value;
-    merged[k] = Array.isArray(d) ? (Array.isArray(v) ? d.map((x, i) => ({ ...x, ...(v[i] || {}) })) : d) : typeof d === 'object' ? { ...d, ...(v || {}), layers: d.layers ? { ...d.layers, ...(v?.layers || {}) } : undefined } : (v ?? d);
-    if (merged[k] && merged[k].layers === undefined) delete merged[k].layers;
+    // Only keys that exist today are kept, so old saved values (hills, timer ring, steps) cannot leak back in.
+    merged[k] = Array.isArray(d) ? (Array.isArray(v) ? d.map((x, i) => ({ ...x, ...(v[i] || {}) })) : d)
+      : typeof d === 'object' ? Object.fromEntries(Object.keys(d).map((key) => [key, v && key in v ? v[key] : d[key]])) : (v ?? d);
   }
   // swap media ids for urls
   const ids = new Set();
-  const walk = (o) => { if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) { if ((k === 'art' || k === 'timer_cup' || k === 'portrait' || ['sun', 'far', 'mid', 'near'].includes(k)) && typeof v === 'string') ids.add(v); else walk(v); } };
+  const walk = (o) => { if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) { if ((k === 'portrait') && typeof v === 'string') ids.add(v); else walk(v); } };
   walk(merged);
   const found = ids.size ? (await query('SELECT id, mime FROM media WHERE id = ANY($1::uuid[])', [[...ids]])).rows : [];
   const byId = new Map(found.map((m) => [m.id, m]));
   const resolve = (o) => {
     if (Array.isArray(o)) return o.map(resolve);
-    if (o && typeof o === 'object') return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, ((k === 'art' || k === 'timer_cup' || k === 'portrait' || ['sun', 'far', 'mid', 'near'].includes(k)) && (typeof v === 'string' || v === null)) ? (v && byId.has(v) ? { id: v, url: mediaUrl(v, byId.get(v).mime) } : null) : resolve(v)]));
+    if (o && typeof o === 'object') return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, ((k === 'portrait') && (typeof v === 'string' || v === null)) ? (v && byId.has(v) ? { id: v, url: mediaUrl(v, byId.get(v).mime) } : null) : resolve(v)]));
     return o;
   };
   const out = resolve(merged);

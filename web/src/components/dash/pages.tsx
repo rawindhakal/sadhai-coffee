@@ -5,12 +5,11 @@ import { AuditTab, DropsTab, FinanceTab, GrowthTab, PassesReportTab, SettingsTab
 import { MenuStudio } from '../menu-studio';
 import { StationWorkspace } from '../station';
 import { CostingSection } from '../recipes';
-import { PushSection } from '../push';
 import { CountPanel, IngredientsTab, InventoryHub, TransfersPanel, VariancePanel } from '../inventory';
 import { CustomersSection, LiveSection, OrdersSection, OverviewSection } from './sections';
 import { DashShell, Section, useDash } from './shell';
 import { useAuth, useRequireRole } from '@/lib/auth';
-import { EnquiriesSection, IntegrationsPanel, SettingsHub, SiteEditor } from '../studio';
+import { EnquiriesSection, SettingsHub, SiteEditor } from '../studio';
 import { MyShift, PeopleSection } from '../people';
 
 const P = ({ children }: { children: React.ReactNode }) => <div className="panel">{children}</div>;
@@ -37,7 +36,6 @@ function Body({ section, role }: { section: string; role: 'owner' | 'manager' | 
     case 'reviews': return <P><ReviewsTab stationId={sid} /></P>;
     case 'offers': return <P><OffersTab stations={stations} isOwner={isOwner} /></P>;
     case 'welcome_referrals': return <P><WelcomeReferralsTab isOwner={isOwner} /></P>;
-    case 'push': return <PushSection isOwner={isOwner} />;
     case 'promos': return <P><PromosTab stations={stations} isOwner={isOwner} /></P>;
     case 'drops': return <P><DropsTab /></P>;
     case 'stations': return <P><StationsTab /></P>;
@@ -50,7 +48,6 @@ function Body({ section, role }: { section: string; role: 'owner' | 'manager' | 
     case 'passes_report': return <P><PassesReportTab /></P>;
     case 'cash': return <P><CashTab stationId={sid} /></P>;
     case 'statement': return <PartnerStatement />;
-    case 'gateways': return <IntegrationsPanel />;
     case 'rules': return <SettingsHub />;
     case 'audit': return <P><AuditTab /></P>;
     default: return null;
@@ -63,16 +60,16 @@ const OWNER: Section[] = [
   { key: 'orders', label: 'Orders', icon: 'receipt', group: 'Operate', keywords: 'refund history' }, { key: 'run', label: 'Run a station', icon: 'cup', group: 'Operate', keywords: 'queue pos counter' },
   { key: 'menu', label: 'Menu and prices', icon: 'list', group: 'Operate', keywords: 'products items' }, { key: 'reviews', label: 'Ratings', icon: 'star', group: 'Operate' },
   { key: 'inventory', label: 'Inventory', icon: 'box', group: 'Costing and stock', keywords: 'stock central purchase transfer warehouse count loss' }, { key: 'recipes', label: 'Recipes and costing', icon: 'coin', group: 'Costing and stock', keywords: 'recipe cost margin food cost wastage' }, { key: 'stock', label: 'Station stock', icon: 'store', group: 'Costing and stock', keywords: 'restock station inventory' },
-  { key: 'offers', label: 'Offer of the day', icon: 'tag', group: 'Marketing' }, { key: 'welcome_referrals', label: 'Welcome & referrals', icon: 'gift', group: 'Marketing', keywords: 'welcome first cup ladder referral friend coupon anti breach' }, { key: 'promos', label: 'Promo codes', icon: 'ticket', group: 'Marketing' }, { key: 'push', label: 'Push notifications', icon: 'bell', group: 'Marketing', keywords: 'message notification send campaign' }, { key: 'drops', label: 'Limited drops', icon: 'flame', group: 'Marketing' },
+  { key: 'offers', label: 'Offer of the day', icon: 'tag', group: 'Marketing' }, { key: 'welcome_referrals', label: 'Welcome & referrals', icon: 'gift', group: 'Marketing', keywords: 'welcome first cup ladder referral friend coupon anti breach' }, { key: 'promos', label: 'Promo codes', icon: 'ticket', group: 'Marketing' }, { key: 'drops', label: 'Limited drops', icon: 'flame', group: 'Marketing' },
   { key: 'stations', label: 'Stations', icon: 'store', group: 'Network', keywords: 'partner cafe' }, { key: 'team', label: 'Users & Managers', icon: 'user', group: 'Network', keywords: 'users managers staff team accounts roles' }, { key: 'staff', label: 'Staff and pay', icon: 'users', group: 'Network', keywords: 'roster shift duty auto assign payroll salary attendance hourly leave' }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Network', keywords: 'scorecard partner statement' },
   { key: 'finance', label: 'Finance', icon: 'wallet', group: 'Money', keywords: 'reconcile settlements' }, { key: 'passes_report', label: 'Passes Report', icon: 'ticket', group: 'Money', keywords: 'passes wallet liability breakage redemptions' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Money' },
-  { key: 'gateways', label: 'SMS and app', icon: 'bell', group: 'Admin', keywords: 'nestsms sms otp push firebase app company' }, { key: 'rules', label: 'Settings and keys', icon: 'cog', group: 'Admin', keywords: 'settings pass price api key firebase push integration nestsms' }, { key: 'site', label: 'Home page and pictures', icon: 'image', group: 'Admin', keywords: 'hero images website partners investors content' }, { key: 'enquiries', label: 'Enquiries', icon: 'mail', group: 'Admin', keywords: 'partner investor leads' }, { key: 'audit', label: 'Audit log', icon: 'clock', group: 'Admin' },
+  { key: 'rules', label: 'Settings', icon: 'cog', group: 'Admin', keywords: 'settings prices pass rules company app version backup' }, { key: 'site', label: 'Home page and pictures', icon: 'image', group: 'Admin', keywords: 'hero images website partners investors content' }, { key: 'enquiries', label: 'Enquiries', icon: 'mail', group: 'Admin', keywords: 'partner investor leads' }, { key: 'audit', label: 'Audit log', icon: 'clock', group: 'Admin' },
 ];
 const MANAGER: Section[] = [
   { key: 'overview', label: 'Overview', icon: 'grid', group: 'Insight' }, { key: 'live', label: 'Live', icon: 'pulse', group: 'Insight' }, { key: 'customers', label: 'Customers', icon: 'users', group: 'Insight' },
   { key: 'orders', label: 'Orders', icon: 'receipt', group: 'Operate' }, { key: 'run', label: 'Run station', icon: 'cup', group: 'Operate' }, { key: 'stock', label: 'Stock and deliveries', icon: 'box', group: 'Operate' },
   { key: 'recipes', label: 'Recipes and costing', icon: 'coin', group: 'Operate' }, { key: 'menu', label: 'Menu', icon: 'list', group: 'Operate' }, { key: 'reviews', label: 'Ratings', icon: 'star', group: 'Operate' },
-  { key: 'offers', label: 'Offer of the day', icon: 'tag', group: 'Marketing' }, { key: 'welcome_referrals', label: 'Welcome & referrals', icon: 'gift', group: 'Marketing' }, { key: 'promos', label: 'Promo codes', icon: 'ticket', group: 'Marketing' }, { key: 'push', label: 'Push notifications', icon: 'bell', group: 'Marketing' },
+  { key: 'offers', label: 'Offer of the day', icon: 'tag', group: 'Marketing' }, { key: 'welcome_referrals', label: 'Welcome & referrals', icon: 'gift', group: 'Marketing' }, { key: 'promos', label: 'Promo codes', icon: 'ticket', group: 'Marketing' }, 
   { key: 'staff', label: 'Staff and roster', icon: 'users', group: 'Team', keywords: 'roster shift duty auto assign attendance leave' }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Team' }, { key: 'passes_report', label: 'Passes Report', icon: 'ticket', group: 'Team', keywords: 'passes redemptions' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Team' },
 ];
 

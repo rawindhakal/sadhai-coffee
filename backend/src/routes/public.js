@@ -3,9 +3,7 @@ import { query } from '../lib/db.js';
 import { wrap, notFound } from '../lib/http.js';
 import { stationMenu, bestSellers, liveOffers, pickupWindow } from '../lib/orders.js';
 import { getSettings } from '../lib/settings.js';
-import { vapidPublicKey } from '../lib/push.js';
 import { rt } from '../lib/runtime.js';
-import { smsStatus } from '../lib/sms.js';
 import { loadSite } from '../lib/site.js';
 import rateLimit from 'express-rate-limit';
 import crypto from 'node:crypto';
@@ -28,7 +26,6 @@ pub.get('/config', wrap(async (_req, res) => {
     pricing: { hot: s.price_hot, flavored: s.price_flavored, iced: s.price_iced },
     partner_share_pct: s.partner_share_pct,
     payment_methods: ['cash', 'pass'], // no online payment: cash at pickup, or a 10-cup pass
-    sms: smsStatus(),
     referral: {
       enabled: !!Number(s.referral_enabled),
       cap_month: s.referral_cap_month,
@@ -36,7 +33,6 @@ pub.get('/config', wrap(async (_req, res) => {
       min_spend: s.referral_min_spend,
       cup_max: s.referral_cup_max,
       reward_pct: s.referral_reward_pct,
-      require_verified_phone: !!Number(s.offer_require_verified_phone),
     },
     welcome: {
       enabled: !!Number(s.welcome_enabled),
@@ -51,7 +47,6 @@ pub.get('/config', wrap(async (_req, res) => {
       ladder_min_spend: s.ladder_min_spend,
     },
     pass_use_by_days: s.pass_use_by_days, pass_valid_days: s.pass_valid_days,
-    vapid_public_key: vapidPublicKey(),
     site: { company: rt('company_name'), address: rt('company_address'), support_email: rt('support_email'), privacy_email: rt('privacy_email') },
   });
 }));
@@ -75,19 +70,7 @@ pub.get('/stations', wrap(async (req, res) => {
   res.json(out);
 }));
 
-pub.get('/stations/:id/menu', wrap(async (req, res) => {
-  const { rows } = await query('SELECT id, name FROM stations WHERE id=$1 AND active', [req.params.id]);
-  if (!rows[0]) throw notFound('Station not found');
-  res.json({ station: rows[0], categories: await stationMenu(req.params.id) });
-}));
 
-pub.get('/drops/active', wrap(async (_req, res) => {
-  const { rows } = await query(
-    `SELECT d.*, p.name AS product_name FROM drops d JOIN products p ON p.id=d.product_id
-      WHERE d.active AND d.ends_at >= now() ORDER BY d.starts_at`,
-  );
-  res.json(rows.map((d) => ({ ...d, remaining: Math.max(0, d.cap - d.sold), live: new Date(d.starts_at) <= new Date() && d.sold < d.cap })));
-}));
 
 // Centralized offers: returns active daily offers, limited drops, pass info, and welcome/referral rules
 pub.get('/offers', wrap(async (req, res) => {

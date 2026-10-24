@@ -8,7 +8,7 @@ import 'screens/staff.dart';
 import 'state.dart';
 import 'theme.dart';
 import 'version.dart';
-import 'push.dart';
+import 'messenger.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 Future<void> main() async {
@@ -35,7 +35,6 @@ class _SadhaiAppState extends State<SadhaiApp> {
 
   void _changed() {
     setState(() => _signedIn = Api.instance.signedIn);
-    if (Api.instance.signedIn && Api.instance.user!['role'] == 'customer') PushService.resume();
   }
 
   @override

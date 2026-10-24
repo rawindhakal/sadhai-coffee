@@ -22,7 +22,6 @@ Google Play and App Store requirements are tracked in `store/COMPLIANCE.md`: in-
 
 - **Passes**: each pass has a unique code; buy several and they are used one after another (a big order spills into the next pass). See the pass wallet in Offers.
 - **Kiosk**: open `/kiosk` on a counter tablet, sign in once with the station account, and customers order for themselves (name and phone collected with consent; pay at the counter, by pass code, or online). Tap the logo five times and enter the staff password to leave kiosk mode.
-- **Push notifications**: automatic order, pass, win-back, offer and drop messages, plus a campaign console under Marketing. Runs in test mode until Firebase and web keys are set; see `store/PUSH.md`.
 - **Recipes, costing and central inventory**: ingredient pack prices and wastage drive recipe cost and margin; everything is bought centrally and sent to stations with receiving, shortage tracking and shelf counts. See `docs/INVENTORY-AND-COSTING.md`.
 
 ## Who uses what
@@ -57,7 +56,7 @@ npm install && npm run dev      # http://localhost:3000
 cd ../mobile
 flutter pub get
 flutter run                     # iOS simulator -> localhost:4747, Android emulator -> 10.0.2.2:4747
-# real device or deployed API: flutter run --dart-define=API_URL=https://api.sadhaicoffee.com
+# real device or deployed API: flutter run --dart-define=API_URL=https://sadhaicoffee.com/api
 ```
 
 Or with Docker: `docker compose up --build`, then `docker compose exec api npm run setup`.
@@ -98,7 +97,6 @@ Demo data: 4 stations, 13 menu items with Nepali names, ~15,000 orders over 60 d
 - **10-cup pass, Rs 1,200, 30 days**: pass covers drinks only; one cup per item; cancelled orders return the cup.
 - **Give a cup. Get a cup.**: both sides rewarded after the friend's first *completed* order; capped at 3 a month per referrer.
 - **Limited drop**: capped cups sold atomically (`sold + qty <= cap`), shows "n left", sells out cleanly.
-- **One push a day**: owner broadcasts skip anyone already sent a promo in the last 24 hours.
 - **Honest prices**: every price is all-in; no tax or service line anywhere.
 - **Offer payback and spend**: Growth tab shows spend per offer, cost per acquired customer, repeat rate within 90 days, app share. Promo codes carry use caps and end dates.
 - **Anti-fabrication guardrails**: pass register with a related-party flag (reported, target zero), passes sold against cups redeemed, cups still owed, and daily cash counts per counter.
@@ -116,9 +114,9 @@ Sadhai takes **no online payments**. There is no payment gateway anywhere in the
 
 ## Things to do before launch
 
-- **Domain `sadhaicoffee.com`:** web app and legal pages at `https://sadhaicoffee.com` (also `www`), API at `https://api.sadhaicoffee.com`. Set `PUBLIC_WEB_URL`, `PUBLIC_API_URL` and `CORS_ORIGINS` to match (see `backend/.env.example`), build the web app with `NEXT_PUBLIC_API_URL=https://api.sadhaicoffee.com`, and build the mobile apps with `--dart-define=API_URL=https://api.sadhaicoffee.com --dart-define=WEB_URL=https://sadhaicoffee.com`. The support and privacy addresses default to `support@sadhaicoffee.com` and `privacy@sadhaicoffee.com`; create those mailboxes. The same values can be saved under Settings and keys. Privacy policy URL for the stores: `https://sadhaicoffee.com/privacy`.
+- **Domain `sadhaicoffee.com`:** web app and legal pages at `https://sadhaicoffee.com` (also `www`), API at `https://sadhaicoffee.com/api` (nginx forwards `/api/` to the API on port 4747). Set `PUBLIC_WEB_URL`, `PUBLIC_API_URL` and `CORS_ORIGINS` to match (see `backend/.env.example`), build the web app with `NEXT_PUBLIC_API_URL=https://sadhaicoffee.com/api`, and build the mobile apps with `--dart-define=API_URL=https://sadhaicoffee.com/api --dart-define=WEB_URL=https://sadhaicoffee.com`. The support and privacy addresses default to `support@sadhaicoffee.com` and `privacy@sadhaicoffee.com`; create those mailboxes. The same values can be saved under Settings and keys. Privacy policy URL for the stores: `https://sadhaicoffee.com/privacy`.
 - Set a strong `JWT_SECRET`, `IGNORE_STATION_HOURS=0`, HTTPS, and tight `CORS_ORIGINS`.
-- Sign-up uses phone and password. Add SMS OTP (Sparrow SMS or Aakash SMS) in `routes/auth.js`, and push delivery (FCM) in `lib/notify.js`; hooks are marked.
+- Sign-up uses a phone number and password. There is no SMS or push notification: order updates show live in the app and in the inbox.
 - The SSE hub is in memory. For more than one API instance, replace `lib/hub.js` with Postgres `LISTEN/NOTIFY` or Redis.
 - Have a native copywriter check the Nepali strings, as the brand notes ask.
 - Flutter platform folders were generated for iOS and Android; add your app signing, icon (`brand/app-icon.svg`) and deep links.

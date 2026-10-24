@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../push.dart';
 import '../version.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -245,87 +244,12 @@ class AccountScreen extends StatefulWidget {
 }
 
 class _AccountScreenState extends State<AccountScreen> {
-  bool _otpSent = false, _otpBusy = false, _otpAllowed = true;
-  final _otpCtl = TextEditingController();
-  String? _devOtp;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkSmsCfg();
-  }
-
-  Future<void> _checkSmsCfg() async {
-    try {
-      final cfg = await Api.instance.request('GET', '/config', auth: false) as Map;
-      final sms = cfg['sms'] as Map?;
-      if (sms != null && (sms['enabled'] == false || sms['otp_enabled'] == false)) {
-        if (mounted) setState(() => _otpAllowed = false);
-      }
-    } catch (_) {}
-  }
-
-  @override
-  void dispose() { _otpCtl.dispose(); super.dispose(); }
-
-  Future<void> _sendOtp() async {
-    setState(() => _otpBusy = true);
-    try {
-      final r = await Api.instance.post('/me/verify-phone/send');
-      if (!mounted) return;
-      setState(() { _otpSent = true; _devOtp = r['dev_code'] as String?; });
-      toast(context, 'Verification code sent via SMS');
-    } on ApiException catch (e) {
-      if (mounted) toast(context, e.message, bad: true);
-    } finally {
-      if (mounted) setState(() => _otpBusy = false);
-    }
-  }
-
-  Future<void> _confirmOtp() async {
-    setState(() => _otpBusy = true);
-    try {
-      final r = await Api.instance.post('/me/verify-phone/confirm', {'code': _otpCtl.text.trim()});
-      Api.instance.user = {...Api.instance.user!, ...Map<String, dynamic>.from(r as Map)};
-      if (!mounted) return;
-      setState(() { _otpSent = false; _devOtp = null; _otpCtl.clear(); });
-      toast(context, 'Phone number verified');
-    } on ApiException catch (e) {
-      if (mounted) toast(context, e.message, bad: true);
-    } finally {
-      if (mounted) setState(() => _otpBusy = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final u = Api.instance.user!;
-    final verified = u['phone_verified'] == true;
     return ListView(padding: const EdgeInsets.all(20), children: [
       Text('Hello, ${(u['name'] as String).split(' ').first}', style: display(30)),
-      Row(children: [
-        Text(u['phone'], style: const TextStyle(color: Brand.inkMuted)),
-        const SizedBox(width: 8),
-        Chip2(verified ? 'Verified' : 'Unverified', bg: verified ? Brand.hill : Brand.surfaceSunk, fg: verified ? Brand.onCherry : Brand.ink),
-      ]),
-      if (!verified && _otpAllowed) Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Verify your phone number', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          const Text('Verify via SMS OTP to unlock welcome offers and referral rewards.', style: TextStyle(color: Brand.inkMuted, fontSize: 13)),
-          if (_devOtp != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text('Sandbox code: $_devOtp', style: const TextStyle(color: Brand.cherry, fontWeight: FontWeight.w700, fontSize: 13))),
-          const SizedBox(height: 10),
-          if (!_otpSent)
-            OutlinedButton(onPressed: _otpBusy ? null : _sendOtp, child: Text(_otpBusy ? 'Sending…' : 'Send SMS code'))
-          else
-            Row(children: [
-              Expanded(child: TextField(controller: _otpCtl, keyboardType: TextInputType.number, maxLength: 6, decoration: const InputDecoration(hintText: '6-digit code', counterText: '', isDense: true))),
-              const SizedBox(width: 8),
-              FilledButton(onPressed: _otpBusy ? null : _confirmOtp, child: const Text('Verify')),
-            ]),
-        ]))),
-      ),
+      Text(u['phone'], style: const TextStyle(color: Brand.inkMuted)),
       const SizedBox(height: 16),
       for (final t in [
         ('Coupons', Icons.sell_outlined, const CouponsScreen()),
@@ -334,7 +258,7 @@ class _AccountScreenState extends State<AccountScreen> {
         ('Profile and password', Icons.manage_accounts_outlined, ProfileScreen(onSignOut: widget.onSignOut)),
       ]) Padding(padding: const EdgeInsets.only(bottom: 10), child: Card(child: ListTile(leading: Icon(t.$2, color: Brand.cherry), title: Text(t.$1, style: const TextStyle(fontWeight: FontWeight.w600)), trailing: const Icon(Icons.chevron_right), onTap: () async { await Navigator.push(context, MaterialPageRoute(builder: (_) => t.$3)); if (mounted) setState(() {}); }))),
       const SizedBox(height: 8),
-      OutlinedButton(onPressed: () async { await PushService.disable(remember: false); await Api.instance.logout(); widget.onSignOut(); }, child: const Text('Sign out')),
+      OutlinedButton(onPressed: () async { await Api.instance.logout(); widget.onSignOut(); }, child: const Text('Sign out')),
     ]);
   }
 }
@@ -433,7 +357,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ));
     if (ok != true || !mounted) return;
     try {
-      await PushService.disable(remember: false);
       await Api.instance.request('DELETE', '/me', body: {'password': pw.text});
       await Api.instance.logout();
       widget.onSignOut();
@@ -466,7 +389,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           FilledButton(onPressed: _save, child: const Text('Save')),
           const SizedBox(height: 24),
           const Divider(),
-          const NotificationSettings(),
           const SizedBox(height: 8),
           const Divider(),
           Text('Your data', style: display(18)),
@@ -492,51 +414,3 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
 
 /// Order updates on this phone (system permission) and the choice to hear about offers.
-class NotificationSettings extends StatefulWidget {
-  const NotificationSettings({super.key});
-  @override
-  State<NotificationSettings> createState() => _NotificationSettingsState();
-}
-
-class _NotificationSettingsState extends State<NotificationSettings> {
-  bool _on = false, _offers = true, _busy = false;
-  @override
-  void initState() {
-    super.initState();
-    PushService.wantsPush.then((v) { if (mounted) setState(() => _on = v); });
-    _offers = Api.instance.user?['notif_offers'] != false;
-  }
-  @override
-  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const SizedBox(height: 12),
-        Text('Notifications', style: display(18)),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero, activeTrackColor: Brand.hill, title: const Text('Tell me when my coffee is ready'),
-          subtitle: Text(PushService.configured ? 'Order and pass messages on this phone' : 'Not set up in this build. Order updates still arrive while the app is open.', style: const TextStyle(fontSize: 13)),
-          value: _on, onChanged: _busy || !PushService.configured ? null : (v) async {
-            setState(() => _busy = true);
-            var ok = false;
-            if (v) { ok = await PushService.enable(); } else { await PushService.disable(); }
-            if (!mounted) return;
-            setState(() { _on = v && ok; _busy = false; });
-            if (v && !ok) {
-              if (context.mounted) toast(context, 'Notifications are blocked. Allow them in your phone settings to turn this on.', bad: true);
-            }
-          },
-        ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero, activeTrackColor: Brand.hill, title: const Text('Offers and news'), subtitle: const Text('One a day at most. Order messages are always sent.', style: TextStyle(fontSize: 13)),
-          value: _offers, onChanged: (v) async {
-            setState(() => _offers = v);
-            try {
-              final u = await Api.instance.patch('/me', {'notif_offers': v});
-              Api.instance.user = {...Api.instance.user!, ...Map<String, dynamic>.from(u)};
-            } on ApiException catch (e) {
-              if (!mounted) return;
-              setState(() => _offers = !v);
-              if (context.mounted) toast(context, e.message, bad: true);
-            }
-          },
-        ),
-      ]);
-}
