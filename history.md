@@ -18,6 +18,20 @@ The running log of how Sadhai Coffee was built and what changed. Newest first. E
 
 _Nothing yet._
 
+## v1.9.0 (2026-10-24)
+
+### Added
+- **eSewa (ePay v2) and Fonepay (web payment), built fresh, on every platform**: website cart, the mobile app, the self-order kiosk (a QR the guest scans with their phone), the counter (the barista shows a QR) and 10-cup passes bought online. Each gateway starts switched off and is turned on, set to Sandbox or Live, and tested with a Rs 10 payment under **Settings, Payments**.
+- An online order waits as "awaiting payment" (nothing reserved, the station does not see it), is placed only when the gateway's **signed answer** is verified (and, for eSewa, eSewa's status API agrees), and is cancelled after 15 minutes if nobody pays. The customer can cancel while it waits. Refunds for online orders are listed for the owner to pay back and mark done.
+- Owner list of online payments with references, late payments and refunds due, and an alert for refunds to pay back.
+
+### Changed
+- Sandbox payments are never offered to customers on a real website (only on a local or test site), so nobody can pay with a public test account. Live needs your own merchant code and key.
+- A placed order still cannot be cancelled by the customer; an order still waiting for its online payment can.
+
+### Removed
+- The GitHub repository link on the changelog page.
+
 ## v1.8.0 (2026-10-24)
 
 ### Removed

@@ -21,9 +21,23 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
-    version: '1.8.0',
+    version: '1.9.0',
     date: '24 October 2026',
     badge: 'Latest',
+    highlight: 'Pay with eSewa or Fonepay',
+    changes: [
+      {
+        category: 'Added',
+        items: [
+          { title: 'eSewa and Fonepay', desc: 'Pay online on the website, in the app, at the kiosk by scanning a QR, or at the counter. You can also buy a 10-cup pass online. Cash and passes still work.' },
+          { title: 'Safer online orders', desc: 'An order waits for the payment, goes to the barista only when it is confirmed, and is cancelled if nobody pays within 15 minutes.' },
+        ],
+      },
+    ],
+  },
+  {
+    version: '1.8.0',
+    date: '24 October 2026',
     highlight: 'Simpler settings, a home page you can edit, and one rule for sales',
     changes: [
       {
@@ -416,15 +430,6 @@ export default function ChangelogPage() {
               All notable updates, new features, and improvements across the Sadhai platform.
             </p>
           </div>
-          <a
-            href="https://github.com/rawindhakal/sadhai-coffee"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn ghost sm"
-            style={{ marginTop: 8 }}
-          >
-            GitHub Repository ↗
-          </a>
         </div>
 
         <div className="col" style={{ gap: 40 }}>

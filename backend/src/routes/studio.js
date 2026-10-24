@@ -10,6 +10,7 @@ import { audit } from '../lib/notify.js';
 import { DEFS, describeRuntime, setRuntime, rt } from '../lib/runtime.js';
 import { SITE_DEFAULTS, loadSite, mediaUrl } from '../lib/site.js';
 import { getSettings } from '../lib/settings.js';
+import { GATEWAYS, gateway, gatewayStatus, initiate } from '../lib/payments.js';
 import { todayNpt, addDays } from '../lib/roster.js';
 
 /** Owner-only: integration keys, pictures and website content. */
@@ -30,6 +31,34 @@ studio.put('/integrations', wrap(async (req, res) => {
   }
   if (changed.length) await audit(req.user.id, 'integrations.update', 'settings', null, { keys: changed }); // key names only, never values
   res.json({ ok: true, changed, settings: await describeRuntime() });
+}));
+
+/* ---------------- online payments ---------------- */
+studio.get('/payments', wrap(async (_req, res) => {
+  const { rows } = await query(
+    `SELECT p.id, p.provider, p.purpose, p.amount, p.status, p.provider_ref, p.created_at, p.settled_at, o.pickup_code, s.name AS station,
+            COALESCE((p.raw->>'refund_pending_manual')::boolean, false) AS refund_due, COALESCE((p.raw->>'late_payment')::boolean, false) AS late
+       FROM payments p LEFT JOIN orders o ON o.id=p.order_id LEFT JOIN stations s ON s.id=COALESCE(o.station_id, p.station_id)
+      WHERE p.provider IN ('esewa','fonepay') ORDER BY p.created_at DESC LIMIT 100`);
+  res.json({ gateways: gatewayStatus(), payments: rows });
+}));
+// A Rs 10 test payment through the real gateway page, so the owner can check the keys without placing an order.
+studio.post('/payments/test', wrap(async (req, res) => {
+  const { provider } = z.object({ provider: z.enum(GATEWAYS) }).parse(req.body);
+  const missing = gateway(provider).missing();
+  if (missing.length) throw bad(`Save these first: ${missing.map((k) => DEFS[k]?.label || k).join(', ')}.`);
+  const { rows } = await query(`INSERT INTO payments(user_id, purpose, provider, amount, status) VALUES ($1,'test',$2,10,'pending') RETURNING *`, [req.user.id, provider]);
+  const init = initiate(provider, rows[0]);
+  await query('UPDATE payments SET provider_ref=$2 WHERE id=$1', [rows[0].id, init.reference]);
+  await audit(req.user.id, 'payments.test', 'payment', rows[0].id, { provider });
+  res.status(201).json(init);
+}));
+// The owner has paid a customer back outside the system (from the eSewa or Fonepay merchant account).
+studio.post('/payments/:id/refund-done', wrap(async (req, res) => {
+  const r = await query(`UPDATE payments SET raw = (raw - 'refund_pending_manual') || '{"refund_done": true}'::jsonb WHERE id=$1 AND status='refunded' RETURNING id`, [req.params.id]);
+  if (!r.rowCount) throw notFound('No refund waiting for that payment');
+  await audit(req.user.id, 'payments.refund_done', 'payment', req.params.id);
+  res.json({ ok: true });
 }));
 
 /* ---------------- pictures ---------------- */
@@ -120,6 +149,7 @@ studio.get('/setup', wrap(async (req, res) => {
     { key: 'ingredients', title: 'Enter ingredient prices and suppliers', done: ing.unpriced === 0 && ing.no_supplier === 0, detail: ing.unpriced || ing.no_supplier ? `${ing.unpriced} without a price, ${ing.no_supplier} without a supplier` : 'All priced', section: 'inventory' },
     { key: 'team', title: 'Add your team and their hourly rates', done: team.n > 0 && team.unpaid === 0, detail: team.n ? (team.unpaid ? `${team.unpaid} of ${team.n} have no hourly rate` : `${team.n} staff with rates`) : 'No staff yet', section: 'staff' },
     { key: 'roster', title: 'Fill and publish this week’s roster', done: ros.n > 0 && ros.open === 0 && ros.unpublished === 0, detail: ros.n ? `${ros.open} open slots, ${ros.unpublished} not published` : 'No shifts planned for the next 7 days', section: 'staff' },
+    { key: 'payments', title: 'Turn on eSewa or Fonepay (optional)', done: Object.values(gatewayStatus()).some((g) => g.enabled && g.mode === 'live' && g.ready), detail: Object.values(gatewayStatus()).some((g) => g.enabled) ? 'A gateway is switched on' : 'Customers can pay cash or with a pass. Add eSewa or Fonepay in Settings, Payments.', section: 'rules' },
     { key: 'company', title: 'Add your company details for the legal pages', done: companyDone, detail: companyDone ? 'Saved' : 'Still showing the placeholder name and email', section: 'rules' },
     { key: 'site', title: 'Make the home page yours', done: site.n > 0, detail: site.n ? 'Customised' : 'Using the built-in hero artwork', section: 'site' },
   ];

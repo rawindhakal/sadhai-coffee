@@ -733,21 +733,8 @@ ALTER TABLE claimed_phones ADD COLUMN IF NOT EXISTS welcome_claimed boolean NOT 
 ALTER TABLE claimed_phones ADD COLUMN IF NOT EXISTS referral_claimed boolean NOT NULL DEFAULT false;
 ALTER TABLE claimed_phones ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
--- ---- v1.7: no online payments ----
--- Orders are paid with cash or a pass. Older rows may still say esewa, khalti or fonepay, and 'awaiting_payment'; they stay readable in reports.
--- Online payments are no longer accepted by the API, and the settlements table is kept only for old history.
-
--- Tidy any order or pass that was still waiting for an online payment when online payments were removed. Safe to run again.
-UPDATE coupons SET status = CASE WHEN expires_at > now() THEN 'active' ELSE 'expired' END, used_order_id = NULL
- WHERE used_order_id IN (SELECT id FROM orders WHERE status = 'awaiting_payment');
-UPDATE passes p SET used_cups = GREATEST(0, p.used_cups - u.cups),
-       status = CASE WHEN p.status = 'used' THEN 'active' ELSE p.status END
-  FROM (SELECT pass_id, sum(cups)::int AS cups FROM order_pass_uses WHERE order_id IN (SELECT id FROM orders WHERE status = 'awaiting_payment') GROUP BY pass_id) u
- WHERE u.pass_id = p.id;
-UPDATE payments SET status = 'failed' WHERE status = 'pending' AND provider NOT IN ('cash', 'pass');
-UPDATE orders SET status = 'cancelled', payment_status = 'unpaid', cancel_reason = 'Online payment is no longer available' WHERE status = 'awaiting_payment';
-UPDATE passes SET status = 'expired' WHERE status = 'pending';
-DELETE FROM app_secrets WHERE key LIKE 'esewa%' OR key LIKE 'khalti%' OR key LIKE 'fonepay%' OR key IN ('payment_mode', 'cash_enabled');
+-- ---- v1.7: online payments were switched off for a while ----
+-- (Its one-off clean-up of orders waiting for payment has been applied and is not repeated: such orders are normal again from v1.9.)
 
 -- ---- v1.8: no SMS and no push notifications ----
 -- Phone verification, SMS and push notifications were removed. Drop their tables and columns (safe to run again).
@@ -759,3 +746,9 @@ DELETE FROM settings WHERE key IN ('offer_require_verified_phone', 'promo_push_d
 -- The home page no longer has a hills scene, steps, story or people cards; drop what was saved for them.
 DELETE FROM site_content WHERE key IN ('steps', 'story', 'people');
 UPDATE site_content SET value = value - 'layers' - 'timer_cup' - 'show_timer' - 'parallax' - 'note' WHERE key = 'hero';
+
+-- ---- v1.9: eSewa and Fonepay online payments ----
+-- 'test' payments are the owner's Rs 10 checks of a gateway; they are not sales.
+ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_purpose_check;
+ALTER TABLE payments ADD CONSTRAINT payments_purpose_check CHECK (purpose IN ('order','pass','test'));
+CREATE INDEX IF NOT EXISTS payments_ref_idx ON payments(provider_ref) WHERE provider_ref IS NOT NULL;

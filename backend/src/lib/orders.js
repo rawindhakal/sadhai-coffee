@@ -3,7 +3,8 @@ import { bad, conflict, forbidden, notFound } from './http.js';
 import { publish } from './hub.js';
 import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
-import { PAYMENT_METHODS } from './payments.js';
+import { PAYMENT_METHODS, isGateway, offered, initiate } from './payments.js';
+import * as esewaGw from './gateways/esewa.js';
 import { rtBool } from './runtime.js';
 import crypto from 'node:crypto';
 import { stockNeeds, recipeBreakdown } from './costing.js';
@@ -418,8 +419,11 @@ export async function createOrder(user, input) {
   const channel = input.channel || 'app';
   const result = await tx(async (db) => {
     const q = await quote(db, user, { ...input, channel });
-    const method = q.total === 0 && q.pass_id ? 'pass' : input.payment_method;
-    if (!PAYMENT_METHODS.includes(method)) throw bad('Pay with cash at pickup or with your 10-cup pass');
+    // A free order (pass or coupon covers everything) needs no payment method at all.
+    const method = q.total === 0 ? (q.pass_id ? 'pass' : 'cash') : input.payment_method;
+    if (!PAYMENT_METHODS.includes(method)) throw bad('Choose how you will pay');
+    const online = isGateway(method) && q.total > 0;
+    if (online && !offered(method)) throw bad(`${method === 'esewa' ? 'eSewa' : 'Fonepay'} is not available right now. Pay with cash instead.`);
 
     // Prevent unpaid cash order spam that locks stock or coupons
     if (method === 'cash' && channel !== 'counter' && user?.id) {
@@ -433,12 +437,12 @@ export async function createOrder(user, input) {
     }
 
     const code = await nextPickupCode(db, q.station);
-    const paidNow = q.total === 0 || (channel === 'counter' && input.paid_now !== false);
+    const paidNow = q.total === 0 || (!online && channel === 'counter' && input.paid_now !== false);
     const { rows } = await db.query(
       `INSERT INTO orders(station_id, user_id, customer_name, pickup_code, channel, status, subtotal, discount, total, discount_label,
          payment_method, payment_status, coupon_id, promo_code_id, pass_id, drop_id, note, scheduled_for, customer_phone, handover_code)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
-      [q.station.id, user?.id || null, input.customer_name || null, code, channel, 'placed',
+      [q.station.id, user?.id || null, input.customer_name || null, code, channel, online ? 'awaiting_payment' : 'placed',
         q.subtotal, q.discount, q.total, q.discount_label, method, paidNow ? 'paid' : 'unpaid', q.coupon_id, q.promo_code_id, q.pass_id,
         [...q.drops.keys()][0] || null, input.note?.slice(0, 200) || null, q.scheduledFor, input.customer_phone || null, String(crypto.randomInt(1000, 10000))],
     );
@@ -475,9 +479,17 @@ export async function createOrder(user, input) {
       [user?.id || null, order.id, q.station.id, method, q.total, paidNow ? 'paid' : 'pending', paidNow ? new Date() : null],
     );
 
-    const low = await placeOrder(db, order, q.lines, user?.id);
-    await audit(user?.id, 'order.create', 'order', order.id, { total: q.total, channel }, db);
-    return { id: order.id, low, stationId: q.station.id };
+    let low = [];
+    let paymentInit = null;
+    if (online) {
+      // Paid online: the order waits (nothing is reserved or shown to the station) until the gateway confirms.
+      paymentInit = initiate(method, pay[0]);
+      await db.query('UPDATE payments SET provider_ref=$2 WHERE id=$1', [pay[0].id, paymentInit.reference]);
+    } else {
+      low = await placeOrder(db, order, q.lines, user?.id);
+    }
+    await audit(user?.id, 'order.create', 'order', order.id, { total: q.total, channel, method }, db);
+    return { id: order.id, low, stationId: q.station.id, paymentInit };
   });
 
   const order = await fullOrder(result.id, undefined, { reveal: true });
@@ -486,7 +498,105 @@ export async function createOrder(user, input) {
     if (order.user_id) await notify(order.user_id, { kind: 'order', title: `Order ${order.pickup_code} received`, body: `${order.station_name} is on it. Your coffee in 90 seconds.`, data: { order_id: order.id } });
     alertLowStock(result.stationId, result.low).catch(() => {});
   }
-  return { order };
+  return { order, payment: result.paymentInit };
+}
+
+/**
+ * Called when a gateway has told us the outcome (the customer came back from eSewa or Fonepay, the status check said so, or the owner's test button).
+ * Safe to call twice. A paid order is placed and sent to the station; a failed one is cancelled and everything it used is given back.
+ */
+export async function confirmPayment(paymentId, { ref, raw, outcome = 'paid', reason } = {}) {
+  const res = await tx(async (db) => {
+    const { rows } = await db.query('SELECT * FROM payments WHERE id=$1 FOR UPDATE', [paymentId]);
+    const p = rows[0];
+    if (!p) throw notFound('Payment not found');
+    if (p.status === 'paid' || p.status === 'refunded') return { already: true, payment: p };
+    if (p.status === 'failed' && outcome !== 'paid') return { already: true, payment: p };
+    if (outcome !== 'paid') {
+      await db.query(`UPDATE payments SET status='failed', raw=COALESCE(raw,'{}'::jsonb) || $2::jsonb WHERE id=$1`, [paymentId, JSON.stringify(raw || {})]);
+      if (p.order_id) await cancelInTx(db, p.order_id, null, reason || 'The payment was not completed', { refund: false });
+      if (p.pass_id) await db.query(`UPDATE passes SET status='expired' WHERE id=$1 AND status='pending'`, [p.pass_id]);
+      return { failed: true, payment: p, orderId: p.order_id };
+    }
+    await db.query(`UPDATE payments SET status='paid', provider_ref=COALESCE($2, provider_ref), raw=COALESCE(raw,'{}'::jsonb) || $3::jsonb, settled_at=now() WHERE id=$1`, [paymentId, ref || null, JSON.stringify(raw || {})]);
+    let low = [];
+    if (p.purpose === 'order') {
+      const o = (await db.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [p.order_id])).rows[0];
+      if (o.status === 'awaiting_payment') {
+        const items = (await db.query('SELECT product_id, qty, options FROM order_items WHERE order_id=$1', [o.id])).rows;
+        await db.query(`UPDATE orders SET payment_status='paid' WHERE id=$1`, [o.id]);
+        try {
+          await db.query('SAVEPOINT stock');
+          low = await placeOrder(db, o, items, o.user_id);
+          await db.query('RELEASE SAVEPOINT stock');
+        } catch (e) {
+          // An ingredient ran out while the customer was paying: give the money back and say so.
+          await db.query('ROLLBACK TO SAVEPOINT stock');
+          await cancelInTx(db, o.id, null, 'An ingredient ran out while you were paying. You will be refunded.', { refund: true });
+          return { cancelled: true, orderId: o.id, payment: p };
+        }
+      } else if (o.status === 'cancelled') {
+        // Paid after the order timed out or was cancelled: the money is real, so mark it for a refund.
+        await db.query(`UPDATE payments SET status='refunded', raw = raw || '{"refund_pending_manual": true, "late_payment": true}'::jsonb WHERE id=$1`, [paymentId]);
+        await db.query(`UPDATE orders SET payment_status='refunded' WHERE id=$1`, [o.id]);
+        return { late: true, orderId: o.id, payment: p };
+      }
+    } else if (p.purpose === 'pass') {
+      const days = (await getSettings(db)).pass_use_by_days;
+      await db.query(`UPDATE passes SET status='active', purchased_at=now(), expires_at=now() + ($2 || ' days')::interval WHERE id=$1 AND status='pending'`, [p.pass_id, String(days)]);
+    }
+    return { payment: p, orderId: p.order_id, passId: p.pass_id, low };
+  });
+
+  if (res.orderId && !res.already) {
+    const order = await fullOrder(res.orderId);
+    if (order.status === 'placed') {
+      emitOrder(order, order.scheduled_for && !order.released_at ? 'order' : 'order_new');
+      if (order.user_id) await notify(order.user_id, { kind: 'order', title: `Order ${order.pickup_code} received`, body: 'Payment received. Your coffee in 90 seconds.', data: { order_id: order.id } });
+      alertLowStock(order.station_id, res.low || []).catch(() => {});
+    } else if (order.status === 'cancelled') {
+      emitOrder(order);
+      if (order.user_id) await notify(order.user_id, { kind: 'order', title: `Order ${order.pickup_code} cancelled`, body: order.cancel_reason || 'The payment was not completed.', data: { order_id: order.id } });
+    }
+  }
+  if (res.passId && !res.failed && !res.already) {
+    const code = (await query('SELECT code FROM passes WHERE id=$1', [res.passId])).rows[0]?.code;
+    if (res.payment.user_id) await notify(res.payment.user_id, { kind: 'pass', title: 'Your 10-cup pass is ready', body: `Pass ${code}. It starts when you use your first cup, then lasts 30 days.`, data: { pass_id: res.passId } });
+  }
+  return res;
+}
+
+/**
+ * Orders and passes still waiting for a gateway after 15 minutes: ask the gateway once more (eSewa can be asked), and if there is no payment,
+ * cancel them so the coupon, pass cups and offer are free again. Run every minute.
+ */
+export async function expireUnpaid() {
+  const { rows } = await query(`SELECT * FROM payments WHERE status='pending' AND provider IN ('esewa','fonepay') AND created_at < now() - interval '15 minutes' LIMIT 50`);
+  let n = 0;
+  for (const p of rows) {
+    try {
+      if (p.provider === 'esewa') {
+        const st = await esewaGw.checkStatus({ uuid: p.provider_ref || p.id, amount: p.amount });
+        if (st?.state === 'COMPLETE') { await confirmPayment(p.id, { ref: st.ref, raw: { status_check: st.raw } }); continue; }
+      }
+      await confirmPayment(p.id, { outcome: 'failed', reason: 'The payment was not completed in time', raw: { expired: true } });
+      n++;
+    } catch (e) { console.error('expire payment', p.id, e.message); }
+  }
+  return n;
+}
+
+/** Re-checks a pending eSewa payment with eSewa itself (used when the customer's browser never came back). */
+export async function refreshPayment(paymentId) {
+  const { rows } = await query('SELECT * FROM payments WHERE id=$1', [paymentId]);
+  const p = rows[0];
+  if (!p || p.status !== 'pending') return p;
+  if (p.provider === 'esewa') {
+    const st = await esewaGw.checkStatus({ uuid: p.provider_ref || p.id, amount: p.amount });
+    if (st?.state === 'COMPLETE') await confirmPayment(p.id, { ref: st.ref, raw: { status_check: st.raw } });
+    else if (['CANCELED', 'FULL_REFUND'].includes(st?.state || '')) await confirmPayment(p.id, { outcome: 'failed', raw: { status_check: st.raw } });
+  }
+  return (await query('SELECT * FROM payments WHERE id=$1', [paymentId])).rows[0];
 }
 
 async function cancelInTx(db, orderId, actorId, reason, { refund = true } = {}) {
@@ -525,8 +635,12 @@ export async function cancelOrder(orderId, actor, reason) {
   if (!o) throw notFound('Order not found');
   if (actor.role === 'customer') {
     if (o.user_id !== actor.id) throw forbidden();
-    // Every order goes straight to the bar when it is placed, so a customer cannot cancel it. The station can decline it.
-    throw conflict('Your order has gone to the barista, so it cannot be cancelled. Ask at the counter if something is wrong.', 'in_progress');
+    // A customer can stop an order only while it still waits for its online payment. Once placed it is with the barista and only the station can decline it.
+    if (o.status !== 'awaiting_payment') throw conflict('Your order has gone to the barista, so it cannot be cancelled. Ask at the counter if something is wrong.', 'in_progress');
+    await tx((db) => cancelInTx(db, orderId, actor.id, 'Cancelled before paying', { refund: false }));
+    const done = await fullOrder(orderId);
+    emitOrder(done);
+    return done;
   }
   await tx((db) => cancelInTx(db, orderId, actor.id, reason || 'Cancelled', { refund: true }));
   const order = await fullOrder(orderId);
@@ -535,7 +649,7 @@ export async function cancelOrder(orderId, actor, reason) {
   return order;
 }
 
-const FLOW = { placed: ['preparing', 'cancelled'], preparing: ['ready', 'cancelled'], ready: ['picked_up'] };
+const FLOW = { placed: ['preparing', 'cancelled'], preparing: ['ready', 'cancelled'], ready: ['picked_up'], awaiting_payment: ['cancelled'] };
 
 /**
  * The customer reads a 4-digit code from their phone or kiosk receipt and says it at the counter.
@@ -748,7 +862,36 @@ export async function buyPass(user, method, { stationId = null, soldBy = null } 
     return { pass, payment: null };
   }
 
-  throw bad('10-cup passes are bought at a station counter, in cash');
+  if (isGateway(method)) {
+    if (!offered(method)) throw bad(`${method === 'esewa' ? 'eSewa' : 'Fonepay'} is not available right now. Buy the pass at a counter in cash.`);
+    const { pass, payment } = await tx(async (db) => {
+      let rows;
+      for (let i = 0; ; i++) {
+        try {
+          await db.query('SAVEPOINT code');
+          ({ rows } = await db.query(
+            `INSERT INTO passes(user_id, total_cups, price_paid, status, purchased_at, expires_at, code)
+             VALUES ($1,$2,$3,'pending', now(), now() + ($4 || ' days')::interval, $5) RETURNING *`,
+            [user.id, s.pass_cups, price, String(s.pass_use_by_days), newPassCode()],
+          ));
+          await db.query('RELEASE SAVEPOINT code');
+          break;
+        } catch (e) {
+          await db.query('ROLLBACK TO SAVEPOINT code');
+          if (e.code !== '23505' || i > 5) throw e;
+        }
+      }
+      const pay = (await db.query(
+        `INSERT INTO payments(user_id, pass_id, station_id, purpose, provider, amount, status) VALUES ($1,$2,$3,'pass',$4,$5,'pending') RETURNING *`,
+        [user.id, rows[0].id, stationId, method, price],
+      )).rows[0];
+      const init = initiate(method, pay);
+      await db.query('UPDATE payments SET provider_ref=$2 WHERE id=$1', [pay.id, init.reference]);
+      return { pass: rows[0], payment: init };
+    });
+    return { pass, payment };
+  }
+  throw bad('Choose how to pay for the pass');
 }
 
 /* ---------------------------------------------------------- welcome & ladder */

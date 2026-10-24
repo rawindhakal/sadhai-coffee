@@ -28,7 +28,7 @@ Google Play and App Store requirements are tracked in `store/COMPLIANCE.md`: in-
 
 | Role | Web | Mobile |
 |---|---|---|
-| **Customer** | Pick a station, order ahead, pay (cash at pickup or a 10-cup pass; no online payment), live pickup number, 10-cup pass, coupons, referral, ratings, English/Nepali | Same, native |
+| **Customer** | Pick a station, order ahead, pay (cash at pickup, eSewa, Fonepay or a 10-cup pass), live pickup number, 10-cup pass, coupons, referral, ratings, English/Nepali | Same, native |
 | **Station staff** | Live queue with 90-second timers and sound, counter orders, customer lookup, pass sales, sold-out toggles, stock, cash count | Live queue, sold out, stock, close day |
 | **Manager** (one or more stations) | Modern dashboard: KPIs against the previous period, live operations board, alerts, orders with detail drawer, customers and win-back list, station menu, stock, staff, offer of the day, promos, cash counts, ratings, accountability | Numbers, run station, promos |
 | **Owner** | Everything, plus stations, menu and prices, drops, team, finance (settlement reconciliation, pass register), growth, rules, audit log, CSV export | Numbers, run station, promos |
@@ -87,7 +87,7 @@ Demo data: 4 stations, 13 menu items with Nepali names, ~15,000 orders over 60 d
 ## Running Sadhai on existing cafes (accountability)
 
 - A station can be **Sadhai-run** or a **partner cafe** with a revenue share (set under Owner, Stations).
-- The cafe keeps the **cash** it takes; Sadhai holds the **digital money**. The **partner statement** nets this: cafe share of net sales minus the cash the cafe holds = what Sadhai pays the cafe, or what the cafe remits. Pass cups count at the pass's per-cup value so the cafe is paid for them. The owner records each settlement with a reference.
+- The cafe keeps the **cash** it takes; Sadhai holds the **digital money** (eSewa and Fonepay). The **partner statement** nets this: cafe share of net sales minus the cash the cafe holds = what Sadhai pays the cafe, or what the cafe remits. Pass cups count at the pass's per-cup value so the cafe is paid for them. The owner records each settlement with a reference.
 - Every order records who started it and who marked it ready. The **scorecard** flags cash counts that do not match, trading days with no cash count, high cancellations, orders marked ready in under 12 seconds, slow service and low ratings, per station and per staff member. Managers see their own stations; the owner sees all.
 - Existing safeguards stay: audit log, settlement reconciliation, pass register with a related-party flag, offer caps and price floors.
 
@@ -104,13 +104,14 @@ Demo data: 4 stations, 13 menu items with Nepali names, ~15,000 orders over 60 d
 
 ## Payments
 
-Sadhai takes **no online payments**. There is no payment gateway anywhere in the API, the web app, the mobile apps, the kiosk or the settings.
+Customers pay with **cash at the counter** (when they collect), a **10-cup pass**, or online with **eSewa** (ePay v2) or **Fonepay** (web payment). Coupons and promo codes only reduce the price. Both gateways start **switched off**; the owner turns each on under **Settings, Payments**.
 
-- An order is paid in **cash at the counter when the customer collects it**, or with a **10-cup pass**. Coupons and promo codes only reduce the price.
-- **10-cup passes are sold for cash at a station counter.** The barista enters the customer's phone number and the pass appears in the customer's account.
-- Every order goes straight to the station when it is placed, so a customer cannot cancel it. The station can decline it with a reason.
-- Cash is counted at close of day per station; partner cafes hold the cash and are settled by the statement (their share netted against the cash they hold).
-- Older orders from before this change may still show an online provider in reports. Nothing new can be created with one.
+- **How an online order works.** The order waits as *awaiting payment*: the barista does not see it and no ingredients are used. The customer is sent to eSewa's or Fonepay's page and comes back to their order. When the gateway's signed answer is verified the order is placed and goes to the station. An order nobody pays for is cancelled after 15 minutes (eSewa is asked one last time first). The customer can cancel while it is still waiting; once placed only the station can decline it, and a paid order is then marked for a refund.
+- **Where it works.** Website cart, the mobile app, the self-order kiosk (a QR the guest scans with their phone) and the counter (the barista shows a QR). 10-cup passes can also be bought online; counters still sell them for cash.
+- **Setup.** In Settings, Payments, enter the merchant code and secret key from eSewa (and from Fonepay: merchant code PID and shared secret), choose **Live**, and press *Try a Rs 10 payment*. In **Sandbox** eSewa uses its test server with the public test code `EPAYTEST`; Fonepay needs the test code Fonepay gives you (until then a built-in test page is used). On a real website customers are never offered Sandbox payments.
+- **Security.** Requests and answers are signed (eSewa HMAC-SHA256, Fonepay HMAC-SHA512). Answers with a wrong signature, wrong merchant or wrong amount are ignored or cancel the order. Secrets are stored encrypted and never shown again.
+- **Money and refunds.** Online money arrives in Sadhai's merchant accounts. Partner cafes hold the cash, so the partner statement nets their share against the cash they hold. Refunds are paid back from the merchant account and then marked done in Settings, Payments.
+- The Fonepay request format follows Fonepay's web payment (merchantRequest). Test with your own merchant details before going live; only Sandbox is exercised by `npm run smoke` and `npm run flows`.
 
 ## Things to do before launch
 

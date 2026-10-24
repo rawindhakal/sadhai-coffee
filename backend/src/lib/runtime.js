@@ -8,6 +8,15 @@ import { config } from './config.js';
  * Secrets are stored encrypted (AES-256-GCM, key from SETTINGS_ENCRYPTION_KEY or JWT_SECRET) and never sent back to the browser.
  */
 export const DEFS = {
+  // online payments: eSewa ePay and Fonepay. Both start switched off; the owner turns each on when its merchant account is ready.
+  esewa_enabled: { group: 'payments', label: 'Accept eSewa', type: 'bool', env: 'ESEWA_ENABLED', def: '0', help: 'Customers can pay with eSewa (ePay v2) on the website, kiosk, counter and app.' },
+  esewa_mode: { group: 'payments', label: 'eSewa mode', type: 'enum', options: ['sandbox', 'live'], env: 'ESEWA_MODE', def: 'sandbox', help: 'Sandbox uses eSewa’s test server, so no real money moves. Switch to Live when eSewa has approved your merchant account.' },
+  esewa_merchant_code: { group: 'payments', label: 'eSewa merchant (product) code', env: 'ESEWA_MERCHANT_CODE', def: 'EPAYTEST', help: 'In Sandbox the public test code EPAYTEST works. For Live, use the code eSewa gave you.' },
+  esewa_secret_key: { group: 'payments', label: 'eSewa secret key', secret: true, env: 'ESEWA_SECRET_KEY', def: '8gBm/:&EnhH.1/q', help: 'Signs every payment. In Sandbox eSewa’s public test key is used until you save your own.' },
+  fonepay_enabled: { group: 'payments', label: 'Accept Fonepay', type: 'bool', env: 'FONEPAY_ENABLED', def: '0', help: 'Customers can pay with Fonepay (any bank or wallet app) on the website, kiosk, counter and app.' },
+  fonepay_mode: { group: 'payments', label: 'Fonepay mode', type: 'enum', options: ['sandbox', 'live'], env: 'FONEPAY_MODE', def: 'sandbox', help: 'Sandbox uses Fonepay’s test server with the test merchant code Fonepay gave you. Live uses the real server.' },
+  fonepay_merchant_code: { group: 'payments', label: 'Fonepay merchant code (PID)', env: 'FONEPAY_MERCHANT_CODE', def: '', help: 'Given by Fonepay when your merchant account is approved.' },
+  fonepay_secret_key: { group: 'payments', label: 'Fonepay shared secret key', secret: true, env: 'FONEPAY_SECRET_KEY', def: '', help: 'Signs every request to Fonepay and every answer from it.' },
   // app and web addresses
   public_web_url: { group: 'app', label: 'Website address', type: 'url', env: 'PUBLIC_WEB_URL', def: 'http://localhost:3000', help: 'Where customers open the web app. Used in links.' },
   public_api_url: { group: 'app', label: 'API address', type: 'url', env: 'PUBLIC_API_URL', def: '', help: 'The public address of this server, used for uploaded images.' },

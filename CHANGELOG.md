@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.9.0] - 2026-10-24
+
+### Added
+- eSewa ePay v2 and Fonepay web payments on the website, mobile app, kiosk and counter, with online passes, signed-answer checks, a 15-minute payment timeout, refunds to pay back, and a Payments screen in Settings with a Rs 10 test.
+
+### Changed
+- Sandbox gateways are never offered to customers on a real website.
+
+### Removed
+- The GitHub repository link on the changelog page.
+
+---
+
 ## [1.8.0] - 2026-10-24
 
 ### Removed

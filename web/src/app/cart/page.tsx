@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth';
 import { PromoBox } from '@/components/promo-box';
 import { useCart } from '@/lib/cart';
 import { useI18n } from '@/lib/i18n';
+import { useConfig } from '@/lib/site-content';
 import { Empty, ErrorNote, Field, useData } from '@/components/ui';
 import { CustomerShell, PAY_LABEL } from '@/components/customer';
 import { Icon } from '@/components/icons';
@@ -19,7 +20,10 @@ export default function Cart() {
   const coupons = useData<any[]>(user ? '/coupons' : null, [user?.id]);
   const passes = useData<any[]>(user ? '/passes' : null, [user?.id]);
   const [offer, setOffer] = useState<{ type: 'none' | 'coupon' | 'pass' | 'promo'; id?: string }>({ type: 'none' });
-  const [method, setMethod] = useState<'cash'>('cash');
+  const config = useConfig();
+  const methods: string[] = (config?.payment_methods || ['cash']).filter((m: string) => m !== 'pass');
+  const [method, setMethod] = useState<string>('cash');
+  useEffect(() => { if (!methods.includes(method)) setMethod('cash'); }, [methods.join()]);
   const [note, setNote] = useState('');
   const [quote, setQuote] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +70,8 @@ export default function Cart() {
       passes.reload();
       coupons.reload();
       cart.clear();
+      // Online payment: send the customer to the gateway's page. They come back to their order when done.
+      if (out.payment?.pay_url) { window.location.href = out.payment.pay_url; return; }
       router.push(`/order/${out.order.id}`);
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
@@ -127,14 +133,9 @@ export default function Cart() {
             <>
               <h4 style={{ margin: '20px 0 8px' }}>{t('pay_with')}</h4>
               <div className="row wrap" style={{ gap: 8 }}>
-                <button
-                  type="button"
-                  className={`btn sm ${method === 'cash' ? 'primary' : 'ghost'}`}
-                  aria-pressed={method === 'cash'}
-                  onClick={() => setMethod('cash')}
-                >
-                  {PAY_LABEL.cash}
-                </button>
+                {methods.map((m) => (
+                  <button key={m} type="button" className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>{PAY_LABEL[m]}</button>
+                ))}
               </div>
             </>
           )}

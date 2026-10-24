@@ -9,6 +9,8 @@ import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 import { productArt } from '@/lib/art';
 import { Icon } from './icons';
+import { PayQr } from './pay-qr';
+import { useConfig } from '@/lib/site-content';
 
 type Line = { key: string; product: any; qty: number; option_ids: string[]; names: string[]; unit: number };
 const T: Record<string, [string, string]> = {
@@ -93,7 +95,7 @@ export function Kiosk() {
 
   const offers: any[] = home.offers || [];
 
-  async function place(method: 'counter' | 'pass', passCode?: string) {
+  async function place(method: string, passCode?: string) {
     setBusy(true); setError(null);
     try {
       const body: any = {
@@ -442,6 +444,8 @@ function KItem({ p, onClose, onAdd }: { p: any; onClose: () => void; onAdd: (l: 
 }
 
 function Pay({ t, total, busy, error, guest, onBack, onPlace }: any) {
+  const config = useConfig();
+  const gateways: string[] = (config?.payment_methods || []).filter((m: string) => m === 'esewa' || m === 'fonepay');
   const [mode, setMode] = useState<'' | 'pass'>('');
   const [code, setCode] = useState('');
   const [check, setCheck] = useState<any>(null);
@@ -454,6 +458,9 @@ function Pay({ t, total, busy, error, guest, onBack, onPlace }: any) {
     <div className="k-card wide">
       <h2>{t('pay')}</h2>
       <div className="col" style={{ marginTop: 16 }}>
+        {gateways.map((g) => (
+          <button key={g} className="k-opt" disabled={busy} onClick={() => onPlace(g)}><Icon name="cart" size={30} /><span><strong>Pay now with {g === 'esewa' ? 'eSewa' : 'Fonepay'}</strong><small>Scan a QR with your phone, then collect your coffee</small></span></button>
+        ))}
         <button className="k-opt" disabled={busy} onClick={() => onPlace('counter')}><Icon name="coin" size={30} /><span><strong>{t('counter')}</strong><small>Pay {rs(total)} when you pick up your coffee</small></span></button>
         <button className={`k-opt ${mode === 'pass' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'pass' ? '' : 'pass')}><Icon name="ticket" size={30} /><span><strong>{t('passopt')}</strong><small>Enter your pass code (SP-XXXX-XXXX)</small></span></button>
         {mode === 'pass' && (
@@ -472,12 +479,21 @@ function Pay({ t, total, busy, error, guest, onBack, onPlace }: any) {
 }
 
 function Done({ t, result, guest, onNew }: { t: (k: string) => string; result: any; guest: any; onNew: () => void }) {
-  const [o] = useState<any>(result.order);
+  const [o, setO] = useState<any>(result.order);
+  const pay = result.payment;
+  const awaiting = o.status === 'awaiting_payment' && pay;
+  const refresh = () => api(`/kiosk/orders/${o.id}`).then((x) => setO({ ...o, ...x })).catch(() => {});
   const [left, setLeft] = useState(25);
-  useEffect(() => { setLeft(25); const i = setInterval(() => setLeft((n) => { if (n <= 1) { onNew(); return 0; } return n - 1; }), 1000); return () => clearInterval(i); }, []);
+  useEffect(() => { if (awaiting) return; setLeft(25); const i = setInterval(() => setLeft((n) => { if (n <= 1) { onNew(); return 0; } return n - 1; }), 1000); return () => clearInterval(i); }, [awaiting]);
   return (
     <div className="k-card wide center">
-      {o.status === 'cancelled' ? <><h2>Order cancelled</h2><p className="muted">Please start again.</p></> : (
+      {o.status === 'cancelled' ? <><h2>Order cancelled</h2><p className="muted">The payment was not completed. You were not charged. Please start again.</p></> : awaiting ? (
+        <>
+          <h2>Pay to send your order to the barista</h2>
+          <PayQr payment={pay} amount={o.total} big size={300} onDone={refresh} />
+          <button className="btn ghost lg" onClick={async () => { await api(`/station/orders/${o.id}/status`, { method: 'POST', body: { status: 'cancelled', reason: 'The guest cancelled at the kiosk' } }).catch(() => {}); onNew(); }}>Cancel</button>
+        </>
+      ) : (
         <>
           <p className="label">{t('done')}</p>
           <div className="pickup" style={{ fontSize: 'clamp(96px, 22vw, 200px)' }} aria-live="polite">{o.pickup_code}</div>
@@ -487,7 +503,7 @@ function Done({ t, result, guest, onNew }: { t: (k: string) => string; result: a
           <p className="muted">Your coffee in 90 seconds.</p>
         </>
       )}
-      <button className="btn primary lg" style={{ marginTop: 24 }} onClick={onNew}>{t('again')}{o.status !== 'cancelled' ? ` (${left})` : ''}</button>
+      {!awaiting && <button className="btn primary lg" style={{ marginTop: 24 }} onClick={onNew}>{t('again')}{o.status !== 'cancelled' ? ` (${left})` : ''}</button>}
     </div>
   );
 }

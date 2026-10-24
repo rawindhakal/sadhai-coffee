@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
@@ -23,6 +24,7 @@ class _CartScreenState extends State<CartScreen> {
   String? _offerId;
   String? _lastPromo;
   String _method = 'cash';
+  List<String> _methods = ['cash'];
   final _note = TextEditingController();
   String? _error;
   bool _busy = false;
@@ -56,6 +58,11 @@ class _CartScreenState extends State<CartScreen> {
   String _fmt(String iso) => DateFormat('h:mm a').format(DateTime.parse(iso).toLocal());
 
   Future<void> _loadOffers() async {
+    try {
+      final cfg = await Api.instance.request('GET', '/config', auth: false);
+      final m = [for (final x in (cfg['payment_methods'] as List)) if (x != 'pass') x as String];
+      if (mounted) setState(() { _methods = m.isEmpty ? ['cash'] : m; if (!_methods.contains(_method)) _method = 'cash'; });
+    } catch (_) {}
     try {
       final c = await Api.instance.get('/coupons') as List;
       final p = await Api.instance.get('/passes') as List;
@@ -92,6 +99,9 @@ class _CartScreenState extends State<CartScreen> {
       if (!mounted) return;
       cart.clear();
       cart.invalidatePasses();
+      // Online payment: open the gateway's page in the browser. The order screen waits for the payment and updates by itself.
+      final pay = out['payment'] as Map?;
+      if (pay != null && pay['pay_url'] != null) await launchUrl(Uri.parse(pay['pay_url'] as String), mode: LaunchMode.externalApplication);
       if (!mounted) return;
       await Navigator.push(context, MaterialPageRoute(builder: (_) => TrackingScreen(orderId: order['id'])));
       widget.onPlaced();
@@ -201,13 +211,13 @@ class _CartScreenState extends State<CartScreen> {
         Text('Pay with', style: display(18)),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 4, children: [
-          ChoiceChip(
-            label: const Text('Cash at counter'),
-            selected: _method == 'cash',
+          for (final m in _methods) ChoiceChip(
+            label: Text(payLabel[m] ?? m),
+            selected: _method == m,
             selectedColor: Brand.cherry,
             showCheckmark: false,
-            labelStyle: TextStyle(color: _method == 'cash' ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600),
-            onSelected: (_) => setState(() => _method = 'cash'),
+            labelStyle: TextStyle(color: _method == m ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600),
+            onSelected: (_) { setState(() => _method = m); _requote(cart); },
           ),
         ]),
       ],

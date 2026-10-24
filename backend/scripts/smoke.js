@@ -85,7 +85,7 @@ const pct = refAfter.find((c) => c.kind === 'pct');
 const o2 = (await call('POST', '/orders', { station_id: st.id, items: [{ ...item, qty: 2 }], payment_method: 'cash', coupon_id: pct.id }, T)).body;
 ok(o2.order.status === 'placed' && o2.order.payment_method === 'cash' && o2.order.payment_status === 'unpaid', 'cash order is placed immediately for counter payment');
 ok(o2.order.discount === Math.floor(o2.order.subtotal * 0.3) || o2.order.discount === 30, '30% coupon applied');
-ok((await call('POST', `/orders/${o2.order.id}/cancel`, {}, T)).status === 404, 'there is no customer cancel: a placed order goes straight to the barista');
+ok((await call('POST', `/orders/${o2.order.id}/cancel`, {}, T)).status === 409, 'a placed order cannot be cancelled by the customer');
 const cancel = (await call('POST', `/station/orders/${o2.order.id}/status`, { status: 'cancelled', reason: 'Out of milk' }, staff.access_token));
 ok(cancel.status === 200 && cancel.body.status === 'cancelled', 'the station can decline a placed order');
 const couponBack = (await call('GET', '/coupons', null, T)).body.find((c) => c.id === pct.id);
@@ -93,7 +93,7 @@ ok(couponBack.status === 'active', 'coupon restored when the station declines');
 
 // pass: buy for cash at station counter, then redeem
 const onlinePassAttempt = await call('POST', '/passes', {}, T);
-ok(onlinePassAttempt.status === 404, 'a customer cannot buy a pass online: passes are sold for cash at the station counter');
+ok(onlinePassAttempt.status === 400, 'a pass cannot be bought without choosing eSewa or Fonepay (cash passes are sold at the counter)');
 const pp = await call('POST', '/station/passes', { phone }, staff.access_token);
 ok(pp.status === 201 && (pp.body.pass?.status === 'active' || pp.body.status === 'active'), 'station sells 10-cup pass for cash');
 const passes = (await call('GET', '/passes', null, T)).body;
@@ -249,8 +249,8 @@ const amrCard = cards.find((c) => c.sku === 'AMR');
 ok(amrCard && amrCard.lines.some((l) => l.name.startsWith('Coffee') && l.qty === 16) && amrCard.recipe_method && !JSON.stringify(cards).includes('unit_cost'), 'recipe cards show the standard recipe and no costs');
 
 const ints = (await call('GET', '/owner/integrations', null, owner.access_token)).body;
-ok(ints.length > 0 && ints.every((i) => ['app', 'company'].includes(i.group)), 'the owner settings hold only app and company details');
-ok(!ints.some((i) => /sms|push|vapid|fcm|esewa|khalti|fonepay|payment/i.test(i.key)), 'no SMS, push or payment settings are left');
+ok(ints.length > 0 && ints.every((i) => ['app', 'company', 'payments'].includes(i.group)), 'the owner settings hold only app, company and payment details');
+ok(!ints.some((i) => /sms|push|vapid|fcm|khalti/i.test(i.key)) && ints.some((i) => i.key === 'esewa_secret_key' && i.secret && i.value === null), 'no SMS or push settings; payment secrets are never sent to the browser');
 ok((await call('GET', '/owner/integrations', null, mgr.access_token)).status === 403, 'only the owner can see these settings');
 ok((await call('PUT', '/owner/integrations', { values: { min_app_version: 'new' } }, owner.access_token)).status === 400, 'invalid setting values are refused');
 ok((await call('PUT', '/owner/integrations', { values: { sms_mode: 'live' } }, owner.access_token)).status === 400, 'an SMS setting is refused: it no longer exists');
@@ -387,8 +387,8 @@ const setup = (await call('GET', '/owner/setup', null, owner.access_token)).body
 ok(setup.total >= 9 && setup.steps.every((x) => x.title && typeof x.done === 'boolean'), 'setup checklist reports each step');
 
 // no online payments
-ok((await call('POST', '/orders', { station_id: st.id, items: [item], payment_method: 'esewa' }, T)).status === 400, 'online payment methods are refused');
-ok((await call('GET', '/config')).body.payment_methods.join() === 'cash,pass', 'the public config offers cash and a pass only');
+ok((await call('POST', '/orders', { station_id: st.id, items: [item], payment_method: 'esewa' }, T)).status === 400, 'eSewa is refused until the owner switches it on');
+ok((await call('GET', '/config')).body.payment_methods.join() === 'cash', 'the public config offers cash only until a gateway is switched on');
 }
 
 // store compliance: version endpoint, data export, account deletion

@@ -3,6 +3,7 @@ import { query } from '../lib/db.js';
 import { wrap, notFound } from '../lib/http.js';
 import { stationMenu, bestSellers, liveOffers, pickupWindow } from '../lib/orders.js';
 import { getSettings } from '../lib/settings.js';
+import { enabledPaymentMethods, gatewayStatus } from '../lib/payments.js';
 import { rt } from '../lib/runtime.js';
 import { loadSite } from '../lib/site.js';
 import rateLimit from 'express-rate-limit';
@@ -25,7 +26,8 @@ pub.get('/config', wrap(async (_req, res) => {
     pass: { price: s.pass_price, cups: s.pass_cups, valid_days: s.pass_valid_days },
     pricing: { hot: s.price_hot, flavored: s.price_flavored, iced: s.price_iced },
     partner_share_pct: s.partner_share_pct,
-    payment_methods: ['cash', 'pass'], // no online payment: cash at pickup, or a 10-cup pass
+    payment_methods: enabledPaymentMethods(), // cash at pickup, plus eSewa and Fonepay when the owner has switched them on
+    payment_gateways: Object.fromEntries(Object.entries(gatewayStatus()).map(([k, v]) => [k, { offered: v.offered, mode: v.mode }])),
     referral: {
       enabled: !!Number(s.referral_enabled),
       cap_month: s.referral_cap_month,

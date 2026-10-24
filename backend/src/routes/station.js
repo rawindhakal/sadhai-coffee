@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { PAYMENT_METHODS } from '../lib/payments.js';
 import { z } from 'zod';
 import { query } from '../lib/db.js';
 import { wrap, bad, notFound, conflict, normalizePhone, forbidden } from '../lib/http.js';
@@ -77,7 +78,7 @@ station.post('/orders', wrap(async (req, res) => {
   const stationId = await sid(req);
   const b = z.object({
     items: z.array(z.object({ product_id: z.string().uuid(), qty: z.number().int().min(1).max(10).default(1), option_ids: z.array(z.string().uuid()).default([]) })).min(1),
-    payment_method: z.enum(['cash', 'pass']).default('cash'),
+    payment_method: z.enum(PAYMENT_METHODS).default('cash'),
     customer_phone: z.string().optional(), customer_name: z.string().max(40).optional(),
     coupon_id: z.string().uuid().optional(), promo_code: z.string().optional(), note: z.string().max(200).optional(),
   }).parse(req.body);

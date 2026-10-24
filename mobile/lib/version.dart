@@ -1,6 +1,6 @@
 // Keep in sync with /VERSION and pubspec.yaml. scripts/release.mjs updates all three.
-const appVersion = '1.8.0';
-const appBuild = 15;
+const appVersion = '1.9.0';
+const appBuild = 16;
 
 /// Where legal pages live. Override: --dart-define=WEB_URL=https://sadhaicoffee.com
 const webUrl = String.fromEnvironment('WEB_URL', defaultValue: 'https://sadhaicoffee.com');

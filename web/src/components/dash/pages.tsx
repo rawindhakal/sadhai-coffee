@@ -119,5 +119,5 @@ function PartnerStatement() {
   if (!st.data) return <Loading />;
   if (!st.data.length) return <Empty>No statement for this period.</Empty>;
   return <div className="col" style={{ gap: 16 }}>{st.data.map((s) => <PartnerStatementCard key={s.station.id} s={s} />)}
-    <p className="small muted">All sales are paid in cash at your counter, so you hold the cash. Each period your share is netted against the cash you hold, and one of us pays the difference.</p></div>;
+    <p className="small muted">Cash stays at your counter. Payments through eSewa and Fonepay arrive in Sadhai’s account. Each period your share is netted against the cash you hold, and one of us pays the difference.</p></div>;
 }

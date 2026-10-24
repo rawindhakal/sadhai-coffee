@@ -50,6 +50,7 @@ class _PassPanelState extends State<PassPanel> {
   bool _loaded = false;
   Map<String, dynamic>? _pass;
   num? get _price => _pass?['price'] as num?;
+  List<String> _online = [];
   int _lastEpoch = 0;
   int _activePassIdx = 0;
 
@@ -62,6 +63,7 @@ class _PassPanelState extends State<PassPanel> {
       try {
         final c = await Api.instance.request('GET', '/config', auth: false);
         _pass = Map<String, dynamic>.from(c['pass'] as Map);
+        _online = [for (final x in (c['payment_methods'] as List)) if (x == 'esewa' || x == 'fonepay') x as String];
       } catch (_) {}
       if (mounted) setState(() { _passes = p.cast<Map>(); _loaded = true; });
     } catch (_) {}
@@ -183,11 +185,24 @@ class _PassPanelState extends State<PassPanel> {
                 style: TextStyle(color: Brand.inkMuted),
               ),
               const SizedBox(height: 16),
+              for (final m in _online) Padding(padding: const EdgeInsets.only(bottom: 8), child: FilledButton(
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                onPressed: () async {
+                  Navigator.pop(c);
+                  try {
+                    final out = await Api.instance.post('/passes', {'payment_method': m});
+                    final pay = out['payment'] as Map;
+                    await launchUrl(Uri.parse(pay['pay_url'] as String), mode: LaunchMode.externalApplication);
+                    if (mounted) toast(context, 'Finish paying in your browser, then pull down to refresh.');
+                  } on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); }
+                },
+                child: Text('Pay ${rs(_price ?? 900)} with ${payLabel[m] ?? m}'),
+              )),
               const SizedBox(height: 8),
               OutlinedButton(
                 style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
                 onPressed: () => Navigator.pop(c),
-                child: const Text('Got it'),
+                child: Text(_online.isEmpty ? 'Got it' : 'Or buy at a counter in cash'),
               ),
             ],
           ),

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
@@ -10,7 +11,7 @@ import 'cart.dart';
 import 'home.dart';
 import 'offers.dart';
 
-const payLabel = {'cash': 'Cash at counter', 'pass': '10-cup pass', 'esewa': 'Online (old)', 'khalti': 'Online (old)', 'fonepay': 'Online (old)'};
+const payLabel = {'cash': 'Cash at counter', 'pass': '10-cup pass', 'esewa': 'eSewa', 'fonepay': 'Fonepay', 'khalti': 'Online (old)'};
 
 void toast(BuildContext c, String m, {bool bad = false}) => ScaffoldMessenger.of(c)
   ..hideCurrentSnackBar()
@@ -70,17 +71,25 @@ class _TrackingScreenState extends State<TrackingScreen> {
   String? _error;
   StreamSubscription? _sub;
   Timer? _poll;
+  int _ticks = 0;
 
   @override
   void initState() {
     super.initState();
     _load();
     _sub = Api.instance.events().listen((e) { if (e.$1 == 'order' && e.$2['id'] == widget.orderId) _load(); });
-    _poll = Timer.periodic(const Duration(seconds: 10), (_) => _load());
+    // Quick checks while the order waits for its online payment, slower afterwards.
+    _poll = Timer.periodic(const Duration(seconds: 4), (_) { _ticks++; if (_o?['status'] == 'awaiting_payment' || _ticks % 3 == 0) _load(); });
   }
 
   @override
   void dispose() { _sub?.cancel(); _poll?.cancel(); super.dispose(); }
+
+  Future<void> _cancel() async {
+    final yes = await showDialog<bool>(context: context, builder: (c) => AlertDialog(title: const Text('Cancel this order?'), content: const Text('You have not been charged.'), actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep it')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Cancel order'))]));
+    if (yes != true) return;
+    try { await Api.instance.post('/orders/${widget.orderId}/cancel'); _load(); } on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); }
+  }
 
   Future<void> _load() async {
     try { final o = await Api.instance.get('/orders/${widget.orderId}'); if (mounted) setState(() { _o = o; _error = null; }); }
@@ -137,6 +146,16 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 Row(children: [Text(payLabel[o['payment_method']] ?? ''), const SizedBox(width: 8), Chip2.status(o['payment_status'])]),
                 if (o['payment_method'] == 'cash' && o['payment_status'] == 'unpaid') const Text('Pay when you pick up.', style: TextStyle(color: Brand.inkMuted)),
               ]))),
+              if (o['status'] == 'awaiting_payment' && o['pay_url'] != null) ...[
+                const SizedBox(height: 12),
+                FilledButton(
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                  onPressed: () => launchUrl(Uri.parse(o['pay_url'] as String), mode: LaunchMode.externalApplication),
+                  child: Text('Pay ${rs(o['total'])} with ${payLabel[o['payment_method']] ?? 'your wallet'}'),
+                ),
+                const Padding(padding: EdgeInsets.only(top: 6), child: Text('This screen updates by itself once you have paid.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted, fontSize: 13))),
+                TextButton(onPressed: _cancel, child: const Text('Cancel this order')),
+              ],
               if (['placed', 'preparing', 'ready'].contains(o['status'])) const Padding(padding: EdgeInsets.only(top: 12), child: Text('Your order has gone to the barista, so it cannot be cancelled. Something wrong? Ask at the counter.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted, fontSize: 13))),
               if (o['status'] == 'picked_up') Padding(padding: const EdgeInsets.only(top: 16), child: Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
                 Text(o['rating'] != null ? 'Thank you for rating' : 'How was your coffee?', style: display(20)),

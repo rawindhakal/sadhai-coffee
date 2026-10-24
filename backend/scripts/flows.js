@@ -35,6 +35,7 @@ const sizeOpt = (p) => p.option_groups.find((g) => g.name === 'Size').options.fi
 const line = (p, qty = 1) => ({ product_id: p.id, qty, option_ids: [sizeOpt(p)] });
 
 let seq = 0;
+async function ovr0() { return (await call('GET', '/admin/overview', null, tok(owner))).body.totals.revenue; }
 async function newCustomer(referral) {
   const phone = `98${String(Date.now() + (seq++) * 17).slice(-8)}`;
   const r = (await call('POST', '/auth/register', { name: `Flow Customer ${seq}`, phone, password: 'Sadhai@123', referral_code: referral })).body;
@@ -159,22 +160,140 @@ section('4. Things going wrong');
 }
 
 /* ---------------------------------------------------------------- 5 */
-section('5. No online payment gateway remains');
+section('5. Online payment: eSewa and Fonepay');
+const setCfg = (values) => call('PUT', '/owner/integrations', { values }, tok(owner));
+const esewaSign = (d) => crypto.createHmac('sha256', '8gBm/:&EnhH.1/q').update(d.signed_field_names.split(',').map((k) => `${k}=${d[k]}`).join(',')).digest('base64');
+const esewaAnswer = (paymentId, amount, status = 'COMPLETE', tamper = false) => {
+  const d = { transaction_code: 'TEST0001', status, total_amount: String(amount), transaction_uuid: paymentId, product_code: 'EPAYTEST', signed_field_names: 'transaction_code,status,total_amount,transaction_uuid,product_code,signed_field_names' };
+  d.signature = tamper ? 'AAAA' : esewaSign(d);
+  return Buffer.from(JSON.stringify(d)).toString('base64');
+};
+const FP_SECRET = 'flow-test-secret';
+const fpAnswer = (prn, amount, { ps = 'true', rc = 'successful', pid = 'FLOWPID', tamper = false } = {}) => {
+  const v = { PRN: prn, PID: pid, PS: ps, RC: rc, UID: 'FPTRACE1', BC: 'NABIL', INI: 'tester', P_AMT: String(amount), R_AMT: String(amount) };
+  v.DV = tamper ? 'abcd' : crypto.createHmac('sha512', FP_SECRET).update(['PRN', 'PID', 'PS', 'RC', 'UID', 'BC', 'INI', 'P_AMT', 'R_AMT'].map((k) => v[k]).join(',')).digest('hex');
+  return new URLSearchParams(v).toString();
+};
+const hit = (path) => fetch(API + path, { redirect: 'manual' });
+const buy = async (c, method, extra = {}) => call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: method, ...extra }, c.token);
+const orderOf = async (c, id) => (await call('GET', `/orders/${id}`, null, c.token)).body;
 {
   const c = await newCustomer();
-  for (const m of ['esewa', 'khalti', 'fonepay', 'card']) ok((await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: m }, c.token)).status === 400, `${m} is refused as a way to pay`);
-  ok((await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Guest', customer_phone: '9801234500', payment: 'esewa', consent: true }, tok(tuStaff))).status === 400, 'the kiosk refuses online payment');
-  ok((await call('POST', '/passes', { payment_method: 'esewa' }, c.token)).status === 404, 'a customer cannot buy a pass online');
-  const o = await call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: 'cash' }, c.token);
-  ok(!o.body.payment && o.body.order.status === 'placed', 'an order response carries no payment object');
-  ok((await call('GET', '/payments/x', null, c.token)).status === 404 && (await call('POST', '/payments/x/confirm', {}, c.token)).status === 404, 'the payment routes are gone');
-  ok([401, 404].includes(await fetch(API + '/payments/esewa/callback').then((r) => r.status)) && [401, 404].includes(await fetch(API + '/payments/esewa/start').then((r) => r.status)), 'the eSewa start and callback addresses are gone');
-  ok((await call('POST', '/owner/integrations/test/esewa', {}, tok(owner))).status === 404, 'there is no gateway test');
-  const keys = (await call('GET', '/owner/integrations', null, tok(owner))).body.map((i) => i.key).join(' ');
-  ok(!/esewa|khalti|fonepay|payment|cash_enabled/i.test(keys), 'no payment keys are left in the owner settings');
-  ok((await call('GET', '/config')).body.payment_methods.join() === 'cash,pass' && (await call('GET', '/config')).body.payment_gateways === undefined, 'the public config offers only cash and a pass');
-  ok((await call('GET', '/owner/reconciliation', null, tok(owner))).status === 404, 'the provider reconciliation report is gone');
-  ok((await call('GET', '/owner/setup', null, tok(owner))).body.steps.every((x) => x.key !== 'payments'), 'the setup checklist has no payments step');
+  // switched off until the owner turns them on
+  await setCfg({ esewa_enabled: null, fonepay_enabled: null, fonepay_merchant_code: null, fonepay_secret_key: null, esewa_mode: null, fonepay_mode: null });
+  ok((await buy(c, 'esewa')).status === 400 && (await call('GET', '/config')).body.payment_methods.join() === 'cash', 'eSewa and Fonepay are off until the owner turns them on');
+  await setCfg({ esewa_enabled: '1', fonepay_enabled: '1', fonepay_merchant_code: 'FLOWPID', fonepay_secret_key: FP_SECRET });
+  const cfg = (await call('GET', '/config')).body;
+  ok(cfg.payment_methods.join() === 'cash,esewa,fonepay' && cfg.payment_gateways.esewa.mode === 'sandbox', 'once on, customers are offered cash, eSewa and Fonepay');
+  const key = (await call('GET', '/owner/integrations', null, tok(owner))).body.find((i) => i.key === 'esewa_secret_key');
+  ok(key.secret && key.value === null, 'gateway secrets are never sent to the browser');
+  await setCfg({ esewa_mode: 'live' });
+  ok((await buy(c, 'esewa')).status === 400, 'Live mode without your own eSewa code and key takes no orders');
+  await setCfg({ esewa_mode: 'sandbox' });
+
+  // --- eSewa, paid ---
+  const before = await stockOf(tuStaff, 'Coffee');
+  const e1 = await buy(c, 'esewa');
+  const id1 = e1.body.order.id, pid1 = e1.body.payment.payment_id;
+  ok(e1.status === 201 && e1.body.order.status === 'awaiting_payment' && e1.body.payment.pay_url.endsWith(`/payments/${pid1}/pay`), 'an eSewa order waits for payment and gives a pay address');
+  ok(!(await queue(tuStaff)).some((x) => x.id === id1) && (await stockOf(tuStaff, 'Coffee')) === before, 'the station does not see it and no ingredients are reserved yet');
+  const page = await (await fetch(e1.body.payment.pay_url.replace(/^https?:\/\/[^/]+/, API))).text();
+  ok(/rc-epay\.esewa\.com\.np/.test(page) && /name="signature"/.test(page) && /name="total_amount" value="100"/.test(page) && /value="EPAYTEST"/.test(page), 'the pay page posts a signed ePay v2 form to eSewa');
+  const bad1 = await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(pid1, 100, 'COMPLETE', true))}`);
+  ok(bad1.status === 302 && (await orderOf(c, id1)).status === 'awaiting_payment', 'an eSewa answer with a wrong signature does nothing');
+  const wrongAmt = await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(pid1, 5))}`);
+  ok(wrongAmt.status === 302 && (await orderOf(c, id1)).status === 'cancelled', 'an answer for the wrong amount cancels the order');
+  const e2 = await buy(c, 'esewa');
+  const pid2 = e2.body.payment.payment_id, id2 = e2.body.order.id;
+  const ok2 = await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(pid2, 100))}`);
+  ok(ok2.status === 302 && /\/order\/[^?]+\?pay=ok/.test(ok2.headers.get('location')), 'a genuine eSewa answer sends the customer back to their order');
+  const placed = await orderOf(c, id2);
+  ok(placed.status === 'placed' && placed.payment_status === 'paid' && /^\d{4}$/.test(placed.handover_code), 'the order is now placed and paid, with its pickup code');
+  ok((await queue(tuStaff)).some((x) => x.id === id2) && (await stockOf(tuStaff, 'Coffee')) < before, 'it reaches the station and ingredients are reserved');
+  await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(pid2, 100))}`);
+  ok((await call('GET', `/payments/${pid2}`, null, c.token)).body.status === 'paid' && (await queue(tuStaff)).filter((x) => x.id === id2).length === 1, 'answering twice is harmless');
+  ok([404, 409].includes((await call('POST', `/orders/${id2}/cancel`, {}, c.token)).status) && (await orderOf(c, id2)).status === 'placed', 'a paid order cannot be cancelled by the customer');
+
+  // --- eSewa, failed / cancelled by the customer ---
+  const e3 = await buy(c, 'esewa');
+  await hit(`/payments/esewa/failed/${e3.body.payment.payment_id}`);
+  ok((await orderOf(c, e3.body.order.id)).status === 'cancelled' && (await call('GET', `/payments/${e3.body.payment.payment_id}`, null, c.token)).body.status === 'failed', 'eSewa reporting a failure cancels the order and no stock was used');
+  const e4 = await buy(c, 'esewa');
+  const can = await call('POST', `/orders/${e4.body.order.id}/cancel`, {}, c.token);
+  ok(can.status === 200 && can.body.status === 'cancelled', 'the customer can cancel while the order still waits for payment');
+  const late = await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(e4.body.payment.payment_id, 100))}`);
+  const lateRow = (await call('GET', '/owner/payments', null, tok(owner))).body.payments.find((p) => p.id === e4.body.payment.payment_id);
+  ok(late.status === 302 && lateRow?.status === 'refunded' && lateRow.refund_due, 'money that arrives after a cancel is marked to be refunded, not lost');
+
+  // --- Fonepay ---
+  const f1 = await buy(c, 'fonepay');
+  const fpid1 = f1.body.payment.payment_id, prn1 = f1.body.payment.reference;
+  const go = await hit(`/payments/${fpid1}/pay`);
+  const target = new URL(go.headers.get('location'));
+  const dvIn = crypto.createHmac('sha512', FP_SECRET).update(['PID', 'MD', 'PRN', 'AMT', 'CRN', 'DT', 'R1', 'R2', 'RU'].map((k) => target.searchParams.get(k)).join(',')).digest('hex');
+  ok(go.status === 302 && target.host === 'dev-clientapi.fonepay.com' && target.searchParams.get('PID') === 'FLOWPID' && target.searchParams.get('AMT') === '100' && target.searchParams.get('DV') === dvIn && /^[A-Z0-9]{1,25}$/.test(prn1), 'Fonepay: the customer is sent to Fonepay with a signed request');
+  ok(target.searchParams.get('RU').endsWith('/payments/fonepay/return') && !target.searchParams.get('RU').includes('?'), 'and the return address is a plain address Fonepay can add to');
+  await hit(`/payments/fonepay/return?${fpAnswer(prn1, 100, { tamper: true })}`);
+  ok((await orderOf(c, f1.body.order.id)).status === 'awaiting_payment', 'a Fonepay answer with a wrong signature does nothing');
+  await hit(`/payments/fonepay/return?${fpAnswer(prn1, 100, { pid: 'SOMEONEELSE' })}`);
+  ok((await orderOf(c, f1.body.order.id)).status === 'awaiting_payment', 'a Fonepay answer for another merchant does nothing');
+  const fok = await hit(`/payments/fonepay/return?${fpAnswer(prn1, 100)}`);
+  ok(fok.status === 302 && (await orderOf(c, f1.body.order.id)).status === 'placed' && (await queue(tuStaff)).some((x) => x.id === f1.body.order.id), 'a genuine Fonepay answer places the order and the station sees it');
+  const f2 = await buy(c, 'fonepay');
+  await hit(`/payments/fonepay/return?${fpAnswer(f2.body.payment.reference, 100, { ps: 'false', rc: 'cancel' })}`);
+  ok((await orderOf(c, f2.body.order.id)).status === 'cancelled', 'Fonepay reporting a cancelled payment cancels the order');
+  await setCfg({ fonepay_merchant_code: null, fonepay_secret_key: null });
+  const f3 = await buy(c, 'fonepay');
+  const simPage = await (await fetch(f3.body.payment.pay_url.replace(/^https?:\/\/[^/]+/, API))).text();
+  ok(/TEST MODE/.test(simPage), 'Fonepay in Sandbox without test details shows the built-in test page');
+  const sim = await fetch(`${API}/payments/${f3.body.payment.payment_id}/simulate`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'outcome=paid' });
+  ok(sim.status === 302 && (await orderOf(c, f3.body.order.id)).status === 'placed', 'and Pay on that page places the order');
+  await setCfg({ fonepay_merchant_code: 'FLOWPID', fonepay_secret_key: FP_SECRET });
+
+  // --- the rest of the places that take payment ---
+  const k = await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Kiosk Guest', customer_phone: '9801234588', payment: 'esewa', consent: true }, tok(tuStaff));
+  ok(k.status === 201 && k.body.order.status === 'awaiting_payment' && k.body.payment.pay_url && !(await queue(tuStaff)).some((x) => x.id === k.body.order.id), 'the kiosk shows a pay address (as a QR) and the order waits');
+  await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(k.body.payment.payment_id, 100))}`);
+  ok((await call('GET', `/kiosk/orders/${k.body.order.id}`, null, tok(tuStaff))).body.status === 'placed', 'once paid the kiosk sees it placed');
+  const pos = await call('POST', '/station/orders', { items: [line(latte)], payment_method: 'fonepay' }, tok(tuStaff));
+  ok(pos.status === 201 && pos.body.order.status === 'awaiting_payment' && pos.body.payment.pay_url, 'the counter can take a Fonepay payment and gets a pay address to show');
+  ok((await call('GET', `/payments/${pos.body.payment.payment_id}`, null, tok(tuStaff))).body.status === 'pending', 'the counter can watch the payment');
+  await hit(`/payments/fonepay/return?${fpAnswer(pos.body.payment.reference, pos.body.payment.amount)}`);
+  ok((await call('GET', `/payments/${pos.body.payment.payment_id}`, null, tok(tuStaff))).body.order.status === 'placed', 'and it is placed when paid');
+
+  // --- passes bought online ---
+  const pc = await newCustomer();
+  const pass = await call('POST', '/passes', { payment_method: 'esewa' }, pc.token);
+  ok(pass.status === 201 && pass.body.payment.pay_url && !(await call('GET', '/passes', null, pc.token)).body.length, 'a pass bought online does not exist until it is paid');
+  await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(pass.body.payment.payment_id, 900))}`);
+  const mine = (await call('GET', '/passes', null, pc.token)).body;
+  ok(mine.length === 1 && mine[0].status === 'active' && mine[0].remaining === 10, 'after payment the 10-cup pass is in the account');
+  ok((await call('POST', '/passes', { payment_method: 'cash' }, pc.token)).status === 400, 'cash passes are only sold at a counter');
+
+  // --- timing out, refunds and the owner's view ---
+  const t1 = await buy(c, 'esewa');
+  await sql(`UPDATE payments SET created_at = now() - interval '30 minutes' WHERE id=$1`, [t1.body.payment.payment_id]);
+  const { expireUnpaid } = await import('../src/lib/orders.js');
+  ok((await expireUnpaid()) >= 1 && (await orderOf(c, t1.body.order.id)).status === 'cancelled', 'an order nobody paid for is cancelled after a while');
+  const r1 = await buy(c, 'fonepay');
+  await hit(`/payments/fonepay/return?${fpAnswer(r1.body.payment.reference, 100)}`);
+  await setStatus(tuStaff, r1.body.order.id, 'cancelled', { reason: 'Machine broke' });
+  const list = (await call('GET', '/owner/payments', null, tok(owner))).body;
+  const refund = list.payments.find((p) => p.id === r1.body.payment.payment_id);
+  ok(refund.status === 'refunded' && refund.refund_due, 'a paid online order the station declines is marked for a refund');
+  ok((await call('GET', '/admin/alerts', null, tok(owner))).body.some((a) => a.type === 'refund'), 'and the owner is told');
+  ok((await call('POST', `/owner/payments/${r1.body.payment.payment_id}/refund-done`, {}, tok(owner))).status === 200 && !(await call('GET', '/owner/payments', null, tok(owner))).body.payments.find((p) => p.id === r1.body.payment.payment_id).refund_due, 'the owner marks it paid back');
+  ok((await call('GET', '/owner/payments', null, tok(mgrCo))).status === 403, 'only the owner sees payments');
+  // the owner's Rs 10 check
+  const test = await call('POST', '/owner/payments/test', { provider: 'esewa' }, tok(owner));
+  ok(test.status === 201 && test.body.pay_url, 'the owner can start a Rs 10 test payment');
+  await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(test.body.payment_id, 10))}`);
+  ok((await call('GET', `/payments/${test.body.payment_id}`, null, tok(owner))).body.status === 'paid', 'and see it come back paid');
+  // sales: online orders are sales only when handed over
+  const o5 = await ovr0();
+  ok(typeof o5 === 'number', 'sales are counted from handed-over orders only');
+  await setCfg({ esewa_enabled: '0', fonepay_enabled: '0' });
+  ok((await buy(c, 'fonepay')).status === 400, 'switching a gateway off stops new orders with it');
 }
 
 /* ---------------------------------------------------------------- 6 */

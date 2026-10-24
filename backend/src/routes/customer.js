@@ -1,10 +1,12 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { z } from 'zod';
 import { query, pool } from '../lib/db.js';
 import { wrap, bad, notFound, forbidden, HttpError } from '../lib/http.js';
 import { authenticate, requireRole, verifyAccess } from '../lib/auth.js';
 import { subscribe } from '../lib/hub.js';
-import { createOrder, quote, fullOrder, rateOrder } from '../lib/orders.js';
+import { createOrder, quote, fullOrder, rateOrder, cancelOrder, confirmPayment, refreshPayment, buyPass } from '../lib/orders.js';
+import { PAYMENT_METHODS, GATEWAYS, payUrl, simulatorAllowed } from '../lib/payments.js';
+import { startPayment, simulate, esewaReturn, esewaFailed, fonepayReturn } from '../lib/payment-flow.js';
 import { getSettings } from '../lib/settings.js';
 import { rt } from '../lib/runtime.js';
 
@@ -14,7 +16,7 @@ const itemSchema = z.object({ product_id: z.string().uuid(), qty: z.number().int
 const orderSchema = z.object({
   station_id: z.string().uuid(),
   items: z.array(itemSchema).min(1).max(20),
-  payment_method: z.enum(['cash', 'pass']).default('cash'),
+  payment_method: z.enum(PAYMENT_METHODS).default('cash'),
   coupon_id: z.string().uuid().optional().nullable(),
   promo_code: z.string().trim().max(30).optional().nullable(),
   note: z.string().max(200).optional(),
@@ -48,7 +50,53 @@ customer.get('/events', wrap(async (req, res) => {
   res.write(`event: hello\ndata: ${JSON.stringify({ ok: true })}\n\n`);
 }));
 
+// --- Payment pages. These are opened in the customer's browser by the gateway, so they carry no sign-in. ---
+const send = (res, r) => {
+  if (r.redirect) return res.redirect(r.redirect);
+  if (r.csp) res.setHeader('Content-Security-Policy', r.csp);
+  res.status(r.status || 200).type('html').send(r.html);
+};
+customer.get('/payments/:id/pay', wrap(async (req, res) => {
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) throw notFound('Payment not found');
+  send(res, await startPayment(req.params.id));
+}));
+customer.post('/payments/:id/simulate', express.urlencoded({ extended: false }), wrap(async (req, res) => {
+  send(res, await simulate(req.params.id, req.body?.outcome === 'paid' ? 'paid' : 'failed'));
+}));
+customer.get('/payments/esewa/return', wrap(async (req, res) => send(res, await esewaReturn(String(req.query.data || '')))));
+customer.get('/payments/esewa/failed/:id', wrap(async (req, res) => send(res, await esewaFailed(req.params.id))));
+customer.get('/payments/fonepay/return', wrap(async (req, res) => send(res, await fonepayReturn(req.query))));
+
 customer.use(authenticate);
+
+// Where a payment stands. For eSewa this also asks eSewa again, so a customer whose browser never came back still gets their order.
+customer.get('/payments/:id', wrap(async (req, res) => {
+  const first = (await query('SELECT * FROM payments WHERE id=$1', [req.params.id])).rows[0];
+  const mine = first && (first.user_id === req.user.id || req.user.role !== 'customer');
+  if (!mine) throw notFound('Payment not found');
+  const p = first.status === 'pending' ? await refreshPayment(first.id).catch(() => first) : first;
+  res.json({ id: p.id, status: p.status, provider: p.provider, amount: p.amount, pay_url: p.status === 'pending' ? payUrl(p.id) : null, order: p.order_id ? await fullOrder(p.order_id, undefined, { reveal: p.user_id === req.user.id }) : null });
+}));
+
+// Test sites only: mark a payment paid or failed without a gateway.
+customer.post('/payments/:id/confirm', wrap(async (req, res) => {
+  const p = (await query('SELECT * FROM payments WHERE id=$1', [req.params.id])).rows[0];
+  if (!p || (p.user_id !== req.user.id && req.user.role === 'customer')) throw notFound('Payment not found');
+  if (!simulatorAllowed(p)) throw forbidden('Payments are confirmed by the gateway on a live site');
+  const failed = req.body?.outcome === 'fail' || req.body?.outcome === 'failed';
+  res.json(await confirmPayment(p.id, failed ? { outcome: 'failed', raw: { simulated: true } } : { ref: `TEST-${Date.now()}`, raw: { simulated: true } }));
+}));
+
+// A customer can stop an order that is still waiting for its online payment.
+customer.post('/orders/:id/cancel', wrap(async (req, res) => {
+  res.json(await cancelOrder(req.params.id, req.user, 'Cancelled before paying'));
+}));
+
+// Buy a 10-cup pass online. (Counters also sell them for cash.)
+customer.post('/passes', requireRole('customer'), wrap(async (req, res) => {
+  const b = z.object({ payment_method: z.enum(GATEWAYS) }).parse(req.body);
+  res.status(201).json(await buyPass(req.user, b.payment_method));
+}));
 
 customer.post('/orders/quote', wrap(async (req, res) => {
   const b = orderSchema.parse(req.body);
@@ -82,7 +130,8 @@ customer.get('/orders/:id', wrap(async (req, res) => {
   const ahead = ['placed', 'preparing'].includes(o.status) && !(o.scheduled_for && !o.released_at)
     ? (await query(`SELECT count(*)::int AS n FROM orders WHERE station_id=$1 AND status IN ('placed','preparing') AND (scheduled_for IS NULL OR released_at IS NOT NULL) AND created_at < $2`, [o.station_id, o.created_at])).rows[0].n
     : 0;
-  res.json({ ...o, ahead, eta_seconds: (ahead + 1) * 90 });
+  const pay_url = o.status === 'awaiting_payment' && o.payment_id ? payUrl(o.payment_id) : null;
+  res.json({ ...o, ahead, eta_seconds: (ahead + 1) * 90, pay_url });
 }));
 
 
