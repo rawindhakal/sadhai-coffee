@@ -26,7 +26,6 @@ const isLocalWeb = () => /^https?:\/\/(localhost|127\.|0\.0\.0\.0|[^/]*\.(local|
 export function offered(provider) {
   if (!isGateway(provider) || !rtBool(`${provider}_enabled`)) return false;
   const g = mods[provider];
-  if (provider === 'nepalpay') return g.missing().length === 0;
   if (g.mode() === 'live') return g.missing().length === 0;
   return isLocalWeb();
 }
@@ -36,7 +35,7 @@ export const enabledPaymentMethods = () => ['cash', ...GATEWAYS.filter(offered)]
 export function gatewayStatus() {
   const one = (p) => {
     const g = mods[p];
-    return { enabled: rtBool(`${p}_enabled`), mode: g.mode(), missing: g.missing(), ready: g.missing().length === 0 || (g.mode() === 'sandbox' && p === 'esewa'), offered: offered(p), real_qr: p === 'fonepay' ? fonepay.qrReady() : p === 'nepalpay' };
+    return { enabled: rtBool(`${p}_enabled`), mode: g.mode(), missing: g.missing(), ready: g.missing().length === 0 || (g.mode() === 'sandbox' && p === 'esewa'), offered: offered(p), real_qr: p === 'fonepay' ? fonepay.qrReady() : false };
   };
   return { esewa: one('esewa'), fonepay: one('fonepay'), nepalpay: one('nepalpay') };
 }
@@ -46,7 +45,7 @@ export const payUrl = (paymentId) => `${apiBase()}/payments/${paymentId}/pay`;
 // Return addresses carry no query string of their own: eSewa and Fonepay add theirs, and each answer says which payment it is about.
 export const returnUrls = (provider, paymentId) => (provider === 'esewa'
   ? { success: `${apiBase()}/payments/esewa/return`, failure: `${apiBase()}/payments/esewa/failed/${paymentId}` }
-  : { success: `${apiBase()}/payments/fonepay/return` });
+  : { success: `${apiBase()}/payments/${provider}/return` });
 export const webUrl = () => (rt('public_web_url') || '').replace(/\/$/, '');
 
 /** The built-in test page may only be used on a test site, or for the owner's own Rs 10 check. */
@@ -66,11 +65,14 @@ export function startPlan(payment, label) {
   const g = mods[payment.provider];
   if (!g) throw bad('Unknown payment');
   if (g.mode() === 'live' && g.missing().length) throw bad('This payment method is not set up yet');
-  if (payment.provider === 'nepalpay') return { type: 'scan' };
   if (payment.provider === 'esewa') {
     const u = returnUrls('esewa', payment.id);
     const f = esewa.formFields({ amount: payment.amount, uuid: payment.provider_ref || payment.id, successUrl: u.success, failureUrl: u.failure });
     return { type: 'form', ...f };
+  }
+  if (payment.provider === 'nepalpay') {
+    if (nepalpay.missing().length) return { type: 'simulator' };
+    return { type: 'redirect', url: nepalpay.requestUrl({ amount: payment.amount, prn: payment.provider_ref || nepalpay.reference(payment.id), returnUrl: returnUrls('nepalpay', payment.id).success, note: label }) };
   }
   if (fonepay.missing().length) {
     // Sandbox without Fonepay's test merchant details: a built-in test page, never available in Live.
@@ -89,13 +91,10 @@ export async function qrFor(payment) {
   let qr = null;
   const ref = payment.provider_ref || (payment.provider === 'nepalpay' ? nepalpay.reference(payment.id) : fonepay.reference(payment.id));
   try {
-    if (payment.provider === 'nepalpay') qr = { kind: 'bank', value: nepalpay.dynamicQr({ amount: payment.amount, ref }) };
-    else if (payment.provider === 'fonepay' && fonepay.qrReady()) qr = { kind: 'bank', value: (await fonepay.createQr({ amount: payment.amount, prn: ref, note: 'Sadhai Coffee' })).qr };
-  } catch (e) { console.error('qr', payment.provider, e.message); if (payment.provider === 'nepalpay') throw bad('The NepalPay QR could not be made. Check the merchant QR text in Settings, Payments.'); }
-  if (!qr) {
-    if (payment.provider === 'nepalpay') throw bad('NepalPay QR is not set up yet');
-    qr = { kind: 'link', value: payUrl(payment.id) };
-  }
+    if (payment.provider === 'fonepay' && fonepay.qrReady()) qr = { kind: 'bank', value: (await fonepay.createQr({ amount: payment.amount, prn: ref, note: 'Sadhai Coffee' })).qr };
+  } catch (e) { console.error('qr', payment.provider, e.message); }
+  // No QR service: the QR holds our payment page, which sends the phone on to the signed NepalPay or Fonepay request.
+  if (!qr) qr = { kind: 'link', value: payUrl(payment.id) };
   await query(`UPDATE payments SET raw = COALESCE(raw,'{}'::jsonb) || $2::jsonb WHERE id=$1`, [payment.id, JSON.stringify({ qr })]);
   return qr;
 }

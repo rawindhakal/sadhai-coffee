@@ -180,7 +180,7 @@ const orderOf = async (c, id) => (await call('GET', `/orders/${id}`, null, c.tok
 {
   const c = await newCustomer();
   // switched off until the owner turns them on
-  await setCfg({ esewa_enabled: null, fonepay_enabled: null, fonepay_merchant_code: null, fonepay_secret_key: null, esewa_mode: null, fonepay_mode: null, nepalpay_enabled: null, nepalpay_merchant_id: null, nepalpay_qr_template: null, nepalpay_ws_url: null, nepalpay_username: null, nepalpay_api_token: null, nepalpay_public_key: null });
+  await setCfg({ esewa_enabled: null, fonepay_enabled: null, fonepay_merchant_code: null, fonepay_secret_key: null, esewa_mode: null, fonepay_mode: null, nepalpay_enabled: null, nepalpay_merchant_code: null, nepalpay_secret_key: null });
   ok((await buy(c, 'esewa')).status === 400 && (await call('GET', '/config')).body.payment_methods.join() === 'cash', 'eSewa and Fonepay are off until the owner turns them on');
   await setCfg({ esewa_enabled: '1', fonepay_enabled: '1', fonepay_merchant_code: 'FLOWPID', fonepay_secret_key: FP_SECRET });
   const cfg = (await call('GET', '/config')).body;
@@ -293,21 +293,30 @@ const orderOf = async (c, id) => (await call('GET', `/orders/${id}`, null, c.tok
   const pf = await buy(c, 'fonepay');
   const pq = await call('GET', `/payments/${pf.body.payment.payment_id}`, null, c.token);
   ok(pq.body.qr?.kind === 'link' && pq.body.qr.value === pf.body.payment.pay_url && pq.body.expires_at, 'a Fonepay payment without the QR service gets a link QR and an expiry time');
-  // NepalPay QR: a real NepalQR for the exact amount, with a valid checksum
-  const T = (t, v) => t + String(v.length).padStart(2, '0') + v;
-  const tplBody = T('00', '01') + T('01', '11') + T('26', T('00', 'NP.NCHL.QR') + T('01', 'SADHAI')) + T('52', '5812') + T('53', '524') + T('58', 'NP') + T('59', 'Sadhai Coffee') + T('60', 'Kathmandu') + '6304';
-  const crc = (str) => { let x = 0xffff; for (const ch of str) { x ^= ch.charCodeAt(0) << 8; for (let i = 0; i < 8; i++) x = (x & 0x8000) ? ((x << 1) ^ 0x1021) & 0xffff : (x << 1) & 0xffff; } return x.toString(16).toUpperCase().padStart(4, '0'); };
+  // NepalPay QR needs only a merchant code and a secret key
+  const NP_SECRET = 'np-test-secret';
+  const npAnswer = (prn, amount, { tamper = false } = {}) => {
+    const v = { PRN: prn, PID: 'NPPID', PS: 'true', RC: 'successful', UID: 'NPTRACE1', BC: 'NABIL', INI: 'tester', P_AMT: String(amount), R_AMT: String(amount) };
+    v.DV = tamper ? 'abcd' : crypto.createHmac('sha512', NP_SECRET).update(['PRN', 'PID', 'PS', 'RC', 'UID', 'BC', 'INI', 'P_AMT', 'R_AMT'].map((k) => v[k]).join(',')).digest('hex');
+    return new URLSearchParams(v).toString();
+  };
   ok((await buy(c, 'nepalpay')).status === 400, 'NepalPay QR is refused until it is switched on');
-  await setCfg({ nepalpay_enabled: '1', nepalpay_merchant_id: 'TERM01', nepalpay_qr_template: tplBody + crc(tplBody), nepalpay_ws_url: 'wss://127.0.0.1:9/nqrws', nepalpay_username: 'u', nepalpay_api_token: 't', nepalpay_public_key: 'k' });
-  ok((await call('GET', '/config')).body.payment_methods.includes('nepalpay'), 'once set up, customers are offered NepalPay QR');
+  await setCfg({ nepalpay_enabled: '1', nepalpay_merchant_code: 'NPPID', nepalpay_secret_key: NP_SECRET });
+  ok((await call('GET', '/config')).body.payment_methods.includes('nepalpay'), 'with only a merchant code and secret key, customers are offered NepalPay QR');
   const n1 = await buy(c, 'nepalpay');
-  const nq = (await call('GET', `/payments/${n1.body.payment.payment_id}`, null, c.token)).body.qr;
-  ok(n1.status === 201 && nq?.kind === 'bank' && nq.value.startsWith('000201') && nq.value.includes('5406100.00') && nq.value.includes('010212') && crc(nq.value.slice(0, -4)) === nq.value.slice(-4), 'the NepalPay QR carries the exact amount, a dynamic marker and a correct checksum');
-  ok(nq.value.includes(n1.body.payment.reference) && n1.body.payment.reference.length <= 24, 'and it carries our payment reference so NCHL can tell us which order was paid');
-  await setCfg({ nepalpay_enabled: null, nepalpay_merchant_id: null, nepalpay_qr_template: null, nepalpay_ws_url: null, nepalpay_username: null, nepalpay_api_token: null, nepalpay_public_key: null });
-  const sm = await call('GET', '/station/menu', null, tok(tuStaff));
-  ok(sm.status === 200 && Array.isArray(sm.body.categories) && sm.body.categories.flatMap((x) => x.products).every((p) => Array.isArray(p.option_groups)), 'the counter menu has categories and every item has its add-on groups (the New order screen needs both)');
-  ok((await orderOf(c, pf.body.order.id)).payment_id === pf.body.payment.payment_id, 'an order waiting for payment tells the app which payment to open');
+  const np = n1.body.payment;
+  const nq = (await call('GET', `/payments/${np.payment_id}`, null, c.token)).body.qr;
+  ok(n1.status === 201 && nq?.kind === 'link' && nq.value === np.pay_url, 'the NepalPay QR opens our payment page');
+  const goes = await hit(`/payments/${np.payment_id}/pay`);
+  const loc = new URL(goes.headers.get('location'));
+  ok(goes.status === 302 && loc.searchParams.get('PID') === 'NPPID' && loc.searchParams.get('AMT') === '100' && loc.searchParams.get('PRN') === np.reference && loc.searchParams.get('RU').endsWith('/payments/nepalpay/return'), 'which sends the phone on with a request for the exact amount');
+  const want = crypto.createHmac('sha512', NP_SECRET).update(['PID', 'MD', 'PRN', 'AMT', 'CRN', 'DT', 'R1', 'R2', 'RU'].map((k) => loc.searchParams.get(k)).join(',')).digest('hex');
+  ok(loc.searchParams.get('DV') === want, 'signed with the secret key');
+  await hit(`/payments/nepalpay/return?${npAnswer(np.reference, 100, { tamper: true })}`);
+  ok((await orderOf(c, n1.body.order.id)).status === 'awaiting_payment', 'an answer with a wrong signature does nothing');
+  await hit(`/payments/nepalpay/return?${npAnswer(np.reference, 100)}`);
+  ok((await orderOf(c, n1.body.order.id)).status === 'placed', 'a signed answer places the order');
+  await setCfg({ nepalpay_enabled: null, nepalpay_merchant_code: null, nepalpay_secret_key: null });
   // order flow: the owner's rules apply to every way in
   const fl = (await call('GET', '/owner/order-flow', null, tok(owner))).body.flow;
   const noCash = { ...fl, web: { ...fl.web, payments: { ...fl.web.payments, cash: false }, max_cups: 1, notes: false } };

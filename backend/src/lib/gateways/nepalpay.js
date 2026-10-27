@@ -2,85 +2,45 @@ import crypto from 'node:crypto';
 import { rt } from '../runtime.js';
 
 /**
- * NepalPay QR (NCHL). The shop shows a dynamic NepalQR (EMVCo merchant-presented QR) that any bank or wallet app can scan. The amount and our
- * payment reference are put into the QR, and NCHL's WebSocket channel tells us when the payment is done (see doc.connectips.com, NepalPay QR WebSocket).
- *
- * The bank that gave you NepalPay QR hands over a static merchant QR string. We turn it into a dynamic one by setting tag 01 to 12, adding the
- * amount (tag 54) and our reference (tag 62), and writing a fresh CRC (tag 63).
+ * NepalPay QR with just a merchant code and a secret key. The customer scans our QR with any NepalPay bank or wallet app, which opens the
+ * signed payment request; the answer comes back to our address signed with the same secret, so nothing else is needed.
+ * Request DV = HMAC-SHA512(secret, "PID,MD,PRN,AMT,CRN,DT,R1,R2,RU"); answer DV = HMAC-SHA512(secret, "PRN,PID,PS,RC,UID,BC,INI,P_AMT,R_AMT").
  */
+const SANDBOX = 'https://dev-clientapi.fonepay.com/api/merchantRequest';
+const LIVE = 'https://clientapi.fonepay.com/api/merchantRequest';
+
 export const mode = () => (rt('nepalpay_mode') === 'live' ? 'live' : 'sandbox');
-export const merchantId = () => (rt('nepalpay_merchant_id') || '').trim();
-export const template = () => (rt('nepalpay_qr_template') || '').trim();
+export const url = () => (mode() === 'live' ? LIVE : SANDBOX);
+export const merchantCode = () => (rt('nepalpay_merchant_code') || '').trim();
+const secret = () => rt('nepalpay_secret_key');
 
 export function missing() {
   const out = [];
-  if (!template()) out.push('nepalpay_qr_template');
-  if (!merchantId()) out.push('nepalpay_merchant_id');
-  if (!rt('nepalpay_ws_url')) out.push('nepalpay_ws_url');
-  if (!rt('nepalpay_username')) out.push('nepalpay_username');
-  if (!rt('nepalpay_api_token')) out.push('nepalpay_api_token');
-  if (!rt('nepalpay_public_key')) out.push('nepalpay_public_key');
+  if (!merchantCode()) out.push('nepalpay_merchant_code');
+  if (!secret()) out.push('nepalpay_secret_key');
   return out;
 }
 
-/** 24 letters and digits, unique for every attempt; this is the transaction id (request_id) in NCHL's WebSocket messages. */
+const sign = (message) => crypto.createHmac('sha512', secret()).update(message).digest('hex');
 export const reference = (id) => String(id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 24).toUpperCase();
+const fmtDate = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
 
-/* ---------------- EMVCo QR ---------------- */
-export function parseTlv(s) {
-  const out = [];
-  let i = 0;
-  while (i < s.length) {
-    const tag = s.slice(i, i + 2), len = Number(s.slice(i + 2, i + 4));
-    if (!/^\d{2}$/.test(tag) || !Number.isInteger(len) || i + 4 + len > s.length) throw new Error('That is not a valid NepalQR string');
-    out.push([tag, s.slice(i + 4, i + 4 + len)]);
-    i += 4 + len;
-  }
-  return out;
-}
-const tlv = (tag, value) => `${tag}${String(value.length).padStart(2, '0')}${value}`;
-
-export function crc16(str) {
-  let crc = 0xffff;
-  for (let i = 0; i < str.length; i++) {
-    crc ^= str.charCodeAt(i) << 8;
-    for (let b = 0; b < 8; b++) crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
-  }
-  return crc.toString(16).toUpperCase().padStart(4, '0');
+export function requestUrl({ amount, prn, returnUrl, note }) {
+  const p = {
+    PID: merchantCode(), MD: 'P', PRN: prn, AMT: String(Math.round(Number(amount))), CRN: 'NPR', DT: fmtDate(new Date()),
+    R1: (note || 'Sadhai Coffee').replace(/[^\w .-]/g, '').slice(0, 50) || 'Sadhai Coffee', R2: 'N/A', RU: returnUrl,
+  };
+  p.DV = sign([p.PID, p.MD, p.PRN, p.AMT, p.CRN, p.DT, p.R1, p.R2, p.RU].join(','));
+  return `${url()}?${new URLSearchParams(p)}`;
 }
 
-/** A dynamic NepalQR for one payment. */
-export function dynamicQr({ amount, ref, tpl = template() }) {
-  const fields = parseTlv(tpl).filter(([t]) => !['01', '54', '62', '63'].includes(t));
-  fields.push(['01', '12']);
-  fields.push(['54', Number(amount).toFixed(2)]);
-  // Additional data: 01 bill number, 05 reference label, 07 terminal label. The reference goes in the bill number and the reference label.
-  fields.push(['62', tlv('01', ref) + tlv('05', ref) + tlv('07', merchantId().slice(0, 25) || 'SADHAI')]);
-  fields.sort((a, b) => Number(a[0]) - Number(b[0]));
-  const body = fields.map(([t, v]) => tlv(t, v)).join('') + '6304';
-  return body + crc16(body);
-}
-
-/* ---------------- NCHL WebSocket ---------------- */
-/** The API token is encrypted with NCHL's public key, RSA/ECB/PKCS1Padding. */
-export function encryptToken() {
-  let pem = rt('nepalpay_public_key').trim();
-  if (!pem.includes('BEGIN')) pem = `-----BEGIN PUBLIC KEY-----\n${pem.replace(/\s+/g, '').match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----`;
-  return crypto.publicEncrypt({ key: pem, padding: crypto.constants.RSA_PKCS1_PADDING }, Buffer.from(rt('nepalpay_api_token'))).toString('base64');
-}
-
-export function wsUrl() {
-  const u = (rt('nepalpay_ws_url') || '').trim().replace(/\/$/, '');
-  return /\/nqrws$/.test(u) ? u : `${u}/nqrws`;
-}
-
-/** NCHL's message tells us if the payment went through: the debit must be 000 and the credit 000, 999 or DEFER. */
-export function readMessage(m) {
-  const status = String(m.status || '').toUpperCase();
-  if (status === 'COMPLETED') {
-    const ok = String(m.debit_status) === '000' && ['000', '999', 'DEFER'].includes(String(m.credit_status).toUpperCase());
-    return { done: true, ok };
-  }
-  if (status === 'FAILED') return { done: true, ok: false };
-  return { done: false, ok: false };
+export function readCallback(q) {
+  const names = ['PRN', 'PID', 'PS', 'RC', 'UID', 'BC', 'INI', 'P_AMT', 'R_AMT'];
+  const v = Object.fromEntries(names.map((n) => [n, String(q[n] ?? '')]));
+  if (!q.DV) throw new Error('That answer is not signed');
+  const a = Buffer.from(sign(names.map((n) => v[n]).join(','))), b = Buffer.from(String(q.DV).toLowerCase());
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new Error('That answer has a wrong signature');
+  if (v.PID !== merchantCode()) throw new Error('That answer is for a different merchant');
+  const ok = v.PS === 'true' && /^success/i.test(v.RC);
+  return { ok, failed: !ok, ref: v.UID || null, amount: Math.round(Number(v.P_AMT || 0)), prn: v.PRN, raw: v };
 }

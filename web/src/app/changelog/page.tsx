@@ -21,15 +21,21 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
-    version: '2.0.0',
+    version: '2.0.1',
     date: '27 October 2026',
     badge: 'Latest',
+    highlight: 'NepalPay QR needs only a merchant code and secret key',
+    changes: [{ category: 'Fixed', items: [{ title: 'NepalPay QR', desc: 'It now works with just the merchant code and secret key you were given, on the website, app, kiosk and counter.' }] }],
+  },
+  {
+    version: '2.0.0',
+    date: '27 October 2026',
     highlight: 'Pay by QR in a window, NepalPay QR, one set of ordering rules',
     changes: [
       {
         category: 'Added',
         items: [
-          { title: 'NepalPay QR', desc: 'Customers scan a NepalQR from any bank or wallet app. NCHL tells us the moment it is paid.' },
+          { title: 'NepalPay QR', desc: 'Customers scan a QR with any NepalPay bank or wallet app and pay the exact amount.' },
           { title: 'Real Fonepay QR', desc: 'Fonepay now shows a real QR for the exact amount when its QR service is set up.' },
           { title: 'Pay window', desc: 'The QR opens as a window on the same page, with a clear status. It closes by itself once you have paid, and the order goes to the barista.' },
           { title: 'Order flow', desc: 'The owner sets how ordering works for the app, website, kiosk, kiosk QR and counter in one place, and every screen follows it.' },

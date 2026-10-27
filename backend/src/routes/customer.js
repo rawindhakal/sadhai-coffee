@@ -6,8 +6,7 @@ import { authenticate, requireRole, verifyAccess } from '../lib/auth.js';
 import { subscribe } from '../lib/hub.js';
 import { createOrder, quote, fullOrder, rateOrder, cancelOrder, confirmPayment, refreshPayment, buyPass } from '../lib/orders.js';
 import { PAYMENT_METHODS, GATEWAYS, payUrl, simulatorAllowed, qrFor } from '../lib/payments.js';
-import { watchNepalpay } from '../lib/qr-watch.js';
-import { startPayment, simulate, esewaReturn, esewaFailed, fonepayReturn } from '../lib/payment-flow.js';
+import { startPayment, simulate, esewaReturn, esewaFailed, fonepayReturn, nepalpayReturn } from '../lib/payment-flow.js';
 import { getSettings } from '../lib/settings.js';
 import { rt } from '../lib/runtime.js';
 
@@ -67,6 +66,7 @@ customer.post('/payments/:id/simulate', express.urlencoded({ extended: false }),
 customer.get('/payments/esewa/return', wrap(async (req, res) => send(res, await esewaReturn(String(req.query.data || '')))));
 customer.get('/payments/esewa/failed/:id', wrap(async (req, res) => send(res, await esewaFailed(req.params.id))));
 customer.get('/payments/fonepay/return', wrap(async (req, res) => send(res, await fonepayReturn(req.query))));
+customer.get('/payments/nepalpay/return', wrap(async (req, res) => send(res, await nepalpayReturn(req.query))));
 
 customer.use(authenticate);
 
@@ -77,7 +77,6 @@ customer.get('/payments/:id', wrap(async (req, res) => {
   if (!mine) throw notFound('Payment not found');
   const p = first.status === 'pending' ? await refreshPayment(first.id).catch(() => first) : first;
   const qr = p.status === 'pending' ? await qrFor(p) : null;
-  if (qr && p.provider === 'nepalpay') watchNepalpay(p);
   res.json({ id: p.id, status: p.status, provider: p.provider, amount: p.amount, pay_url: p.status === 'pending' ? payUrl(p.id) : null, qr, expires_at: new Date(new Date(p.created_at).getTime() + 15 * 60_000).toISOString(), order: p.order_id ? await fullOrder(p.order_id, undefined, { reveal: p.user_id === req.user.id }) : null });
 }));
 

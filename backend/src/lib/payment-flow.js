@@ -4,6 +4,7 @@ import { confirmPayment } from './orders.js';
 import { startPlan, simulatorAllowed, webUrl } from './payments.js';
 import * as esewa from './gateways/esewa.js';
 import * as fonepay from './gateways/fonepay.js';
+import * as nepalpay from './gateways/nepalpay.js';
 
 const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const money = (n) => `Rs ${Number(n).toLocaleString('en-IN')}`;
@@ -25,7 +26,6 @@ export async function startPayment(paymentId) {
   const p = rows[0];
   if (!p || !['esewa', 'fonepay', 'nepalpay'].includes(p.provider)) return { status: 404, html: page('Not found', '<h2>That payment link is not valid.</h2>') };
   if (p.status !== 'pending') return { redirect: await landing(p, p.status === 'paid' ? 'ok' : 'failed') };
-  if (p.provider === 'nepalpay') return { html: page('Scan to pay', '<h2>Scan the QR with your bank or wallet app</h2><p>Use the QR on the shop screen.</p>') };
   const plan = startPlan(p, p.pickup_code ? `Sadhai ${p.pickup_code}` : 'Sadhai Coffee');
   if (plan.type === 'redirect') return { redirect: plan.url };
   if (plan.type === 'form') {
@@ -41,7 +41,7 @@ export async function startPayment(paymentId) {
   if (!simulatorAllowed(p)) return { status: 400, html: page('Not ready', '<h2>This payment method is not ready yet.</h2><p>Please pay with cash at the counter.</p>') };
   return {
     html: page('Test payment', `<p style="background:#F2A81D;border-radius:99px;display:inline-block;padding:4px 14px;font-weight:700">TEST MODE</p>
-      <h2 style="margin:12px 0 4px">Fonepay test payment</h2><p>${money(p.amount)} to Sadhai Coffee. No real money moves.</p>
+      <h2 style="margin:12px 0 4px">${p.provider === 'nepalpay' ? 'NepalPay' : 'Fonepay'} test payment</h2><p>${money(p.amount)} to Sadhai Coffee. No real money moves.</p>
       <form method="POST" action="/payments/${esc(p.id)}/simulate" style="display:flex;gap:10px;justify-content:center;margin-top:18px">
         <button name="outcome" value="paid" style="padding:12px 20px;font-size:16px;background:#2F5D46;color:#fff;border:0;border-radius:12px">Pay</button>
         <button name="outcome" value="failed" style="padding:12px 20px;font-size:16px;background:#fff;border:1px solid #D9C8AE;border-radius:12px">Fail</button></form>`),
@@ -101,12 +101,14 @@ export async function esewaFailed(paymentId) {
 }
 
 /** Fonepay sent the browser back with PRN, PS, RC, UID and a signature. */
-export async function fonepayReturn(q) {
-  const p = await byRef(String(q.PRN || ''), 'fonepay');
+export const fonepayReturn = (q) => signedReturn('fonepay', fonepay, q);
+export const nepalpayReturn = (q) => signedReturn('nepalpay', nepalpay, q);
+async function signedReturn(provider, gw, q) {
+  const p = await byRef(String(q.PRN || ''), provider);
   if (!p) return { redirect: `${webUrl()}/order?pay=failed` };
   if (p.status === 'paid' || p.status === 'refunded') return { redirect: await landing(p, p.status === 'paid' ? 'ok' : 'failed') };
   let r;
-  try { r = fonepay.readCallback(q); } catch { return { redirect: await landing(p, 'failed') }; } // not genuine: leave it pending, the order times out
+  try { r = gw.readCallback(q); } catch { return { redirect: await landing(p, 'failed') }; } // not genuine: leave it pending, the order times out
   if (!r.ok) {
     await confirmPayment(p.id, { outcome: 'failed', raw: { callback: r.raw } });
     return { redirect: await landing(p, 'failed') };

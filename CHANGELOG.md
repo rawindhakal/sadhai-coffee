@@ -6,10 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.0.1] - 2026-10-27
+
+### Fixed
+- NepalPay QR works with only a merchant code and secret key. The NCHL WebSocket setup (extra keys, QR text, public key) is removed.
+
+---
+
 ## [2.0.0] - 2026-10-27
 
 ### Added
-- NepalPay QR (NCHL): dynamic NepalQR for the exact amount, paid status through NCHL's WebSocket channel (`backend/src/lib/gateways/nepalpay.js`, `qr-watch.js`).
+- NepalPay QR with just a merchant code and a secret key (`backend/src/lib/gateways/nepalpay.js`).
 - Fonepay Dynamic QR (`thirdPartyDynamicQrDownload` and `GetStatus`) when the QR user name and password are saved; a link QR is used until then.
 - A pay-by-QR window (`PayModal` on the web, a bottom sheet in the app) on the cart, order page, passes, counter, kiosk and the owner's Rs 10 test. No page changes.
 - Order flow (Settings, Order flow): per way of ordering (app, website, kiosk QR, kiosk, counter): on or off, ways to pay, item limit, notes, pickup later, kiosk name and phone. Enforced by the API and read from `/config`.

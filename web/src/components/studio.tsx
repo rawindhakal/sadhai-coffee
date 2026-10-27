@@ -111,12 +111,9 @@ const GW: Record<string, { name: string; blurb: string; fields: GwField[]; sandb
     { key: 'fonepay_merchant_code', label: 'Merchant code (PID)' }, { key: 'fonepay_secret_key', label: 'Shared secret key', secret: true },
     { key: 'fonepay_qr_username', label: 'QR API user name' }, { key: 'fonepay_qr_password', label: 'QR API password', secret: true }],
     sandboxNote: 'In Sandbox, use the test merchant details Fonepay gave you.', ret: '/payments/fonepay/return' },
-  nepalpay: { name: 'NepalPay QR', blurb: 'NepalPay QR by NCHL. Customers scan a NepalQR from any NepalPay bank or wallet app. NCHL’s WebSocket channel tells Sadhai the moment it is paid.', fields: [
-    { key: 'nepalpay_merchant_id', label: 'Terminal / merchant ID' },
-    { key: 'nepalpay_qr_template', label: 'Your merchant QR text', area: true, hint: 'The text inside the static QR your bank gave you. It starts with 000201.' },
-    { key: 'nepalpay_ws_url', label: 'NCHL WebSocket address' }, { key: 'nepalpay_username', label: 'NCHL user name' },
-    { key: 'nepalpay_api_token', label: 'NCHL API token', secret: true }, { key: 'nepalpay_public_key', label: 'NCHL public key', secret: true, area: true }],
-    sandboxNote: 'Use the test details your bank or NCHL gave you.', ret: null },
+  nepalpay: { name: 'NepalPay QR', blurb: 'NepalPay QR. Customers scan the QR with any NepalPay bank or wallet app and pay the exact amount. Needs only the merchant code and secret key you were given.', fields: [
+    { key: 'nepalpay_merchant_code', label: 'Merchant code' }, { key: 'nepalpay_secret_key', label: 'Secret key', secret: true }],
+    sandboxNote: 'Sandbox uses the test server, so no real money moves.', ret: '/payments/nepalpay/return' },
 };
 
 function GatewayCard({ id, data, reload }: { id: 'esewa' | 'fonepay' | 'nepalpay'; data: any[]; reload: () => void }) {
@@ -170,7 +167,7 @@ function GatewayCard({ id, data, reload }: { id: 'esewa' | 'fonepay' | 'nepalpay
           );
         })}
       </div>
-      {g.ret ? <p className="small muted">Return address for the gateway: <code>{BASE}{g.ret}</code>. Sadhai sends it with every payment, so there is nothing to type into the {g.name} account for it.</p> : <p className="small muted">Needs every field above before customers see it. NepalPay QR has no test page of its own: try it with the Rs 10 button and your bank’s test app.</p>}
+      <p className="small muted">Return address for the gateway: <code>{BASE}{g.ret}</code>. Sadhai sends it with every payment, so there is nothing to type into the {g.name} account for it.</p>
       <div className="row wrap">
         <button className="btn primary" disabled={!Object.keys(edit).length} onClick={() => save()}>{Object.keys(edit).length ? 'Save changes' : 'No changes'}</button>
         <button className="btn" onClick={runTest}>Try a Rs 10 payment</button>
