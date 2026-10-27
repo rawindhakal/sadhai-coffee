@@ -52,14 +52,15 @@ export function make(prefix) {
   }
 
   async function post(path, body) {
-    const r = await fetch(`${API[mode()]}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+    const r = await fetch(`${API[mode()]}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
     return r.json().catch(() => ({}));
   }
 
   async function createQr({ amount, prn, note }) {
+    // Same request the earlier, working version sent: amount with two decimals, remarks2 'SadhaiCoffee', user name trimmed.
     const remarks1 = clean(note);
-    const b = { amount: String(Math.round(Number(amount))), remarks1, remarks2: 'N/A', prn, merchantCode: merchantCode(), username: get('qr_username'), password: get('qr_password') };
-    b.dataValidation = sign([b.amount, prn, b.merchantCode, remarks1, 'N/A'].join(','));
+    const b = { amount: Number(amount).toFixed(2), remarks1, remarks2: 'SadhaiCoffee', prn, merchantCode: merchantCode(), username: (get('qr_username') || '').trim(), password: get('qr_password') };
+    b.dataValidation = sign([b.amount, prn, b.merchantCode, remarks1, b.remarks2].join(','));
     const j = await post('thirdPartyDynamicQrDownload', b);
     const qr = j.qrMessage || j.data?.qrMessage;
     if (!qr) throw new Error(j.message || 'The QR service did not give a QR code');
@@ -67,7 +68,7 @@ export function make(prefix) {
   }
 
   async function qrStatus({ prn }) {
-    const b = { prn, merchantCode: merchantCode(), username: get('qr_username'), password: get('qr_password') };
+    const b = { prn, merchantCode: merchantCode(), username: (get('qr_username') || '').trim(), password: get('qr_password') };
     b.dataValidation = sign([prn, b.merchantCode].join(','));
     const j = await post('thirdPartyDynamicQrGetStatus', b);
     const st = String(j.paymentStatus || j.status || '').toLowerCase();
