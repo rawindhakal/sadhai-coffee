@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { query } from '../lib/db.js';
 import { wrap, bad, notFound, conflict, normalizePhone, forbidden } from '../lib/http.js';
 import { authenticate, requireRole, assertStationAccess } from '../lib/auth.js';
-import { createOrder, advanceOrder, fullOrder, stationMenu, buyPass } from '../lib/orders.js';
+import { createOrder, advanceOrder, fullOrder, stationMenu, buyPass, confirmPayment } from '../lib/orders.js';
 import { audit, notify } from '../lib/notify.js';
 import { publish } from '../lib/hub.js';
 
@@ -53,6 +53,27 @@ station.get('/orders', wrap(async (req, res) => {
   );
   const orders = await Promise.all(rows.map((r) => fullOrder(r.id)));
   res.json(orders);
+}));
+
+// Orders at this station still waiting for an online payment. A QR made from the shop's own printed QR cannot be checked by the gateway, so staff
+// look at their bank or wallet app and press "Payment received".
+station.get('/awaiting', wrap(async (req, res) => {
+  const id = await sid(req);
+  const { rows } = await query(
+    `SELECT o.id, o.pickup_code, o.total, o.channel, o.customer_name, o.payment_method, o.created_at, p.id AS payment_id,
+            COALESCE((p.raw->'qr'->>'manual')::boolean, false) AS manual
+       FROM orders o JOIN payments p ON p.order_id=o.id AND p.status='pending'
+      WHERE o.station_id=$1 AND o.status='awaiting_payment' ORDER BY o.created_at`, [id]);
+  res.json(rows);
+}));
+station.post('/payments/:id/confirm', wrap(async (req, res) => {
+  const p = (await query(`SELECT p.*, o.station_id FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=$1`, [req.params.id])).rows[0];
+  if (!p) throw notFound('Payment not found');
+  await assertStationAccess(req.user, p.station_id);
+  if (!p.raw?.qr?.manual) throw conflict('This payment is confirmed by the gateway, not by hand');
+  if (p.status !== 'pending') throw conflict('This payment is already settled');
+  await audit(req.user.id, 'payment.manual_confirm', 'payment', p.id, { amount: p.amount, provider: p.provider });
+  res.json(await confirmPayment(p.id, { ref: `MANUAL-${Date.now()}`, raw: { confirmed_by: req.user.id } }));
 }));
 
 station.get('/orders/lookup', wrap(async (req, res) => {

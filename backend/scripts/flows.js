@@ -317,6 +317,22 @@ const orderOf = async (c, id) => (await call('GET', `/orders/${id}`, null, c.tok
   await hit(`/payments/nepalpay/return?${npAnswer(np.reference, 100)}`);
   ok((await orderOf(c, n1.body.order.id)).status === 'placed', 'a signed answer places the order');
   await setCfg({ nepalpay_enabled: null, nepalpay_merchant_code: null, nepalpay_secret_key: null });
+  // the shop's own printed QR text becomes a QR for the exact amount at the kiosk, confirmed by staff
+  const T = (t, v) => t + String(v.length).padStart(2, '0') + v;
+  const crc = (str) => { let x = 0xffff; for (const ch of str) { x ^= ch.charCodeAt(0) << 8; for (let i = 0; i < 8; i++) x = (x & 0x8000) ? ((x << 1) ^ 0x1021) & 0xffff : (x << 1) & 0xffff; } return x.toString(16).toUpperCase().padStart(4, '0'); };
+  const tplBody = T('00', '01') + T('01', '11') + T('26', T('00', 'FONEPAY') + T('01', 'SHOP1')) + T('52', '5812') + T('53', '524') + T('58', 'NP') + T('59', 'Sadhai Coffee') + T('60', 'Kathmandu') + '6304';
+  await setCfg({ fonepay_enabled: '1', fonepay_merchant_code: 'FLOWPID', fonepay_secret_key: FP_SECRET, fonepay_qr_template: tplBody + crc(tplBody) });
+  const kq = await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'QR Guest', customer_phone: '9822222222', payment: 'fonepay', consent: true }, tok(tuStaff));
+  const kqr = (await call('GET', `/payments/${kq.body.payment.payment_id}`, null, tok(tuStaff))).body.qr;
+  ok(kqr?.kind === 'bank' && kqr.manual && kqr.value.includes('5406100.00') && kqr.value.includes('010212') && crc(kqr.value.slice(0, -4)) === kqr.value.slice(-4), 'the kiosk shows a real QR for the exact amount made from the printed QR, with a correct checksum');
+  ok(kqr.value.includes(kq.body.payment.reference) && kqr.value.includes('FONEPAY'), 'carrying our reference and the shop details');
+  const wq = await buy(c, 'fonepay');
+  ok((await call('GET', `/payments/${wq.body.payment.payment_id}`, null, c.token)).body.qr.kind === 'link', 'the website and app still use the payment page, which confirms by itself');
+  const aw = (await call('GET', '/station/awaiting', null, tok(tuStaff))).body;
+  ok(aw.some((x) => x.id === kq.body.order.id && x.manual), 'the counter sees the guest waiting to pay');
+  ok((await call('POST', `/station/payments/${kq.body.payment.payment_id}/confirm`, {}, tok(tuStaff))).status === 200 && (await call('GET', `/kiosk/orders/${kq.body.order.id}`, null, tok(tuStaff))).body.status === 'placed', 'Payment received puts the order on the queue');
+  ok((await call('POST', `/station/payments/${wq.body.payment.payment_id}/confirm`, {}, tok(tuStaff))).status === 409, 'a gateway-confirmed payment cannot be confirmed by hand');
+  await setCfg({ fonepay_qr_template: null });
   // order flow: the owner's rules apply to every way in
   const fl = (await call('GET', '/owner/order-flow', null, tok(owner))).body.flow;
   const noCash = { ...fl, web: { ...fl.web, payments: { ...fl.web.payments, cash: false }, max_cups: 1, notes: false } };

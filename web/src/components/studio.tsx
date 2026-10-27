@@ -109,10 +109,13 @@ const GW: Record<string, { name: string; blurb: string; fields: GwField[]; sandb
     sandboxNote: 'In Sandbox the public test code EPAYTEST and eSewa’s test key are used, and eSewa’s test server takes the payment.', ret: '/payments/esewa/return' },
   fonepay: { name: 'Fonepay', blurb: 'Fonepay Dynamic QR. A real QR for the exact amount that any bank or wallet app can scan. Without the QR user name and password, a link QR to Fonepay’s web page is used instead.', fields: [
     { key: 'fonepay_merchant_code', label: 'Merchant code (PID)' }, { key: 'fonepay_secret_key', label: 'Shared secret key', secret: true },
-    { key: 'fonepay_qr_username', label: 'QR API user name' }, { key: 'fonepay_qr_password', label: 'QR API password', secret: true }],
+    { key: 'fonepay_qr_username', label: 'QR API user name', hint: 'Needed for the real dynamic QR.' }, { key: 'fonepay_qr_password', label: 'QR API password', secret: true },
+    { key: 'fonepay_qr_template', label: 'Your printed QR text (optional)', area: true, hint: 'Starts with 000201. Used at the kiosk and counter when there is no QR user name and password.' }],
     sandboxNote: 'In Sandbox, use the test merchant details Fonepay gave you.', ret: '/payments/fonepay/return' },
-  nepalpay: { name: 'NepalPay QR', blurb: 'NepalPay QR. Customers scan the QR with any NepalPay bank or wallet app and pay the exact amount. Needs only the merchant code and secret key you were given.', fields: [
-    { key: 'nepalpay_merchant_code', label: 'Merchant code' }, { key: 'nepalpay_secret_key', label: 'Secret key', secret: true }],
+  nepalpay: { name: 'NepalPay QR', blurb: 'NepalPay QR. Customers scan a QR with any NepalPay bank or wallet app and pay the exact amount. The merchant code and secret key are enough to start.', fields: [
+    { key: 'nepalpay_merchant_code', label: 'Merchant code' }, { key: 'nepalpay_secret_key', label: 'Secret key', secret: true },
+    { key: 'nepalpay_qr_username', label: 'QR API user name', hint: 'Needed for the real dynamic QR.' }, { key: 'nepalpay_qr_password', label: 'QR API password', secret: true },
+    { key: 'nepalpay_qr_template', label: 'Your printed QR text (optional)', area: true, hint: 'Starts with 000201. Used at the kiosk and counter when there is no QR user name and password.' }],
     sandboxNote: 'Sandbox uses the test server, so no real money moves.', ret: '/payments/nepalpay/return' },
 };
 
@@ -154,6 +157,18 @@ function GatewayCard({ id, data, reload }: { id: 'esewa' | 'fonepay' | 'nepalpay
           <select value={mode} onChange={(e) => setEdit({ ...edit, [`${id}_mode`]: e.target.value })}><option value="sandbox">Sandbox (test)</option><option value="live">Live (real money)</option></select>
         </Field>
       </div>
+      {id !== 'esewa' && (() => {
+        const set = (k: string) => !!item(`${id}_${k}`)?.is_set || (`${id}_${k}` in edit && !!edit[`${id}_${k}`]);
+        const qm = set('qr_username') && set('qr_password') && set('merchant_code') && set('secret_key') ? 'api' : set('qr_template') ? 'own' : 'link';
+        return (
+          <div className="card flat" style={{ borderColor: qm === 'api' ? 'var(--hill)' : 'var(--marigold)' }}>
+            <strong>{qm === 'api' ? 'Real dynamic QR is on' : qm === 'own' ? 'QR made from your printed QR text' : 'Not a real QR yet'}</strong>
+            <p className="small muted" style={{ margin: '4px 0 0' }}>{qm === 'api' ? `Every payment gets its own ${g.name} QR for the exact amount, and the order starts by itself when it is paid.`
+              : qm === 'own' ? 'The kiosk and counter show a QR for the exact amount made from your printed QR. The gateway cannot tell us it was paid, so the barista presses Payment received. The website and app use the payment page.'
+              : `With only the merchant code and secret key the QR opens the ${g.name} payment page on the phone. For the real dynamic QR, ask ${g.name} for the QR API user name and password and save them below.`}</p>
+          </div>
+        );
+      })()}
       <div className="grid g3">
         {g.fields.map((f) => {
           const it = item(f.key);

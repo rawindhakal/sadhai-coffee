@@ -21,9 +21,18 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
-    version: '2.0.1',
+    version: '2.0.2',
     date: '27 October 2026',
     badge: 'Latest',
+    highlight: 'Real dynamic QR for Fonepay and NepalPay',
+    changes: [{ category: 'Added', items: [
+      { title: 'Real dynamic QR', desc: 'Fonepay and NepalPay now show their own QR for the exact amount, and the order starts by itself when it is paid. Needs the QR user name and password from the gateway.' },
+      { title: 'Your printed QR', desc: 'Without those, the kiosk and counter can make a QR for the exact amount from the shop QR. The barista presses Payment received.' },
+    ] }],
+  },
+  {
+    version: '2.0.1',
+    date: '27 October 2026',
     highlight: 'NepalPay QR needs only a merchant code and secret key',
     changes: [{ category: 'Fixed', items: [{ title: 'NepalPay QR', desc: 'It now works with just the merchant code and secret key you were given, on the website, app, kiosk and counter.' }] }],
   },

@@ -9,8 +9,8 @@ import { PAY_LABEL } from './customer';
  * It shows the QR, says what is happening (waiting, paid, not paid), and closes itself a moment after the money arrives.
  * `onPaid` is where the page checks the order; `onClose` is when the person leaves it without paying (the payment stays open for 15 minutes).
  */
-export function PayModal({ paymentId, amount, onPaid, onClose, onCancel, big = false }: {
-  paymentId: string; amount: number; onPaid: (p: any) => void; onClose: () => void; onCancel?: () => void; big?: boolean;
+export function PayModal({ paymentId, amount, onPaid, onClose, onCancel, onManual, big = false }: {
+  paymentId: string; amount: number; onPaid: (p: any) => void; onClose: () => void; onCancel?: () => void; onManual?: () => void; big?: boolean;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [p, setP] = useState<any>(null);
@@ -48,6 +48,7 @@ export function PayModal({ paymentId, amount, onPaid, onClose, onCancel, big = f
   const status: 'loading' | 'waiting' | 'paid' | 'failed' = !p ? 'loading' : p.status === 'paid' ? 'paid' : p.status === 'pending' ? 'waiting' : 'failed';
   const label = PAY_LABEL[p?.provider] || 'your wallet';
   const bank = p?.qr?.kind === 'bank';
+  const manual = !!p?.qr?.manual;
   const mmss = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
   return (
     <div className="modal-bg" style={{ zIndex: 80 }} onClick={status === 'waiting' ? undefined : onClose}>
@@ -77,8 +78,10 @@ export function PayModal({ paymentId, amount, onPaid, onClose, onCancel, big = f
               {p?.qr ? <canvas ref={canvas} aria-label={`QR code to pay ${rs(amount)}`} /> : <div className="muted" style={{ width: size, height: size, display: 'grid', placeItems: 'center' }}>{err || 'Making your QR…'}</div>}
             </div>
             <p className="pulse muted" style={{ fontSize: big ? 20 : undefined, margin: '0 0 4px' }} aria-live="polite">Waiting for your payment… <b>{mmss}</b></p>
-            <p className="small muted" style={{ margin: 0 }}>{bank ? 'Open your banking or wallet app, scan, and confirm.' : `Scan with your phone camera to open ${label}.`} This window closes by itself once you have paid.</p>
+            <p className="small muted" style={{ margin: 0 }}>{manual ? 'Open your banking or wallet app, scan and pay. The barista confirms it, then your order starts.' : bank ? 'Open your banking or wallet app, scan, and confirm.' : `Scan with your phone camera to open ${label}.`} This window closes by itself once you have paid.</p>
             {err && p && <p className="small err">{err}</p>}
+            {p?.qr?.note && <p className="small err">The real QR could not be made ({p.qr.note}). This QR opens the payment page instead.</p>}
+            {manual && onManual && <button className="btn primary" style={{ marginTop: 10 }} onClick={onManual}>Payment received</button>}
             <div className="row" style={{ justifyContent: 'center', marginTop: 14, gap: 8 }}>
               {p?.qr?.kind === 'link' && <a className="btn primary" href={p.qr.value} target="_blank" rel="noopener noreferrer">Open {label}</a>}
               <button className="btn ghost" onClick={onCancel || onClose}>{onCancel ? 'Cancel order' : 'Close'}</button>

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.0.2] - 2026-10-27
+
+### Added
+- Fonepay and NepalPay share one implementation (`gateways/fonepay-like.js`): real dynamic QR through the gateway's QR service when its user name and password are saved, with automatic paid status.
+- Without the QR service: a QR for the exact amount made from the shop's own printed QR text (`gateways/emvqr.js`) at the kiosk and counter; staff press Payment received (`/station/awaiting`, `/station/payments/:id/confirm`). Website and app keep the self-confirming payment page.
+- The Payments screen says which kind of QR is active.
+
+---
+
 ## [2.0.1] - 2026-10-27
 
 ### Fixed

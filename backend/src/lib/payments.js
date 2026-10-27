@@ -35,7 +35,7 @@ export const enabledPaymentMethods = () => ['cash', ...GATEWAYS.filter(offered)]
 export function gatewayStatus() {
   const one = (p) => {
     const g = mods[p];
-    return { enabled: rtBool(`${p}_enabled`), mode: g.mode(), missing: g.missing(), ready: g.missing().length === 0 || (g.mode() === 'sandbox' && p === 'esewa'), offered: offered(p), real_qr: p === 'fonepay' ? fonepay.qrReady() : false };
+    return { enabled: rtBool(`${p}_enabled`), mode: g.mode(), missing: g.missing(), ready: g.missing().length === 0 || (g.mode() === 'sandbox' && p === 'esewa'), offered: offered(p), qr_mode: g.qrMode ? g.qrMode() : 'link' };
   };
   return { esewa: one('esewa'), fonepay: one('fonepay'), nepalpay: one('nepalpay') };
 }
@@ -86,15 +86,19 @@ export function startPlan(payment, label) {
  * QR service is set up) shows a QR of our payment page, which opens the gateway on the customer's phone. `kind` says which.
  */
 export async function qrFor(payment) {
-  const saved = payment.raw?.qr;
-  if (saved) return saved;
-  let qr = null;
-  const ref = payment.provider_ref || (payment.provider === 'nepalpay' ? nepalpay.reference(payment.id) : fonepay.reference(payment.id));
-  try {
-    if (payment.provider === 'fonepay' && fonepay.qrReady()) qr = { kind: 'bank', value: (await fonepay.createQr({ amount: payment.amount, prn: ref, note: 'Sadhai Coffee' })).qr };
-  } catch (e) { console.error('qr', payment.provider, e.message); }
-  // No QR service: the QR holds our payment page, which sends the phone on to the signed NepalPay or Fonepay request.
-  if (!qr) qr = { kind: 'link', value: payUrl(payment.id) };
+  if (payment.raw?.qr) return payment.raw.qr;
+  const g = mods[payment.provider];
+  let qr = null, note = null;
+  if (g?.qrMode) {
+    const ref = payment.provider_ref || g.reference(payment.id);
+    const channel = payment.order_id ? (await query('SELECT channel FROM orders WHERE id=$1', [payment.order_id])).rows[0]?.channel : null;
+    try {
+      if (g.qrMode() === 'api') qr = { kind: 'bank', value: (await g.createQr({ amount: payment.amount, prn: ref, note: 'Sadhai Coffee' })).qr };
+      // The shop's own printed QR text, made into a QR for this amount. Only the kiosk and counter use it, because staff confirm it by hand.
+      else if (g.qrMode() === 'own' && ['kiosk', 'counter'].includes(channel)) qr = { kind: 'bank', manual: true, value: g.ownQr({ amount: payment.amount, ref }) };
+    } catch (e) { note = e.message; console.error('qr', payment.provider, e.message); }
+  }
+  if (!qr) return { kind: 'link', value: payUrl(payment.id), ...(note ? { note } : {}) }; // not kept, so the next look tries the QR service again
   await query(`UPDATE payments SET raw = COALESCE(raw,'{}'::jsonb) || $2::jsonb WHERE id=$1`, [payment.id, JSON.stringify({ qr })]);
   return qr;
 }

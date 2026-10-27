@@ -3,9 +3,8 @@ import { bad, conflict, forbidden, notFound } from './http.js';
 import { publish } from './hub.js';
 import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
-import { PAYMENT_METHODS, isGateway, offered, initiate } from './payments.js';
+import { PAYMENT_METHODS, isGateway, offered, initiate, gateway } from './payments.js';
 import * as esewaGw from './gateways/esewa.js';
-import * as fonepayGw from './gateways/fonepay.js';
 import { assertOrder } from './order-flow.js';
 import { rtBool } from './runtime.js';
 import crypto from 'node:crypto';
@@ -578,8 +577,9 @@ export async function expireUnpaid() {
   let n = 0;
   for (const p of rows) {
     try {
-      if (p.provider === 'fonepay' && p.raw?.qr?.kind === 'bank') {
-        const st = await fonepayGw.qrStatus({ prn: p.provider_ref || fonepayGw.reference(p.id) });
+      if (isGateway(p.provider) && p.raw?.qr?.kind === 'bank' && !p.raw.qr.manual) {
+        const gw = gateway(p.provider);
+        const st = await gw.qrStatus({ prn: p.provider_ref || gw.reference(p.id) });
         if (st.state === 'paid') { await confirmPayment(p.id, { ref: st.ref, raw: { qr_status: st.raw } }); continue; }
       }
       if (p.provider === 'esewa') {
@@ -602,8 +602,9 @@ export async function refreshPayment(paymentId) {
     const st = await esewaGw.checkStatus({ uuid: p.provider_ref || p.id, amount: p.amount });
     if (st?.state === 'COMPLETE') await confirmPayment(p.id, { ref: st.ref, raw: { status_check: st.raw } });
     else if (['CANCELED', 'FULL_REFUND'].includes(st?.state || '')) await confirmPayment(p.id, { outcome: 'failed', raw: { status_check: st.raw } });
-  } else if (p.provider === 'fonepay' && p.raw?.qr?.kind === 'bank') {
-    const st = await fonepayGw.qrStatus({ prn: p.provider_ref || fonepayGw.reference(p.id) });
+  } else if (isGateway(p.provider) && p.raw?.qr?.kind === 'bank' && !p.raw.qr.manual) {
+    const gw = gateway(p.provider);
+    const st = await gw.qrStatus({ prn: p.provider_ref || gw.reference(p.id) });
     if (st.state === 'paid') await confirmPayment(p.id, { ref: st.ref, raw: { qr_status: st.raw } });
     else if (st.state === 'failed') await confirmPayment(p.id, { outcome: 'failed', raw: { qr_status: st.raw } });
   }
