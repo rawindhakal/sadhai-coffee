@@ -5,6 +5,7 @@ import '../version.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'pay_sheet.dart';
 import 'package:provider/provider.dart';
 import '../api.dart';
 import '../state.dart';
@@ -63,7 +64,7 @@ class _PassPanelState extends State<PassPanel> {
       try {
         final c = await Api.instance.request('GET', '/config', auth: false);
         _pass = Map<String, dynamic>.from(c['pass'] as Map);
-        _online = [for (final x in (c['payment_methods'] as List)) if (x == 'esewa' || x == 'fonepay') x as String];
+        _online = [for (final x in (c['payment_methods'] as List)) if (x == 'esewa' || x == 'fonepay' || x == 'nepalpay') x as String];
       } catch (_) {}
       if (mounted) setState(() { _passes = p.cast<Map>(); _loaded = true; });
     } catch (_) {}
@@ -192,8 +193,9 @@ class _PassPanelState extends State<PassPanel> {
                   try {
                     final out = await Api.instance.post('/passes', {'payment_method': m});
                     final pay = out['payment'] as Map;
-                    await launchUrl(Uri.parse(pay['pay_url'] as String), mode: LaunchMode.externalApplication);
-                    if (mounted) toast(context, 'Finish paying in your browser, then pull down to refresh.');
+                    if (!mounted) return;
+                    final r = await showPaySheet(context, pay['payment_id'] as String, pay['amount'] as num);
+                    if (mounted && r == 'paid') toast(context, 'Pass bought. It is in your wallet now.');
                   } on ApiException catch (e) { if (mounted) toast(context, e.message, bad: true); }
                 },
                 child: Text('Pay ${rs(_price ?? 900)} with ${payLabel[m] ?? m}'),

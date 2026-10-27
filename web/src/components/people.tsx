@@ -346,11 +346,13 @@ export function PayrollTab() {
 
 /* ============================================================ the People section */
 export function PeopleSection({ isOwner }: { isOwner: boolean }) {
-  const [tab, setTab] = useState<'staff' | 'roster' | 'attendance' | 'off' | 'payroll'>('roster');
+  const { sub } = useDash();
+  const [tabLocal, setTab] = useState<'staff' | 'roster' | 'attendance' | 'off' | 'payroll'>('roster');
+  const tab = (sub || tabLocal) as 'staff' | 'roster' | 'attendance' | 'off' | 'payroll';
   useEffect(() => { const t = new URLSearchParams(location.search).get('tab'); if (t) setTab(t as any); }, []);
   return (
     <div className="col" style={{ gap: 16 }}>
-      <Seg value={tab} onChange={setTab} options={[{ id: 'roster', label: 'Roster' }, { id: 'staff', label: 'Staff' }, { id: 'attendance', label: 'Attendance' }, { id: 'off', label: 'Time off' }, ...(isOwner ? [{ id: 'payroll', label: 'Payroll' }] : [])]} />
+      {!sub && <Seg value={tab} onChange={setTab} options={[{ id: 'roster', label: 'Roster' }, { id: 'staff', label: 'Staff' }, { id: 'attendance', label: 'Attendance' }, { id: 'off', label: 'Time off' }, ...(isOwner ? [{ id: 'payroll', label: 'Payroll' }] : [])]} />}
       {tab === 'roster' && <RosterBoard />}
       {tab === 'staff' && <StaffDirectory isOwner={isOwner} />}
       {tab === 'attendance' && <AttendanceTab />}

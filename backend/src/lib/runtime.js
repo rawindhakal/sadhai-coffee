@@ -17,6 +17,17 @@ export const DEFS = {
   fonepay_mode: { group: 'payments', label: 'Fonepay mode', type: 'enum', options: ['sandbox', 'live'], env: 'FONEPAY_MODE', def: 'sandbox', help: 'Sandbox uses Fonepay’s test server with the test merchant code Fonepay gave you. Live uses the real server.' },
   fonepay_merchant_code: { group: 'payments', label: 'Fonepay merchant code (PID)', env: 'FONEPAY_MERCHANT_CODE', def: '', help: 'Given by Fonepay when your merchant account is approved.' },
   fonepay_secret_key: { group: 'payments', label: 'Fonepay shared secret key', secret: true, env: 'FONEPAY_SECRET_KEY', def: '', help: 'Signs every request to Fonepay and every answer from it.' },
+  fonepay_qr_username: { group: 'payments', label: 'Fonepay QR API user name', env: 'FONEPAY_QR_USERNAME', def: '', help: 'For the real Fonepay QR. Given by Fonepay with the merchant account.' },
+  fonepay_qr_password: { group: 'payments', label: 'Fonepay QR API password', secret: true, env: 'FONEPAY_QR_PASSWORD', def: '', help: 'Goes with the user name above.' },
+  nepalpay_enabled: { group: 'payments', label: 'Accept NepalPay QR', type: 'bool', env: 'NEPALPAY_ENABLED', def: '0', help: 'Customers scan a NepalPay QR with any bank or wallet app.' },
+  nepalpay_mode: { group: 'payments', label: 'NepalPay mode', type: 'enum', options: ['sandbox', 'live'], env: 'NEPALPAY_MODE', def: 'sandbox', help: 'Sandbox is for testing with your bank’s test QR. Live takes real money.' },
+  nepalpay_merchant_id: { group: 'payments', label: 'NepalPay terminal / merchant ID', env: 'NEPALPAY_MERCHANT_ID', def: '', help: 'The terminal ID your bank gave you for NepalPay QR.' },
+  nepalpay_qr_template: { group: 'payments', label: 'Your NepalPay merchant QR text', secret: false, env: 'NEPALPAY_QR_TEMPLATE', def: '', help: 'The text inside the static QR your bank gave you (starts with 000201). We add the amount and a reference to it for every order.' },
+  nepalpay_ws_url: { group: 'payments', label: 'NCHL WebSocket address', type: 'url', env: 'NEPALPAY_WS_URL', def: '', help: 'The wss:// address NCHL gave you for the NepalPay QR WebSocket channel.' },
+  nepalpay_username: { group: 'payments', label: 'NCHL user name', env: 'NEPALPAY_USERNAME', def: '', help: 'Given by NCHL.' },
+  nepalpay_api_token: { group: 'payments', label: 'NCHL API token', secret: true, env: 'NEPALPAY_API_TOKEN', def: '', help: 'Given by NCHL. It is encrypted with NCHL’s public key before it is sent.' },
+  nepalpay_public_key: { group: 'payments', label: 'NCHL public key', secret: true, env: 'NEPALPAY_PUBLIC_KEY', def: '', help: 'NCHL’s public key (PEM text), used to encrypt the token.' },
+  order_flow: { group: 'flow', label: 'Order flow', env: 'ORDER_FLOW', def: '', help: 'How ordering works on each way in. Edited in Settings, Order flow.' },
   // app and web addresses
   public_web_url: { group: 'app', label: 'Website address', type: 'url', env: 'PUBLIC_WEB_URL', def: 'http://localhost:3000', help: 'Where customers open the web app. Used in links.' },
   public_api_url: { group: 'app', label: 'API address', type: 'url', env: 'PUBLIC_API_URL', def: '', help: 'The public address of this server, used for uploaded images.' },
@@ -92,7 +103,7 @@ function validate(key, v) {
   const s = String(v).trim();
   if (d.type === 'enum' && !d.options.includes(s)) throw new Error(`${d.label} must be one of: ${d.options.join(', ')}`);
   if (d.type === 'url') {
-    if (!/^https?:\/\/[^\s]+$/.test(s)) throw new Error(`${d.label} must be a web address starting with http:// or https://`);
+    if (!/^(https?|wss?):\/\/[^\s]+$/.test(s)) throw new Error(`${d.label} must be a web address starting with http:// or https://`);
   }
   if (d.type === 'bool') return ['1', 'true', 'yes', 'on', true].includes(v) ? '1' : '0';
   if (d.type === 'json') {

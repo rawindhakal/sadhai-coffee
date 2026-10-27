@@ -5,6 +5,8 @@ import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
 import { PAYMENT_METHODS, isGateway, offered, initiate } from './payments.js';
 import * as esewaGw from './gateways/esewa.js';
+import * as fonepayGw from './gateways/fonepay.js';
+import { assertOrder } from './order-flow.js';
 import { rtBool } from './runtime.js';
 import crypto from 'node:crypto';
 import { stockNeeds, recipeBreakdown } from './costing.js';
@@ -317,6 +319,7 @@ async function checkSchedule(db, station, input, channel) {
 }
 
 export async function quote(db, user, input) {
+  assertOrder(input.channel || 'app', input);
   const station = await loadStationForOrder(db, input.station_id, input.channel || 'app');
   const scheduledFor = await checkSchedule(db, station, input, input.channel || 'app');
   const { lines, drops, offerUse } = await priceLines(db, station.id, input.items);
@@ -571,10 +574,14 @@ export async function confirmPayment(paymentId, { ref, raw, outcome = 'paid', re
  * cancel them so the coupon, pass cups and offer are free again. Run every minute.
  */
 export async function expireUnpaid() {
-  const { rows } = await query(`SELECT * FROM payments WHERE status='pending' AND provider IN ('esewa','fonepay') AND created_at < now() - interval '15 minutes' LIMIT 50`);
+  const { rows } = await query(`SELECT * FROM payments WHERE status='pending' AND provider IN ('esewa','fonepay','nepalpay') AND created_at < now() - interval '15 minutes' LIMIT 50`);
   let n = 0;
   for (const p of rows) {
     try {
+      if (p.provider === 'fonepay' && p.raw?.qr?.kind === 'bank') {
+        const st = await fonepayGw.qrStatus({ prn: p.provider_ref || fonepayGw.reference(p.id) });
+        if (st.state === 'paid') { await confirmPayment(p.id, { ref: st.ref, raw: { qr_status: st.raw } }); continue; }
+      }
       if (p.provider === 'esewa') {
         const st = await esewaGw.checkStatus({ uuid: p.provider_ref || p.id, amount: p.amount });
         if (st?.state === 'COMPLETE') { await confirmPayment(p.id, { ref: st.ref, raw: { status_check: st.raw } }); continue; }
@@ -595,6 +602,10 @@ export async function refreshPayment(paymentId) {
     const st = await esewaGw.checkStatus({ uuid: p.provider_ref || p.id, amount: p.amount });
     if (st?.state === 'COMPLETE') await confirmPayment(p.id, { ref: st.ref, raw: { status_check: st.raw } });
     else if (['CANCELED', 'FULL_REFUND'].includes(st?.state || '')) await confirmPayment(p.id, { outcome: 'failed', raw: { status_check: st.raw } });
+  } else if (p.provider === 'fonepay' && p.raw?.qr?.kind === 'bank') {
+    const st = await fonepayGw.qrStatus({ prn: p.provider_ref || fonepayGw.reference(p.id) });
+    if (st.state === 'paid') await confirmPayment(p.id, { ref: st.ref, raw: { qr_status: st.raw } });
+    else if (st.state === 'failed') await confirmPayment(p.id, { outcome: 'failed', raw: { qr_status: st.raw } });
   }
   return (await query('SELECT * FROM payments WHERE id=$1', [paymentId])).rows[0];
 }

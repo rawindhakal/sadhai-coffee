@@ -5,6 +5,7 @@ import { api, fmtDate, fmtDateTime, rs } from '@/lib/api';
 import { useAuth, useEvents, useRequireRole } from '@/lib/auth';
 import { Empty, ErrorNote, Field, Loading, Modal, Status, Tabs, useData, useToast } from './ui';
 import { CustomerShell, PAY_LABEL } from './customer';
+import { PayModal } from './pay-modal';
 import { useI18n } from '@/lib/i18n';
 
 export function AccountView() {
@@ -41,7 +42,8 @@ export function PassTab() {
   const [buy, setBuy] = useState(false);
   const [buying, setBuying] = useState(false);
   const [buyErr, setBuyErr] = useState<string | null>(null);
-  const online: string[] = (cfg.data?.payment_methods || []).filter((m: string) => m === 'esewa' || m === 'fonepay');
+  const [passPay, setPassPay] = useState<{ id: string; amount: number } | null>(null);
+  const online: string[] = (cfg.data?.payment_methods || []).filter((m: string) => ['esewa', 'fonepay', 'nepalpay'].includes(m));
   const list = passes.data || [];
   const live = list.filter((p) => p.status === 'active' && p.remaining > 0).sort((a, b) => a.queue_position - b.queue_position);
   const past = list.filter((p) => !live.includes(p));
@@ -51,6 +53,7 @@ export function PassTab() {
 
   return (
     <>
+      {passPay && <PayModal paymentId={passPay.id} amount={passPay.amount} onPaid={() => { setPassPay(null); passes.reload(); toast('Pass bought'); }} onClose={() => { setPassPay(null); passes.reload(); }} />}
       <div className="card">
         <div className="row between wrap"><div><h3>10 cups. One pass. {rs(cfg.data?.pass.price)}.</h3><p className="muted small">Buy as many as you like. They are used one after another, and each starts its {cfg.data?.pass.valid_days} days with your first cup.</p></div>
           <button className="btn primary" onClick={() => setBuy(true)}>{live.length ? 'Buy another pass' : 'Buy a pass'}</button></div>
@@ -96,7 +99,7 @@ export function PassTab() {
             {online.map((m) => (
               <button key={m} className="btn primary block" disabled={buying} onClick={async () => {
                 setBuying(true); setBuyErr(null);
-                try { const out = await api('/passes', { method: 'POST', body: { payment_method: m } }); window.location.href = out.payment.pay_url; } catch (e: any) { setBuyErr(e.message); setBuying(false); }
+                try { const out = await api('/passes', { method: 'POST', body: { payment_method: m } }); setBuy(false); setPassPay({ id: out.payment.payment_id, amount: out.payment.amount }); setBuying(false); } catch (e: any) { setBuyErr(e.message); setBuying(false); }
               }}>{buying ? 'Opening…' : `Pay ${rs(cfg.data?.pass.price)} with ${PAY_LABEL[m]}`}</button>
             ))}
             <div className="card flat" style={{ background: 'var(--surface-sunk)', padding: 12, marginTop: 4 }}>

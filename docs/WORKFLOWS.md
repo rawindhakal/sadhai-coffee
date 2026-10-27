@@ -9,7 +9,7 @@ Everything below is available on the web (`/owner`, `/manager`, `/station`) and 
 
 ## Owner: first day
 
-1. **Settings**: drink prices and rules, *Payments* (eSewa and Fonepay), then *App and company* (web addresses, oldest allowed app version, company name and emails for the legal pages). Payments has the eSewa and Fonepay keys, a Rs 10 test button and the list of online payments and refunds.
+1. **Settings**: drink prices and rules, *Order flow* (rules for each way of ordering), *Payments* (eSewa, Fonepay and NepalPay QR), then *App and company* (web addresses, oldest allowed app version, company name and emails for the legal pages). Payments has the eSewa and Fonepay keys, a Rs 10 test button and the list of online payments and refunds.
 2. **Home page and pictures**: replace every hero layer, section picture, partner and investor page text and product picture. Anything left empty falls back to the built-in artwork.
 3. **Stations**, **Managers**, **Staff and pay**: add the cafes, their managers, and each staff member with an hourly rate.
 4. The *Get Sadhai ready* checklist on the overview tracks what is still missing.

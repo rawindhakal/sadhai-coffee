@@ -1,4 +1,5 @@
 'use client';
+import { Showcase } from './showcase';
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, home, rs } from '@/lib/api';
@@ -116,7 +117,7 @@ function Beans({ className = '' }: { className?: string }) {
   return <img className={`hp-beans ${className}`} src="/img/beans-scatter.svg" alt="" aria-hidden="true" loading="lazy" />;
 }
 
-function HeroArt({ site, pricing }: { site: any; pricing: { hot: number } }) {
+function HeroArt({ site, pricing }: { site: any; pricing: { hot: number; flavored: number; iced: number } }) {
   const portrait = pic(site?.hero?.portrait, '/img/person-barista.svg');
   const custom = !!site?.hero?.portrait?.url;
   return (
@@ -125,9 +126,12 @@ function HeroArt({ site, pricing }: { site: any; pricing: { hot: number } }) {
       <img className="hp-bean b2" src="/img/bean.svg" alt="" aria-hidden="true" />
       <img className="hp-bean b3" src="/img/bean.svg" alt="" aria-hidden="true" />
       <img className="hp-bean b4" src="/img/bean.svg" alt="" aria-hidden="true" />
-      <div className="hp-arch">
-        <img src={portrait} alt={custom ? 'The Sadhai team' : 'A Sadhai barista with a fresh cup'} style={custom ? { objectFit: 'cover' } : undefined} />
-      </div>
+      {custom ? (
+        <div className="hp-arch"><img src={portrait} alt="The Sadhai team" style={{ objectFit: 'cover' }} /></div>
+      ) : (
+        <Showcase pricing={pricing} fallback={<div className="hp-arch"><img src={portrait} alt="A Sadhai barista with a fresh cup" /></div>} />
+      )}
+      {custom && <>
       <div className="hp-float hp-float-order" aria-hidden="true">
         <span className="hp-dot" />
         <span><strong>A27 is ready</strong><small>Say your 4-digit code at the counter</small></span>
@@ -136,6 +140,7 @@ function HeroArt({ site, pricing }: { site: any; pricing: { hot: number } }) {
         <img src="/img/cup-hot.svg" alt="" width={34} height={34} />
         <span><strong>{rs(pricing.hot)}</strong><small>Any hot coffee</small></span>
       </div>
+      </>}
     </div>
   );
 }
@@ -163,7 +168,7 @@ function ModernHero({ stations, site, pricing }: { stations: any[] | null; site:
             <div className="nh-trust-item"><span className="nh-trust-num">{rs(pricing.hot)}</span><span className="nh-trust-lbl">Any hot coffee</span></div>
             <div className="nh-trust-item"><span className="nh-trust-num">90 sec</span><span className="nh-trust-lbl">From order to cup</span></div>
             <div className="nh-trust-item"><span className="nh-trust-num">VAT in</span><span className="nh-trust-lbl">The price is the price</span></div>
-            <div className="nh-trust-item"><span className="nh-trust-num">eSewa · Fonepay</span><span className="nh-trust-lbl">Or cash or pass</span></div>
+            <div className="nh-trust-item"><span className="nh-trust-num">eSewa · Fonepay · NepalPay</span><span className="nh-trust-lbl">Or cash or pass</span></div>
           </div>
         </div>
         <HeroArt site={site} pricing={pricing} />

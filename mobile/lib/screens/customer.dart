@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
@@ -10,8 +9,9 @@ import 'account.dart';
 import 'cart.dart';
 import 'home.dart';
 import 'offers.dart';
+import 'pay_sheet.dart';
 
-const payLabel = {'cash': 'Cash at counter', 'pass': '10-cup pass', 'esewa': 'eSewa', 'fonepay': 'Fonepay', 'khalti': 'Online (old)'};
+const payLabel = {'cash': 'Cash at counter', 'pass': '10-cup pass', 'esewa': 'eSewa', 'fonepay': 'Fonepay', 'nepalpay': 'NepalPay QR', 'khalti': 'Online (old)'};
 
 void toast(BuildContext c, String m, {bool bad = false}) => ScaffoldMessenger.of(c)
   ..hideCurrentSnackBar()
@@ -146,11 +146,11 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 Row(children: [Text(payLabel[o['payment_method']] ?? ''), const SizedBox(width: 8), Chip2.status(o['payment_status'])]),
                 if (o['payment_method'] == 'cash' && o['payment_status'] == 'unpaid') const Text('Pay when you pick up.', style: TextStyle(color: Brand.inkMuted)),
               ]))),
-              if (o['status'] == 'awaiting_payment' && o['pay_url'] != null) ...[
+              if (o['status'] == 'awaiting_payment' && o['payment_id'] != null) ...[
                 const SizedBox(height: 12),
                 FilledButton(
                   style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                  onPressed: () => launchUrl(Uri.parse(o['pay_url'] as String), mode: LaunchMode.externalApplication),
+                  onPressed: () async { await showPaySheet(context, o['payment_id'] as String, o['total'] as num); _load(); },
                   child: Text('Pay ${rs(o['total'])} with ${payLabel[o['payment_method']] ?? 'your wallet'}'),
                 ),
                 const Padding(padding: EdgeInsets.only(top: 6), child: Text('This screen updates by itself once you have paid.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted, fontSize: 13))),

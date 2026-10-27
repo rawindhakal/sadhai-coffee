@@ -5,11 +5,13 @@ import QRCode from 'qrcode';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, rs } from '@/lib/api';
-import { useAuth } from '@/lib/auth';
+import { useAuth, useEvents } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 import { productArt } from '@/lib/art';
 import { Icon } from './icons';
-import { PayQr } from './pay-qr';
+import { PayModal } from './pay-modal';
+import dynamic from 'next/dynamic';
+const Coffee3D = dynamic(() => import('./coffee3d'), { ssr: false });
 import { useConfig } from '@/lib/site-content';
 
 type Line = { key: string; product: any; qty: number; option_ids: string[]; names: string[]; unit: number };
@@ -50,6 +52,8 @@ export function Kiosk() {
   const [result, setResult] = useState<any>(null);
   const [warn, setWarn] = useState(false);
   const last = useRef(Date.now());
+  const cfg = useConfig();
+  const rules = cfg?.order_flow?.kiosk || { enabled: true, ask_name: true, ask_phone: true, notes: false, payment_methods: ['cash', 'pass', ...(cfg?.payment_methods || []).filter((m: string) => !['cash', 'pass'].includes(m))] };
 
   // Kiosk always uses the light brand theme, big and calm.
   useEffect(() => { const prev = document.documentElement.dataset.theme; document.documentElement.dataset.theme = 'light'; return () => { if (prev) document.documentElement.dataset.theme = prev; else delete document.documentElement.dataset.theme; }; }, []);
@@ -62,6 +66,7 @@ export function Kiosk() {
   }, [staff?.id]);
   const loadHome = () => stationId && api(`/stations/${stationId}/home`, { auth: false }).then((h) => { setHome(h); setCat((c) => c || h.categories[0]?.id || ''); }).catch(() => {});
   useEffect(() => { loadHome(); const i = setInterval(loadHome, 60000); return () => clearInterval(i); }, [stationId]);
+  useEvents((ev) => { if (ev === 'menu') loadHome(); });
 
   // reset after inactivity (not on the attract screen)
   useEffect(() => {
@@ -113,14 +118,15 @@ export function Kiosk() {
       <KioskTop name={home.station.name} stationId={stationId} lang={lang} setLang={setLang} onExit={() => router.push('/station')} onSignOut={() => logout()} user={staff} showBack={screen !== 'idle' && screen !== 'done'} onHome={reset} />
 
       {screen === 'idle' && (
-        <button className="k-idle" onClick={() => { setScreen('who'); last.current = Date.now(); }} aria-label={t('touch')}>
+        <button className="k-idle" disabled={!rules.enabled} onClick={() => { setScreen(rules.ask_name || rules.ask_phone ? 'who' : 'menu'); last.current = Date.now(); }} aria-label={t('touch')}>
           <div className="k-hills" aria-hidden><img src="/img/hero-sun.svg" alt="" /><img src="/img/hero-far.svg" alt="" /><img src="/img/hero-mid.svg" alt="" /><img src="/img/hero-near.svg" alt="" /></div>
+          <div className="k-cup3d" aria-hidden><Coffee3D look={{ liquid: '#8a5233' }} interactive={false} /></div>
           <div className="k-idle-in">
             <h1>{lang === 'ne' ? 'सधैं राम्रो कफी।' : 'Good coffee, every day.'}</h1>
             <p className="k-sub">{lang === 'ne' ? 'पहाडमा फलेको, ९० सेकेन्डमा तयार।' : 'Grown in the hills. Ready in 90 seconds.'}</p>
             {offers[0] && <div className="k-offer"><strong>{offers[0].title}</strong><span>{offers[0].blurb}</span></div>}
             <div className="row wrap" style={{ gap: 20, alignItems: 'center', marginTop: 8 }}>
-              <span className="k-touch">{t('touch')}</span>
+              <span className="k-touch">{rules.enabled ? t('touch') : (lang === 'ne' ? 'अर्डर अहिले बन्द छ' : 'Ordering is paused. Please see the counter.')}</span>
               {stationId && (
                 <div
                   className="card flat row"
@@ -151,7 +157,7 @@ export function Kiosk() {
         </button>
       )}
 
-      {screen === 'who' && <Who t={t} guest={guest} setGuest={setGuest} onNext={() => { setScreen('menu'); }} privacy />}
+      {screen === 'who' && <Who t={t} guest={guest} setGuest={setGuest} needName={rules.ask_name} needPhone={rules.ask_phone} onNext={() => { setScreen('menu'); }} privacy />}
 
       {screen === 'menu' && (
         <div className="k-menu">
@@ -187,7 +193,7 @@ export function Kiosk() {
         </div>
       )}
 
-      {screen === 'pay' && <Pay t={t} total={total} busy={busy} error={error} guest={guest} stationId={stationId} staffRole={staff.role} onBack={() => setScreen('review')} onPlace={place} />}
+      {screen === 'pay' && <Pay t={t} rules={rules} total={total} busy={busy} error={error} guest={guest} stationId={stationId} staffRole={staff.role} onBack={() => setScreen('review')} onPlace={place} />}
       {screen === 'done' && result && <Done t={t} result={result} guest={guest} onNew={reset} />}
       {warn && <div className="k-warn" role="alert">Are you still there? This order will clear in a few seconds. Touch the screen to keep going.</div>}
     </div>
@@ -246,13 +252,13 @@ function SetUp({ onLogin }: { onLogin: (p: string, pw: string) => Promise<any> }
 }
 
 /** Name and phone, with on-screen QWERTY keyboard for name and numeric keypad for phone. */
-function Who({ t, guest, setGuest, onNext, privacy }: any) {
+function Who({ t, guest, setGuest, onNext, privacy, needName = true, needPhone = true }: any) {
   const [field, setField] = useState<'name' | 'phone'>('name');
   const [caps, setCaps] = useState(true);
 
   const digits = guest.phone.replace(/\D/g, '');
-  const okPhone = /^(977)?9[78]\d{8}$/.test(digits);
-  const okName = guest.name.trim().length >= 2;
+  const okPhone = !needPhone || /^(977)?9[78]\d{8}$/.test(digits);
+  const okName = !needName || guest.name.trim().length >= 2;
 
   const pressPhone = (k: string) =>
     setGuest({
@@ -443,9 +449,9 @@ function KItem({ p, onClose, onAdd }: { p: any; onClose: () => void; onAdd: (l: 
   );
 }
 
-function Pay({ t, total, busy, error, guest, onBack, onPlace }: any) {
-  const config = useConfig();
-  const gateways: string[] = (config?.payment_methods || []).filter((m: string) => m === 'esewa' || m === 'fonepay');
+function Pay({ t, rules, total, busy, error, guest, onBack, onPlace }: any) {
+  const ways: string[] = rules?.payment_methods || ['cash'];
+  const gateways: string[] = ways.filter((m: string) => ['esewa', 'fonepay', 'nepalpay'].includes(m));
   const [mode, setMode] = useState<'' | 'pass'>('');
   const [code, setCode] = useState('');
   const [check, setCheck] = useState<any>(null);
@@ -459,11 +465,11 @@ function Pay({ t, total, busy, error, guest, onBack, onPlace }: any) {
       <h2>{t('pay')}</h2>
       <div className="col" style={{ marginTop: 16 }}>
         {gateways.map((g) => (
-          <button key={g} className="k-opt" disabled={busy} onClick={() => onPlace(g)}><Icon name="cart" size={30} /><span><strong>Pay now with {g === 'esewa' ? 'eSewa' : 'Fonepay'}</strong><small>Scan a QR with your phone, then collect your coffee</small></span></button>
+          <button key={g} className="k-opt" disabled={busy} onClick={() => onPlace(g)}><Icon name="cart" size={30} /><span><strong>Pay now with {g === 'esewa' ? 'eSewa' : g === 'nepalpay' ? 'NepalPay QR' : 'Fonepay'}</strong><small>Scan a QR with your phone, then collect your coffee</small></span></button>
         ))}
-        <button className="k-opt" disabled={busy} onClick={() => onPlace('counter')}><Icon name="coin" size={30} /><span><strong>{t('counter')}</strong><small>Pay {rs(total)} when you pick up your coffee</small></span></button>
-        <button className={`k-opt ${mode === 'pass' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'pass' ? '' : 'pass')}><Icon name="ticket" size={30} /><span><strong>{t('passopt')}</strong><small>Enter your pass code (SP-XXXX-XXXX)</small></span></button>
-        {mode === 'pass' && (
+        {ways.includes('cash') && <button className="k-opt" disabled={busy} onClick={() => onPlace('counter')}><Icon name="coin" size={30} /><span><strong>{t('counter')}</strong><small>Pay {rs(total)} when you pick up your coffee</small></span></button>}
+        {ways.includes('pass') && <button className={`k-opt ${mode === 'pass' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'pass' ? '' : 'pass')}><Icon name="ticket" size={30} /><span><strong>{t('passopt')}</strong><small>Enter your pass code (SP-XXXX-XXXX)</small></span></button>}
+        {ways.includes('pass') && mode === 'pass' && (
           <div className="card flat col">
             <input className="k-input" value={code} placeholder="SP-XXXX-XXXX" autoCapitalize="characters" onChange={(e) => { setCode(e.target.value.toUpperCase()); setCheck(null); }} aria-label="Pass code" />
             {cerr && <p className="err">{cerr}</p>}
@@ -490,8 +496,9 @@ function Done({ t, result, guest, onNew }: { t: (k: string) => string; result: a
       {o.status === 'cancelled' ? <><h2>Order cancelled</h2><p className="muted">The payment was not completed. You were not charged. Please start again.</p></> : awaiting ? (
         <>
           <h2>Pay to send your order to the barista</h2>
-          <PayQr payment={pay} amount={o.total} big size={300} onDone={refresh} />
-          <button className="btn ghost lg" onClick={async () => { await api(`/station/orders/${o.id}/status`, { method: 'POST', body: { status: 'cancelled', reason: 'The guest cancelled at the kiosk' } }).catch(() => {}); onNew(); }}>Cancel</button>
+          <p className="muted" style={{ fontSize: 20 }}>Your payment window is open. Scan the QR to pay {rs(o.total)}.</p>
+          <PayModal big paymentId={pay.payment_id} amount={o.total} onPaid={refresh} onClose={refresh}
+            onCancel={async () => { await api(`/station/orders/${o.id}/status`, { method: 'POST', body: { status: 'cancelled', reason: 'The guest cancelled at the kiosk' } }).catch(() => {}); onNew(); }} />
         </>
       ) : (
         <>

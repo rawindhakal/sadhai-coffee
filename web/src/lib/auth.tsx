@@ -37,7 +37,7 @@ export function useRequireRole(...roles: string[]) {
 }
 
 /** Subscribes to server-sent events (orders, stock, notifications). Reconnects automatically (EventSource does). */
-export function useEvents(handler: (event: string, data: any) => void, events = ['order', 'order_new', 'notification', 'stock', 'stock_low', 'station']) {
+export function useEvents(handler: (event: string, data: any) => void, events = ['order', 'order_new', 'notification', 'stock', 'stock_low', 'station', 'menu']) {
   const ref = useRef(handler);
   ref.current = handler;
   const { user } = useAuth();

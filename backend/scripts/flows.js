@@ -180,7 +180,7 @@ const orderOf = async (c, id) => (await call('GET', `/orders/${id}`, null, c.tok
 {
   const c = await newCustomer();
   // switched off until the owner turns them on
-  await setCfg({ esewa_enabled: null, fonepay_enabled: null, fonepay_merchant_code: null, fonepay_secret_key: null, esewa_mode: null, fonepay_mode: null });
+  await setCfg({ esewa_enabled: null, fonepay_enabled: null, fonepay_merchant_code: null, fonepay_secret_key: null, esewa_mode: null, fonepay_mode: null, nepalpay_enabled: null, nepalpay_merchant_id: null, nepalpay_qr_template: null, nepalpay_ws_url: null, nepalpay_username: null, nepalpay_api_token: null, nepalpay_public_key: null });
   ok((await buy(c, 'esewa')).status === 400 && (await call('GET', '/config')).body.payment_methods.join() === 'cash', 'eSewa and Fonepay are off until the owner turns them on');
   await setCfg({ esewa_enabled: '1', fonepay_enabled: '1', fonepay_merchant_code: 'FLOWPID', fonepay_secret_key: FP_SECRET });
   const cfg = (await call('GET', '/config')).body;
@@ -289,6 +289,40 @@ const orderOf = async (c, id) => (await call('GET', `/orders/${id}`, null, c.tok
   ok(test.status === 201 && test.body.pay_url, 'the owner can start a Rs 10 test payment');
   await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(test.body.payment_id, 10))}`);
   ok((await call('GET', `/payments/${test.body.payment_id}`, null, tok(owner))).body.status === 'paid', 'and see it come back paid');
+  // the QR a customer scans: every pending payment has one, and the status route hands it to the pay window
+  const pf = await buy(c, 'fonepay');
+  const pq = await call('GET', `/payments/${pf.body.payment.payment_id}`, null, c.token);
+  ok(pq.body.qr?.kind === 'link' && pq.body.qr.value === pf.body.payment.pay_url && pq.body.expires_at, 'a Fonepay payment without the QR service gets a link QR and an expiry time');
+  // NepalPay QR: a real NepalQR for the exact amount, with a valid checksum
+  const T = (t, v) => t + String(v.length).padStart(2, '0') + v;
+  const tplBody = T('00', '01') + T('01', '11') + T('26', T('00', 'NP.NCHL.QR') + T('01', 'SADHAI')) + T('52', '5812') + T('53', '524') + T('58', 'NP') + T('59', 'Sadhai Coffee') + T('60', 'Kathmandu') + '6304';
+  const crc = (str) => { let x = 0xffff; for (const ch of str) { x ^= ch.charCodeAt(0) << 8; for (let i = 0; i < 8; i++) x = (x & 0x8000) ? ((x << 1) ^ 0x1021) & 0xffff : (x << 1) & 0xffff; } return x.toString(16).toUpperCase().padStart(4, '0'); };
+  ok((await buy(c, 'nepalpay')).status === 400, 'NepalPay QR is refused until it is switched on');
+  await setCfg({ nepalpay_enabled: '1', nepalpay_merchant_id: 'TERM01', nepalpay_qr_template: tplBody + crc(tplBody), nepalpay_ws_url: 'wss://127.0.0.1:9/nqrws', nepalpay_username: 'u', nepalpay_api_token: 't', nepalpay_public_key: 'k' });
+  ok((await call('GET', '/config')).body.payment_methods.includes('nepalpay'), 'once set up, customers are offered NepalPay QR');
+  const n1 = await buy(c, 'nepalpay');
+  const nq = (await call('GET', `/payments/${n1.body.payment.payment_id}`, null, c.token)).body.qr;
+  ok(n1.status === 201 && nq?.kind === 'bank' && nq.value.startsWith('000201') && nq.value.includes('5406100.00') && nq.value.includes('010212') && crc(nq.value.slice(0, -4)) === nq.value.slice(-4), 'the NepalPay QR carries the exact amount, a dynamic marker and a correct checksum');
+  ok(nq.value.includes(n1.body.payment.reference) && n1.body.payment.reference.length <= 24, 'and it carries our payment reference so NCHL can tell us which order was paid');
+  await setCfg({ nepalpay_enabled: null, nepalpay_merchant_id: null, nepalpay_qr_template: null, nepalpay_ws_url: null, nepalpay_username: null, nepalpay_api_token: null, nepalpay_public_key: null });
+  const sm = await call('GET', '/station/menu', null, tok(tuStaff));
+  ok(sm.status === 200 && Array.isArray(sm.body.categories) && sm.body.categories.flatMap((x) => x.products).every((p) => Array.isArray(p.option_groups)), 'the counter menu has categories and every item has its add-on groups (the New order screen needs both)');
+  ok((await orderOf(c, pf.body.order.id)).payment_id === pf.body.payment.payment_id, 'an order waiting for payment tells the app which payment to open');
+  // order flow: the owner's rules apply to every way in
+  const fl = (await call('GET', '/owner/order-flow', null, tok(owner))).body.flow;
+  const noCash = { ...fl, web: { ...fl.web, payments: { ...fl.web.payments, cash: false }, max_cups: 1, notes: false } };
+  ok((await call('PUT', '/owner/order-flow', { flow: noCash }, tok(owner))).status === 200, 'the owner can change the ordering rules');
+  const wc = await call('GET', '/config');
+  ok(!wc.body.order_flow.web.payment_methods.includes('cash') && wc.body.order_flow.kiosk.payment_methods.includes('cash'), 'every screen reads the rules from /config, per way of ordering');
+  ok((await buy(c, 'cash', { channel: 'web' })).status === 400, 'the website refuses a way of paying the owner switched off there');
+  ok((await buy(c, 'cash', { channel: 'web', items: [line(ame), line(ame)].slice(0, 1), note: 'x' })).status === 400, 'and a note where notes are off');
+  ok((await buy(c, 'cash', { channel: 'app' })).status === 201, 'while the app, with its own rules, still takes the order');
+  const kOff = { ...fl, kiosk: { ...fl.kiosk, enabled: false } };
+  await call('PUT', '/owner/order-flow', { flow: kOff }, tok(owner));
+  ok((await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Guest One', customer_phone: '9811111111', payment: 'counter', consent: true }, tok(tuStaff))).status === 409, 'a switched-off kiosk takes no orders');
+  ok((await call('PUT', '/owner/order-flow', { flow: { ...fl, web: { ...fl.web, payments: { cash: false, pass: false, esewa: false, fonepay: false, nepalpay: false } } } }, tok(owner))).status === 400, 'a way of ordering must keep at least one way to pay');
+  await call('DELETE', '/owner/order-flow', null, tok(owner));
+  ok((await call('GET', '/config')).body.order_flow.web.payment_methods.includes('cash'), 'resetting brings the built-in rules back');
   // sales: online orders are sales only when handed over
   const o5 = await ovr0();
   ok(typeof o5 === 'number', 'sales are counted from handed-over orders only');
@@ -361,7 +395,8 @@ section('7. Self-operated vs partner: staff, duty and pay');
   ok((await call('POST', '/hr/staff', { name: 'No Pay', phone: '9801110099', password: 'Sadhai@123', station_id: kal.id }, tok(owner))).status === 403, 'Sadhai does not put partner staff on its payroll');
   const staff = (await call('GET', '/hr/staff', null, tok(owner))).body;
   ok(staff.length > 0 && staff.every((s) => !/Kalanki|New Road/.test(s.station_name || '')), 'the staff and pay list holds only Sadhai-run stations');
-  const from = '2026-10-19', to = '2026-10-25';
+  const mon = new Date(Date.now() + ((8 - new Date().getDay()) % 7 || 7) * 864e5), sun = new Date(mon.getTime() + 6 * 864e5);
+  const from = mon.toISOString().slice(0, 10), to = sun.toISOString().slice(0, 10);
   const out = await call('POST', '/hr/roster/auto-assign', { station_id: tu.id, from, to }, tok(mgrCo));
   ok(out.status === 200 && out.body.created > 0, 'a Sadhai-run station gets an auto-assigned roster');
   const sched = (await call('GET', `/hr/roster?station_id=${tu.id}&from=${from}&to=${to}`, null, tok(mgrCo))).body;

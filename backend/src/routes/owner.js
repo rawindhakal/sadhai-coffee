@@ -5,6 +5,7 @@ import { query, tx } from '../lib/db.js';
 import { wrap, bad, notFound, normalizePhone } from '../lib/http.js';
 import { authenticate, requireRole } from '../lib/auth.js';
 import { audit, notify } from '../lib/notify.js';
+import { publish } from '../lib/hub.js';
 import { DEFAULT_SETTINGS, getSettings, validateSettingValue } from '../lib/settings.js';
 import { range } from '../lib/reports.js';
 import { statement } from '../lib/partners.js';
@@ -12,6 +13,11 @@ import { recomputeProductCosts } from '../lib/costing.js';
 
 export const owner = Router();
 owner.use(authenticate, requireRole('owner'));
+// Any change to the menu, its add-ons, prices or recipes tells every open screen (website, kiosk, counter, apps) to load the menu again.
+owner.use((req, res, next) => {
+  if (req.method !== 'GET' && /^\/(categories|products|menu|recipes|settings)/.test(req.path)) res.on('finish', () => { if (res.statusCode < 400) publish('all', 'menu', { at: Date.now() }); });
+  next();
+});
 
 /* ---- stations ---- */
 const stationSchema = z.object({

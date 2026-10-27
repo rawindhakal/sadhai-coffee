@@ -50,3 +50,43 @@ export function readCallback(q) {
   const ok = v.PS === 'true' && /^success/i.test(v.RC);
   return { ok, failed: !ok, ref: v.UID || null, amount: Math.round(Number(v.P_AMT || 0)), prn: v.PRN, raw: v };
 }
+
+/* ---------------- Dynamic QR ---------------- */
+/**
+ * Fonepay Dynamic QR: we ask Fonepay for a QR for one amount and reference, show it, and ask Fonepay if it has been paid. Needs the API user
+ * name and password Fonepay gives with the merchant account, as well as the merchant code and shared secret.
+ *   download: HMAC-SHA512(secret, "amount,prn,merchantCode,remarks1,remarks2")   status: HMAC-SHA512(secret, "prn,merchantCode")
+ */
+const QR = {
+  sandbox: 'https://dev-merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty',
+  live: 'https://merchantapi.fonepay.com/api/merchant/merchantDetailsForThirdParty',
+};
+export const qrMissing = () => [...missing(), ...(rt('fonepay_qr_username') ? [] : ['fonepay_qr_username']), ...(rt('fonepay_qr_password') ? [] : ['fonepay_qr_password'])];
+export const qrReady = () => qrMissing().length === 0;
+
+async function post(path, body) {
+  const r = await fetch(`${QR[mode()]}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+  const j = await r.json().catch(() => ({}));
+  return { ok: r.ok, j };
+}
+
+export async function createQr({ amount, prn, note }) {
+  const remarks1 = (note || 'Sadhai Coffee').replace(/[^\w .-]/g, '').slice(0, 50) || 'Sadhai Coffee';
+  const body = { amount: String(Math.round(Number(amount))), remarks1, remarks2: 'N/A', prn, merchantCode: merchantCode(), username: rt('fonepay_qr_username'), password: rt('fonepay_qr_password') };
+  body.dataValidation = sign([body.amount, prn, body.merchantCode, remarks1, 'N/A'].join(','));
+  const { j } = await post('thirdPartyDynamicQrDownload', body);
+  const qr = j.qrMessage || j.data?.qrMessage;
+  if (!qr) throw new Error(j.message || 'Fonepay could not make a QR code');
+  return { qr, socket: j.thirdpartyQrWebSocketUrl || null };
+}
+
+/** 'paid', 'failed' or 'pending'. */
+export async function qrStatus({ prn }) {
+  const body = { prn, merchantCode: merchantCode(), username: rt('fonepay_qr_username'), password: rt('fonepay_qr_password') };
+  body.dataValidation = sign([prn, body.merchantCode].join(','));
+  const { j } = await post('thirdPartyDynamicQrGetStatus', body);
+  const st = String(j.paymentStatus || j.status || '').toLowerCase();
+  if (st === 'success') return { state: 'paid', ref: j.fonepayTraceId || null, raw: j };
+  if (st === 'failed') return { state: 'failed', raw: j };
+  return { state: 'pending', raw: j };
+}

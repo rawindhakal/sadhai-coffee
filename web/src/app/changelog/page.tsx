@@ -21,9 +21,40 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
+    version: '2.0.0',
+    date: '27 October 2026',
+    badge: 'Latest',
+    highlight: 'Pay by QR in a window, NepalPay QR, one set of ordering rules',
+    changes: [
+      {
+        category: 'Added',
+        items: [
+          { title: 'NepalPay QR', desc: 'Customers scan a NepalQR from any bank or wallet app. NCHL tells us the moment it is paid.' },
+          { title: 'Real Fonepay QR', desc: 'Fonepay now shows a real QR for the exact amount when its QR service is set up.' },
+          { title: 'Pay window', desc: 'The QR opens as a window on the same page, with a clear status. It closes by itself once you have paid, and the order goes to the barista.' },
+          { title: 'Order flow', desc: 'The owner sets how ordering works for the app, website, kiosk, kiosk QR and counter in one place, and every screen follows it.' },
+          { title: 'Live menu', desc: 'Change the menu, an add-on or a price and every open screen shows it straight away.' },
+          { title: '3D coffee', desc: 'Turn the cup on the home page, try a hot, flavoured or iced drink, and order from it.' },
+        ],
+      },
+      {
+        category: 'Changed',
+        items: [
+          { title: 'Dashboard menu', desc: 'The sidebar now has groups, pages and sub-pages, with a path at the top, so every part of Settings, Staff, Inventory and the home page editor is its own page.' },
+        ],
+      },
+      {
+        category: 'Fixed',
+        items: [
+          { title: 'New order at the counter', desc: 'The New order screen no longer crashes when it opens.' },
+          { title: 'Kiosk payment QR', desc: 'The kiosk shows the real payment QR, not a test one.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '1.9.0',
     date: '24 October 2026',
-    badge: 'Latest',
     highlight: 'Pay with eSewa or Fonepay',
     changes: [
       {

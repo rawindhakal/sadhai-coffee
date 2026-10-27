@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
 import 'offers.dart' show PromoBox;
 import 'customer.dart';
+import 'pay_sheet.dart';
 import 'home.dart' show Stepper2;
 
 /// Cart and checkout on one screen: change quantities, pick an offer and payment, place the order.
@@ -25,6 +25,7 @@ class _CartScreenState extends State<CartScreen> {
   String? _lastPromo;
   String _method = 'cash';
   List<String> _methods = ['cash'];
+  Map _rules = const {}; // how the owner set up ordering in the app (Settings, Order flow)
   final _note = TextEditingController();
   String? _error;
   bool _busy = false;
@@ -60,8 +61,10 @@ class _CartScreenState extends State<CartScreen> {
   Future<void> _loadOffers() async {
     try {
       final cfg = await Api.instance.request('GET', '/config', auth: false);
-      final m = [for (final x in (cfg['payment_methods'] as List)) if (x != 'pass') x as String];
-      if (mounted) setState(() { _methods = m.isEmpty ? ['cash'] : m; if (!_methods.contains(_method)) _method = 'cash'; });
+      final rules = ((cfg['order_flow'] as Map?)?['app'] as Map?) ?? const {};
+      final src = (rules['payment_methods'] ?? cfg['payment_methods']) as List;
+      final m = [for (final x in src) if (x != 'pass') x as String];
+      if (mounted) setState(() { _rules = rules; _methods = m.isEmpty ? ['cash'] : m; if (!_methods.contains(_method)) _method = _methods.first; });
     } catch (_) {}
     try {
       final c = await Api.instance.get('/coupons') as List;
@@ -99,9 +102,9 @@ class _CartScreenState extends State<CartScreen> {
       if (!mounted) return;
       cart.clear();
       cart.invalidatePasses();
-      // Online payment: open the gateway's page in the browser. The order screen waits for the payment and updates by itself.
+      // Online payment: the QR opens as a window over this screen, then the order screen takes over.
       final pay = out['payment'] as Map?;
-      if (pay != null && pay['pay_url'] != null) await launchUrl(Uri.parse(pay['pay_url'] as String), mode: LaunchMode.externalApplication);
+      if (pay != null && pay['payment_id'] != null) await showPaySheet(context, pay['payment_id'] as String, order['total'] as num);
       if (!mounted) return;
       await Navigator.push(context, MaterialPageRoute(builder: (_) => TrackingScreen(orderId: order['id'])));
       widget.onPlaced();
@@ -193,9 +196,9 @@ class _CartScreenState extends State<CartScreen> {
       const PromoBox(),
       if (_times != null && _times!['can_order'] == false) Container(margin: const EdgeInsets.only(top: 16), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Brand.surfaceSunk, borderRadius: BorderRadius.circular(Brand.radiusMd), border: Border.all(color: Brand.cherry)), child: Text(_times!['open_now'] == true ? 'This station is not taking orders for a moment.' : 'This station is closed. It opens at ${(_times!['opens'] as String).substring(0, 5)}.', style: const TextStyle(fontWeight: FontWeight.w700))),
       const SizedBox(height: 16),
-      Text('Pickup time', style: display(18)),
+      if (_rules['pickup_later'] != false) Text('Pickup time', style: display(18)),
       const SizedBox(height: 8),
-      if (_times != null && _times!['preorder'] != null) ...[
+      if (_rules['pickup_later'] != false && _times != null && _times!['preorder'] != null) ...[
         Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
           ChoiceChip(label: const Text('As soon as possible'), selected: !_later, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: !_later ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { setState(() => _later = false); _requote(cart); }),
           ChoiceChip(label: const Text('Later today'), selected: _later, selectedColor: Brand.cherry, showCheckmark: false, labelStyle: TextStyle(color: _later ? Brand.onCherry : Brand.ink, fontWeight: FontWeight.w600), onSelected: (_) { final s = _slots; setState(() { _later = true; _at ??= s.firstWhere((x) => DateTime.parse(x).isAfter(DateTime.now().add(const Duration(minutes: 29))), orElse: () => s.first); }); _requote(cart); }),
@@ -222,7 +225,7 @@ class _CartScreenState extends State<CartScreen> {
         ]),
       ],
       const SizedBox(height: 16),
-      TextField(controller: _note, maxLength: 200, decoration: const InputDecoration(labelText: 'Note for the barista (optional)'), onSubmitted: (_) => _requote(cart)),
+      if (_rules['notes'] != false) TextField(controller: _note, maxLength: 200, decoration: const InputDecoration(labelText: 'Note for the barista (optional)'), onSubmitted: (_) => _requote(cart)),
       Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
         Row(children: [const Text('Subtotal'), const Spacer(), Text(rs(q?['subtotal'] ?? cart.total))]),
         if ((q?['discount'] ?? 0) > 0) Row(children: [Text(q!['discount_label'] ?? 'Offer', style: const TextStyle(color: Brand.hill)), const Spacer(), Text('− ${rs(q['discount'])}', style: const TextStyle(color: Brand.hill))]),

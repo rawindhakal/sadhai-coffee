@@ -10,6 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import { useConfig } from '@/lib/site-content';
 import { Empty, ErrorNote, Field, useData } from '@/components/ui';
 import { CustomerShell, PAY_LABEL } from '@/components/customer';
+import { PayModal } from '@/components/pay-modal';
 import { Icon } from '@/components/icons';
 
 export default function Cart() {
@@ -21,10 +22,11 @@ export default function Cart() {
   const passes = useData<any[]>(user ? '/passes' : null, [user?.id]);
   const [offer, setOffer] = useState<{ type: 'none' | 'coupon' | 'pass' | 'promo'; id?: string }>({ type: 'none' });
   const config = useConfig();
-  const methods: string[] = (config?.payment_methods || ['cash']).filter((m: string) => m !== 'pass');
+  const rules = config?.order_flow?.web;
+  const methods: string[] = (rules?.payment_methods || config?.payment_methods || ['cash']).filter((m: string) => m !== 'pass');
   const [method, setMethod] = useState<string>('cash');
-  useEffect(() => { if (!methods.includes(method)) setMethod('cash'); }, [methods.join()]);
   const [note, setNote] = useState('');
+  useEffect(() => { if (methods.length && !methods.includes(method)) setMethod(methods[0]); }, [methods.join()]);
   const [quote, setQuote] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,6 +65,8 @@ export default function Cart() {
   const activePass = passes.data?.some((p) => p.status === 'active' && p.remaining > 0) ? { remaining: passes.data![0].total_remaining } : null;
   const active = (coupons.data || []).filter((c) => c.status === 'active');
 
+  const [paying, setPaying] = useState<{ id: string; amount: number; order: string } | null>(null);
+  const payWindow = paying && <PayModal paymentId={paying.id} amount={paying.amount} onPaid={() => router.push(`/order/${paying.order}`)} onClose={() => router.push(`/order/${paying.order}`)} />;
   async function place() {
     setBusy(true); setError(null);
     try {
@@ -70,18 +74,19 @@ export default function Cart() {
       passes.reload();
       coupons.reload();
       cart.clear();
-      // Online payment: send the customer to the gateway's page. They come back to their order when done.
-      if (out.payment?.pay_url) { window.location.href = out.payment.pay_url; return; }
+      // Online payment: the QR opens in a window on this page, so nobody is sent away.
+      if (out.payment?.payment_id) { setPaying({ id: out.payment.payment_id, amount: out.order.total, order: out.order.id }); return; }
       router.push(`/order/${out.order.id}`);
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
   if (!cart.ready) return <CustomerShell><p className="muted">Loading…</p></CustomerShell>;
   if (!cart.lines.length) {
-    return <CustomerShell><div className="card center col" style={{ padding: 40, alignItems: 'center' }}><Icon name="cart" size={44} color="var(--cherry)" stroke={1.6} /><h3>Your cart is empty</h3><p className="muted">Add a coffee in one tap from the home screen.</p><Link className="btn primary" href="/order">Browse the menu</Link></div></CustomerShell>;
+    return <CustomerShell>{payWindow}<div className="card center col" style={{ padding: 40, alignItems: 'center' }}><Icon name="cart" size={44} color="var(--cherry)" stroke={1.6} /><h3>Your cart is empty</h3><p className="muted">Add a coffee in one tap from the home screen.</p><Link className="btn primary" href="/order">Browse the menu</Link></div></CustomerShell>;
   }
   return (
     <CustomerShell>
+      {payWindow}
       <div className="row between"><h2>{t('cart')}</h2><button className="btn ghost sm" onClick={cart.clear}>Clear</button></div>
       {cart.station && <p className="small muted" style={{ margin: '4px 0 12px' }}>Pickup at <strong>{cart.station.name}</strong> · <Link href="/order">change</Link></p>}
 
@@ -114,11 +119,12 @@ export default function Cart() {
               />
             ))}
             {cart.promo && <Radio on={offer.type === 'promo'} label={`Promo ${cart.promo.code}`} hint={`${cart.promo.pct}% off${cart.promo.min_total ? ` · min ${rs(cart.promo.min_total)}` : ''}`} onClick={() => setOffer({ type: 'promo' })} />}
-            {activePass && <Radio on={offer.type === 'pass'} label={t('pass')} hint={`${activePass.remaining} cups left`} onClick={() => setOffer({ type: 'pass' })} />}
+            {activePass && rules?.payment_methods?.includes('pass') !== false && <Radio on={offer.type === 'pass'} label={t('pass')} hint={`${activePass.remaining} cups left`} onClick={() => setOffer({ type: 'pass' })} />}
           </div>
           <div style={{ marginTop: 8 }}><PromoBox /></div>
           {closed && <div className="card flat" role="alert" style={{ marginTop: 16, borderColor: 'var(--cherry)' }}><strong>{times.data.open_now ? 'This station is not taking orders for a moment.' : `This station is closed. It opens at ${String(times.data.opens).slice(0, 5)}.`}</strong> <button className="btn sm" style={{ marginLeft: 8 }} onClick={() => router.push('/order')}>Choose another station</button></div>}
-          {!closed && w && (
+          {rules && !rules.enabled && <div className="card flat" role="alert" style={{ marginTop: 16, borderColor: 'var(--cherry)' }}><strong>Online ordering is paused right now.</strong> Please order at the counter.</div>}
+          {!closed && w && rules?.pickup_later !== false && (
             <>
               <h4 style={{ margin: '20px 0 8px' }}>Pickup time</h4>
               <div className="row wrap">
@@ -139,7 +145,7 @@ export default function Cart() {
               </div>
             </>
           )}
-          <div style={{ marginTop: 16 }}><Field label="Note for the barista (optional)"><input maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} /></Field></div>
+          {rules?.notes !== false && <div style={{ marginTop: 16 }}><Field label="Note for the barista (optional)"><input maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} /></Field></div>}
           <div className="card flat" style={{ marginTop: 16 }}>
             <div className="row between"><span>Subtotal</span><span>{rs(quote?.subtotal ?? cart.total)}</span></div>
             {quote?.discount > 0 && <div className="row between" style={{ color: 'var(--hill)' }}><span>{quote.discount_label}</span><span>− {rs(quote.discount)}</span></div>}

@@ -5,6 +5,7 @@ import { api, fmtTime, rs } from '@/lib/api';
 import { useEvents, useRequireRole } from '@/lib/auth';
 import { ErrorNote, Loading, Status, useData, useToast } from '@/components/ui';
 import { CustomerShell, PAY_LABEL } from '@/components/customer';
+import { PayModal } from '@/components/pay-modal';
 
 const STEPS = ['placed', 'preparing', 'ready', 'picked_up'];
 
@@ -14,8 +15,12 @@ export default function Tracking() {
   const toast = useToast();
   const { data: o, error, reload } = useData<any>(user ? `/orders/${id}` : null);
   const [rating, setRating] = useState(0);
+  const [payOpen, setPayOpen] = useState(false);
   const pay = useSearchParams().get('pay');
   useEvents((ev, d) => { if (ev === 'order' && d.id === id) reload(); });
+
+  // Orders that arrive here still waiting for payment open the QR window by themselves once.
+  useEffect(() => { if (o?.status === 'awaiting_payment' && o.payment_id && !pay) setPayOpen(true); }, [o?.status, o?.payment_id]);
 
   // While the order waits for its payment, look again every few seconds: eSewa and Fonepay may confirm in another tab.
   const waiting = o?.status === 'awaiting_payment';
@@ -34,6 +39,7 @@ export default function Tracking() {
 
   return (
     <CustomerShell>
+      {payOpen && waiting && o.payment_id && <PayModal paymentId={o.payment_id} amount={o.total} onPaid={() => { setPayOpen(false); reload(); }} onClose={() => { setPayOpen(false); reload(); }} />}
       {pay === 'ok' && o.status !== 'awaiting_payment' && <div className="card flat" role="status" style={{ marginBottom: 16, borderColor: 'var(--hill)' }}><strong>Payment received.</strong> Your order is with the barista. You can close the payment tab and go back to the app if you came from there.</div>}
       {pay === 'failed' && <div className="card flat" role="alert" style={{ marginBottom: 16, borderColor: 'var(--cherry)' }}><strong>The payment was not completed.</strong> {o.status === 'cancelled' ? 'The order was cancelled and you were not charged.' : 'You can try again below.'}</div>}
       {pay === 'pending' && waiting && <div className="card flat" role="status" style={{ marginBottom: 16, borderColor: 'var(--marigold)' }}><strong>We are waiting for the payment to be confirmed.</strong> This page updates by itself.</div>}
@@ -56,7 +62,7 @@ export default function Tracking() {
         {waiting && (
           <div className="col" style={{ alignItems: 'center', gap: 10, marginTop: 8 }}>
             <p className="muted">Pay {rs(o.total)} with {PAY_LABEL[o.payment_method] || 'your wallet'} to send this order to the barista.</p>
-            <a className="btn primary lg" href={o.pay_url}>Pay {rs(o.total)} with {PAY_LABEL[o.payment_method]}</a>
+            <button className="btn primary lg" onClick={() => setPayOpen(true)}>Pay {rs(o.total)} with {PAY_LABEL[o.payment_method]}</button>
             <button className="btn ghost sm" onClick={cancel}>Cancel this order</button>
           </div>
         )}
@@ -72,7 +78,7 @@ export default function Tracking() {
         <hr style={{ border: 0, borderTop: '1px solid var(--hairline)', margin: '12px 0' }} />
         {o.discount > 0 && <div className="row between"><span className="muted">{o.discount_label}</span><span>− {rs(o.discount)}</span></div>}
         <div className="row between"><strong>Total</strong><strong>{rs(o.total)}</strong></div>
-        <p className="small muted" style={{ marginTop: 4 }}>{PAY_LABEL[o.payment_method] || 'Cash at counter'}{['esewa', 'fonepay'].includes(o.payment_method) && o.payment_status === 'unpaid' ? '' : <> · <Status s={o.payment_status} /></>}{o.payment_method === 'cash' && o.payment_status === 'unpaid' ? ' Pay in cash when you pick up.' : ''}</p>
+        <p className="small muted" style={{ marginTop: 4 }}>{PAY_LABEL[o.payment_method] || 'Cash at counter'}{['esewa', 'fonepay', 'nepalpay'].includes(o.payment_method) && o.payment_status === 'unpaid' ? '' : <> · <Status s={o.payment_status} /></>}{o.payment_method === 'cash' && o.payment_status === 'unpaid' ? ' Pay in cash when you pick up.' : ''}</p>
       </div>
       {['placed', 'preparing', 'ready'].includes(o.status) && <p className="small muted center" style={{ marginTop: 16 }}>Your order has gone to the barista, so it cannot be cancelled. Something wrong? Ask at the counter.</p>}
       {o.status === 'picked_up' && (

@@ -371,13 +371,15 @@ export function MatrixTab({ onPick }: { onPick?: (stationId: string) => void }) 
 
 /* ================================ Owner / warehouse hub ================================ */
 export function InventoryHub({ days }: { days: number }) {
-  const { stationId } = useDash();
-  const [tab, setTab] = useState<'network' | 'central' | 'purchases' | 'transfers' | 'counts' | 'prices'>('network');
+  const { stationId, sub, go } = useDash();
+  const [tabLocal, setTab] = useState<'network' | 'central' | 'purchases' | 'transfers' | 'counts' | 'prices'>('network');
+  const tab = (sub || tabLocal) as 'network' | 'central' | 'purchases' | 'transfers' | 'counts' | 'prices';
+  const open = (t: typeof tab) => (sub ? go(`inventory/${t}`) : setTab(t));
   return (
     <div className="col" style={{ gap: 16 }}>
-      <div><Seg value={tab} onChange={setTab} options={[{ id: 'network', label: 'All stations' }, { id: 'central', label: 'Central store' }, { id: 'purchases', label: 'Purchasing' }, { id: 'transfers', label: 'To stations' }, { id: 'counts', label: 'Counts and loss' }, { id: 'prices', label: 'Ingredients and prices' }]} /></div>
+      {!sub && <div><Seg value={tab} onChange={setTab} options={[{ id: 'network', label: 'All stations' }, { id: 'central', label: 'Central store' }, { id: 'purchases', label: 'Purchasing' }, { id: 'transfers', label: 'To stations' }, { id: 'counts', label: 'Counts and loss' }, { id: 'prices', label: 'Ingredients and prices' }]} /></div>}
       {tab === 'network' && <MatrixTab />}
-      {tab === 'central' && <CentralStockTab goPurchase={() => setTab('purchases')} />}
+      {tab === 'central' && <CentralStockTab goPurchase={() => open('purchases')} />}
       {tab === 'purchases' && <PurchasesTab />}
       {tab === 'transfers' && <TransfersPanel mode="warehouse" />}
       {tab === 'counts' && <><VariancePanel days={days} /><CountPanel role="owner" stationId={stationId} /></>}

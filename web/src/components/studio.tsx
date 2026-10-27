@@ -5,6 +5,8 @@ import { Empty, ErrorNote, Field, Meter, Modal, useData, useToast } from './ui';
 import { Seg, Skeleton } from './dash/kit';
 import { useDash } from './dash/shell';
 import { Icon } from './icons';
+import { PayModal } from './pay-modal';
+import { OrderFlowPanel } from './order-flow';
 import { productArt } from '@/lib/art';
 
 /* ============================================================================
@@ -100,12 +102,24 @@ export function IntegrationsPanel() {
 /* ============================================================================
    Payments: eSewa and Fonepay settings, a Rs 10 test, and the list of online payments with refunds to pay back.
    ============================================================================ */
-const GW = {
-  esewa: { name: 'eSewa', blurb: 'eSewa ePay v2. The customer pays in the eSewa page or app and comes back to Sadhai.', code: 'esewa_merchant_code', secret: 'esewa_secret_key', codeLabel: 'Merchant (product) code', secretLabel: 'Secret key', sandboxNote: 'In Sandbox the public test code EPAYTEST and eSewa’s test key are used, and eSewa’s test server takes the payment.', ret: '/payments/esewa/return' },
-  fonepay: { name: 'Fonepay', blurb: 'Fonepay web payment. The customer pays from any bank or wallet app, including by scanning the QR Fonepay shows.', code: 'fonepay_merchant_code', secret: 'fonepay_secret_key', codeLabel: 'Merchant code (PID)', secretLabel: 'Shared secret key', sandboxNote: 'In Sandbox, use the test merchant code and key Fonepay gave you. Until you save them, Sadhai shows its own test page.', ret: '/payments/fonepay/return' },
-} as const;
+type GwField = { key: string; label: string; secret?: boolean; area?: boolean; hint?: string };
+const GW: Record<string, { name: string; blurb: string; fields: GwField[]; sandboxNote: string; ret: string | null; hasMode?: boolean }> = {
+  esewa: { name: 'eSewa', blurb: 'eSewa ePay v2. The customer scans a QR (or taps Open eSewa) and pays in the eSewa app.', fields: [
+    { key: 'esewa_merchant_code', label: 'Merchant (product) code' }, { key: 'esewa_secret_key', label: 'Secret key', secret: true }],
+    sandboxNote: 'In Sandbox the public test code EPAYTEST and eSewa’s test key are used, and eSewa’s test server takes the payment.', ret: '/payments/esewa/return' },
+  fonepay: { name: 'Fonepay', blurb: 'Fonepay Dynamic QR. A real QR for the exact amount that any bank or wallet app can scan. Without the QR user name and password, a link QR to Fonepay’s web page is used instead.', fields: [
+    { key: 'fonepay_merchant_code', label: 'Merchant code (PID)' }, { key: 'fonepay_secret_key', label: 'Shared secret key', secret: true },
+    { key: 'fonepay_qr_username', label: 'QR API user name' }, { key: 'fonepay_qr_password', label: 'QR API password', secret: true }],
+    sandboxNote: 'In Sandbox, use the test merchant details Fonepay gave you.', ret: '/payments/fonepay/return' },
+  nepalpay: { name: 'NepalPay QR', blurb: 'NepalPay QR by NCHL. Customers scan a NepalQR from any NepalPay bank or wallet app. NCHL’s WebSocket channel tells Sadhai the moment it is paid.', fields: [
+    { key: 'nepalpay_merchant_id', label: 'Terminal / merchant ID' },
+    { key: 'nepalpay_qr_template', label: 'Your merchant QR text', area: true, hint: 'The text inside the static QR your bank gave you. It starts with 000201.' },
+    { key: 'nepalpay_ws_url', label: 'NCHL WebSocket address' }, { key: 'nepalpay_username', label: 'NCHL user name' },
+    { key: 'nepalpay_api_token', label: 'NCHL API token', secret: true }, { key: 'nepalpay_public_key', label: 'NCHL public key', secret: true, area: true }],
+    sandboxNote: 'Use the test details your bank or NCHL gave you.', ret: null },
+};
 
-function GatewayCard({ id, data, reload }: { id: 'esewa' | 'fonepay'; data: any[]; reload: () => void }) {
+function GatewayCard({ id, data, reload }: { id: 'esewa' | 'fonepay' | 'nepalpay'; data: any[]; reload: () => void }) {
   const g = GW[id];
   const toast = useToast();
   const item = (k: string) => data.find((i) => i.key === k);
@@ -115,8 +129,7 @@ function GatewayCard({ id, data, reload }: { id: 'esewa' | 'fonepay'; data: any[
   const val = (k: string) => (k in edit ? edit[k] : item(k)?.value ?? '');
   const enabled = val(`${id}_enabled`) === '1';
   const mode = val(`${id}_mode`) || 'sandbox';
-  const secretSet = item(g.secret)?.is_set;
-  async function save(extra: Record<string, string | null> = {}) {
+    async function save(extra: Record<string, string | null> = {}) {
     const values = { ...edit, ...extra };
     if (!Object.keys(values).length) return;
     try { await api('/owner/integrations', { method: 'PUT', body: { values } }); setEdit({}); setShowSecret(false); reload(); toast('Saved'); } catch (e: any) { toast(e.message, true); }
@@ -124,12 +137,7 @@ function GatewayCard({ id, data, reload }: { id: 'esewa' | 'fonepay'; data: any[
   async function runTest() {
     try {
       const out = await api('/owner/payments/test', { method: 'POST', body: { provider: id } });
-      window.open(out.pay_url, '_blank', 'noopener');
       setTest({ status: 'pending', id: out.payment_id });
-      const t = setInterval(async () => {
-        try { const p = await api(`/payments/${out.payment_id}`); if (p.status !== 'pending') { clearInterval(t); setTest({ status: p.status, id: out.payment_id }); reload(); } } catch { /* keep trying */ }
-      }, 3000);
-      setTimeout(() => clearInterval(t), 10 * 60000);
     } catch (e: any) { toast(e.message, true); }
   }
   return (
@@ -148,16 +156,26 @@ function GatewayCard({ id, data, reload }: { id: 'esewa' | 'fonepay'; data: any[
         <Field label="Mode" hint={mode === 'sandbox' ? g.sandboxNote : 'Real money. Use the details from your approved merchant account.'}>
           <select value={mode} onChange={(e) => setEdit({ ...edit, [`${id}_mode`]: e.target.value })}><option value="sandbox">Sandbox (test)</option><option value="live">Live (real money)</option></select>
         </Field>
-        <Field label={g.codeLabel}><input value={val(g.code) || ''} onChange={(e) => setEdit({ ...edit, [g.code]: e.target.value })} /></Field>
-        <Field label={g.secretLabel} hint={secretSet ? `Saved: ${item(g.secret)?.masked}` : 'Not saved yet'}>
-          {showSecret || !secretSet ? <input type="password" autoComplete="off" placeholder="Paste the key" value={(edit[g.secret] as string) ?? ''} onChange={(e) => setEdit({ ...edit, [g.secret]: e.target.value })} /> : <button type="button" className="btn sm" onClick={() => setShowSecret(true)}>Change key</button>}
-        </Field>
       </div>
-      <p className="small muted">Return address for the gateway: <code>{BASE}{g.ret}</code>. Sadhai sends it with every payment, so there is nothing to type into the {g.name} account for it.{mode === 'sandbox' && ' On a real website, customers are not offered Sandbox payments, so nobody can pay with a test account.'}</p>
+      <div className="grid g3">
+        {g.fields.map((f) => {
+          const it = item(f.key);
+          const hide = f.secret && it?.is_set && !(f.key in edit);
+          return (
+            <Field key={f.key} label={f.label} hint={f.secret ? (it?.is_set ? `Saved: ${it.masked}` : 'Not saved yet') : f.hint}>
+              {hide ? <button type="button" className="btn sm" onClick={() => setEdit({ ...edit, [f.key]: '' })}>Change</button>
+                : f.area ? <textarea rows={3} autoComplete="off" value={(edit[f.key] as string) ?? (f.secret ? '' : val(f.key) || '')} onChange={(e) => setEdit({ ...edit, [f.key]: e.target.value })} />
+                : <input type={f.secret ? 'password' : 'text'} autoComplete="off" placeholder={f.secret ? 'Paste it here' : ''} value={(edit[f.key] as string) ?? (f.secret ? '' : val(f.key) || '')} onChange={(e) => setEdit({ ...edit, [f.key]: e.target.value })} />}
+            </Field>
+          );
+        })}
+      </div>
+      {g.ret ? <p className="small muted">Return address for the gateway: <code>{BASE}{g.ret}</code>. Sadhai sends it with every payment, so there is nothing to type into the {g.name} account for it.</p> : <p className="small muted">Needs every field above before customers see it. NepalPay QR has no test page of its own: try it with the Rs 10 button and your bank’s test app.</p>}
       <div className="row wrap">
         <button className="btn primary" disabled={!Object.keys(edit).length} onClick={() => save()}>{Object.keys(edit).length ? 'Save changes' : 'No changes'}</button>
         <button className="btn" onClick={runTest}>Try a Rs 10 payment</button>
-        {test && <span className={`chip ${test.status === 'paid' ? 'hill' : test.status === 'failed' ? 'cherry' : 'marigold'}`}>{test.status === 'paid' ? 'Test payment came back paid' : test.status === 'failed' ? 'Test payment failed' : 'Waiting for you to pay in the new tab…'}</span>}
+        {test?.status === 'pending' && <PayModal paymentId={test.id} amount={10} onPaid={() => { setTest({ status: 'paid', id: test.id }); reload(); }} onClose={() => { setTest(null); reload(); }} />}
+        {test && test.status !== 'pending' && <span className={`chip ${test.status === 'paid' ? 'hill' : 'cherry'}`}>{test.status === 'paid' ? 'Test payment came back paid' : 'Test payment failed'}</span>}
       </div>
     </div>
   );
@@ -173,16 +191,17 @@ export function PaymentsPanel() {
   async function refunded(id: string) { try { await api(`/owner/payments/${id}/refund-done`, { method: 'POST', body: {} }); list.reload(); toast('Marked as paid back'); } catch (e: any) { toast(e.message, true); } }
   return (
     <div className="col" style={{ gap: 16 }}>
-      <div className="panel"><p className="small muted">Customers always can pay cash at the counter or with a pass. Switch on eSewa and Fonepay when each merchant account is ready. Online orders reach the barista only after the gateway confirms the payment, and an order nobody pays for is cancelled after 15 minutes.</p></div>
+      <div className="panel"><p className="small muted">Customers always can pay cash at the counter or with a pass. Switch on eSewa, Fonepay and NepalPay QR when each merchant account is ready. Online orders reach the barista only after the gateway confirms the payment, and an order nobody pays for is cancelled after 15 minutes.</p></div>
       <GatewayCard id="esewa" data={keys.data} reload={() => { keys.reload(); list.reload(); }} />
       <GatewayCard id="fonepay" data={keys.data} reload={() => { keys.reload(); list.reload(); }} />
+      <GatewayCard id="nepalpay" data={keys.data} reload={() => { keys.reload(); list.reload(); }} />
       <div className="panel">
         <div className="ph"><div><h3>Online payments</h3><p className="small muted">The last 100. Online money arrives in your merchant account, not at the counter. A refund is sent back from there, then marked here.</p></div></div>
         {due.length > 0 && <div className="card flat" style={{ borderColor: 'var(--cherry)', marginBottom: 12 }}><strong>{due.length} refund{due.length > 1 ? 's' : ''} to pay back</strong>: {rs(due.reduce((a, r) => a + r.amount, 0))}</div>}
         {!list.data ? <Skeleton h={40} n={3} /> : !rows.length ? <Empty>No online payments yet.</Empty> : (
           <div className="tablewrap"><table><thead><tr><th>When</th><th>Gateway</th><th>For</th><th className="num">Amount</th><th>Status</th><th>Reference</th><th /></tr></thead>
             <tbody>{rows.map((r) => (
-              <tr key={r.id}><td>{fmtDateTime(r.created_at)}</td><td>{r.provider === 'esewa' ? 'eSewa' : 'Fonepay'}</td><td>{r.purpose === 'order' ? `Order ${r.pickup_code || ''}` : r.purpose === 'pass' ? '10-cup pass' : 'Test'}{r.station ? <span className="small muted"> · {r.station}</span> : null}</td><td className="num">{rs(r.amount)}</td>
+              <tr key={r.id}><td>{fmtDateTime(r.created_at)}</td><td>{GW[r.provider]?.name || r.provider}</td><td>{r.purpose === 'order' ? `Order ${r.pickup_code || ''}` : r.purpose === 'pass' ? '10-cup pass' : 'Test'}{r.station ? <span className="small muted"> · {r.station}</span> : null}</td><td className="num">{rs(r.amount)}</td>
                 <td><span className={`chip ${r.status === 'paid' ? 'hill' : r.status === 'failed' ? 'cherry' : r.status === 'refunded' ? 'marigold' : ''}`}>{r.status}</span>{r.late && <span className="small muted"> late</span>}</td><td className="small">{r.provider_ref || '–'}</td>
                 <td>{r.refund_due && <button className="btn sm" onClick={() => refunded(r.id)}>Mark paid back</button>}</td></tr>))}</tbody></table></div>
         )}
@@ -192,20 +211,23 @@ export function PaymentsPanel() {
 }
 
 export function SettingsHub() {
-  const [tab, setTab] = useState<'rules' | 'pay' | 'keys' | 'data'>('rules');
+  const { sub } = useDash();
+  const [tabLocal, setTab] = useState<'rules' | 'flow' | 'pay' | 'keys' | 'data'>('rules');
+  const tab = (sub || tabLocal) as 'rules' | 'flow' | 'pay' | 'keys' | 'data';
   return (
     <div className="col" style={{ gap: 16 }}>
-      <Seg
+      {!sub && <Seg
         value={tab}
         onChange={setTab}
         options={[
           { id: 'rules', label: 'Prices and rules' },
+          { id: 'flow', label: 'Order flow' },
           { id: 'pay', label: 'Payments' },
           { id: 'keys', label: 'App and company' },
           { id: 'data', label: 'Data & Backup' },
         ]}
-      />
-      {tab === 'rules' ? <RulesPanel /> : tab === 'pay' ? <PaymentsPanel /> : tab === 'keys' ? <IntegrationsPanel /> : <DataManagementPanel />}
+      />}
+      {tab === 'rules' ? <RulesPanel /> : tab === 'flow' ? <OrderFlowPanel /> : tab === 'pay' ? <PaymentsPanel /> : tab === 'keys' ? <IntegrationsPanel /> : <DataManagementPanel />}
     </div>
   );
 }
@@ -612,7 +634,9 @@ function ObjList({ label, items, fields, onChange, make, max = 8 }: { label: str
 export function SiteEditor() {
   const site = useData<any>('/owner/site');
   const toast = useToast();
-  const [tab, setTab] = useState<'hero' | 'marquee' | 'partners' | 'investors' | 'menu'>('hero');
+  const { sub } = useDash();
+  const [tabLocal, setTab] = useState<'hero' | 'marquee' | 'partners' | 'investors' | 'menu'>('hero');
+  const tab = (sub || tabLocal) as 'hero' | 'marquee' | 'partners' | 'investors' | 'menu';
   const [draft, setDraft] = useState<any>({});
   useEffect(() => { if (site.data) setDraft(JSON.parse(JSON.stringify(site.data.content))); }, [site.data]);
   if (!site.data || !draft.hero) return <Skeleton h={90} n={4} />;
@@ -628,7 +652,7 @@ export function SiteEditor() {
   const h = draft.hero;
   return (
     <div className="col" style={{ gap: 16 }}>
-      <Seg value={tab} onChange={setTab} options={[{ id: 'hero', label: 'Hero' }, { id: 'marquee', label: 'Banner text' }, { id: 'partners', label: 'Partner page' }, { id: 'investors', label: 'Investor page' }, { id: 'menu', label: 'Menu pictures' }]} />
+      {!sub && <Seg value={tab} onChange={setTab} options={[{ id: 'hero', label: 'Hero' }, { id: 'marquee', label: 'Banner text' }, { id: 'partners', label: 'Partner page' }, { id: 'investors', label: 'Investor page' }, { id: 'menu', label: 'Menu pictures' }]} />}
       <p className="small muted">Changes go live on the website as soon as you save. The Sadhai logo is fixed and cannot be changed here, so it stays the same everywhere.</p>
 
       {tab === 'hero' && (

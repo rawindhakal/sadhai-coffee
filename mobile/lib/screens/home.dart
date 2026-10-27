@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -178,8 +179,17 @@ class _StoreFrontState extends State<StoreFront> {
   final _search = TextEditingController();
   final _dealsKey = GlobalKey(), _merchKey = GlobalKey(), _allKey = GlobalKey(), _heroKey = GlobalKey();
 
+  StreamSubscription? _menuSub;
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+    // The owner changed the menu, an add-on or a price: load it again so this app matches every other screen.
+    _menuSub = Api.instance.events().listen((e) { if (e.$1 == 'menu' && mounted) _load(); });
+  }
+
+  @override
+  void dispose() { _menuSub?.cancel(); super.dispose(); }
 
   Future<void> _load() async {
     final id = context.read<CartState>().station!['id'];

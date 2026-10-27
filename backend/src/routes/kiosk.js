@@ -7,6 +7,7 @@ import { authenticate, requireRole } from '../lib/auth.js';
 import { createOrder, fullOrder } from '../lib/orders.js';
 import { GATEWAYS } from '../lib/payments.js';
 import { sid } from './station.js';
+import { flow } from '../lib/order-flow.js';
 
 // Self-ordering kiosk. The tablet is signed in as that station's staff account, so orders are pinned to the station.
 export const kiosk = Router();
@@ -16,8 +17,8 @@ const passCheckLimit = rateLimit({ windowMs: 60_000, limit: 15, standardHeaders:
 
 const orderSchema = z.object({
   items: z.array(z.object({ product_id: z.string().uuid(), qty: z.number().int().min(1).max(10).default(1), option_ids: z.array(z.string().uuid()).default([]) })).min(1).max(20),
-  customer_name: z.string().trim().min(2, 'Enter your name').max(40),
-  customer_phone: z.string(),
+  customer_name: z.string().trim().max(40).default(''),
+  customer_phone: z.string().default(''),
   payment: z.enum(['counter', 'pass', ...GATEWAYS]),
   pass_code: z.string().trim().max(20).optional(),
   consent: z.literal(true, { errorMap: () => ({ message: 'Please accept so we can call your order' }) }),
@@ -46,16 +47,19 @@ kiosk.get('/pass-check', passCheckLimit, wrap(async (req, res) => {
 kiosk.post('/orders', wrap(async (req, res) => {
   const stationId = await sid(req);
   const b = orderSchema.parse(req.body);
-  const phone = normalizePhone(b.customer_phone);
+  const rules = flow().kiosk;
+  if ((rules.ask_name || b.payment === 'pass') && b.customer_name.length < 2) throw bad('Enter your name');
+  if ((rules.ask_phone || b.payment === 'pass') && !b.customer_phone) throw bad('Enter your phone number');
+  const phone = b.customer_phone ? normalizePhone(b.customer_phone) : null;
   let user = null;
   let method = b.payment === 'counter' ? 'cash' : b.payment;
   if (b.payment === 'pass') {
     if (!b.pass_code) throw bad('Enter your pass code');
     user = await passOwner(b.pass_code, phone);
   } else {
-    user = (await query(`SELECT id, name, phone, role FROM users WHERE phone=$1 AND role='customer' AND active`, [phone])).rows[0] || null;
+    user = !phone ? null : (await query(`SELECT id, name, phone, role FROM users WHERE phone=$1 AND role='customer' AND active`, [phone])).rows[0] || null;
   }
-  const out = await createOrder(user, { items: b.items, station_id: stationId, payment_method: method, channel: 'kiosk', customer_name: b.customer_name, customer_phone: phone, note: b.note });
+  const out = await createOrder(user, { items: b.items, station_id: stationId, payment_method: method, channel: 'kiosk', customer_name: b.customer_name || 'Kiosk guest', customer_phone: phone, note: b.note });
   res.status(201).json(out);
 }));
 

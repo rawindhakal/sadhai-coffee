@@ -5,7 +5,7 @@ import { useAuth, useEvents } from '@/lib/auth';
 import { Empty, ErrorNote, Field, Loading, Modal, Stat, Status, Tabs, useData, useToast } from './ui';
 import { CountPanel, TransfersPanel } from './inventory';
 import { MyShift } from './people';
-import { PayQr } from './pay-qr';
+import { PayModal } from './pay-modal';
 import { useConfig } from '@/lib/site-content';
 
 /** Station workspace. Staff are pinned to their station; managers/owners pass stationId. */
@@ -173,8 +173,9 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
   const [phone, setPhone] = useState('');
   const [cust, setCust] = useState<any>(null);
   const config = useConfig();
-  const methods: string[] = (config?.payment_methods || ['cash']).filter((m: string) => m !== 'pass');
+  const methods: string[] = (config?.order_flow?.counter?.payment_methods || config?.payment_methods || ['cash']).filter((m: string) => m !== 'pass');
   const [method, setMethod] = useState('cash');
+  useEffect(() => { if (methods.length && !methods.includes(method)) setMethod(methods[0]); }, [methods.join()]);
   const [qrPay, setQrPay] = useState<any>(null);
   const [offer, setOffer] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -227,7 +228,7 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
         )}
         {offer !== 'pass' && (
           <div className="row wrap">
-            {methods.map((m) => <button key={m} type="button" className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>{m === 'cash' ? 'Cash at counter' : m === 'esewa' ? 'eSewa QR' : 'Fonepay QR'}</button>)}
+            {methods.map((m) => <button key={m} type="button" className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>{m === 'cash' ? 'Cash at counter' : m === 'esewa' ? 'eSewa QR' : m === 'nepalpay' ? 'NepalPay QR' : 'Fonepay QR'}</button>)}
           </div>
         )}
         <div className="row between"><strong>Total</strong><strong style={{ fontSize: 24 }}>{rs(total)}</strong></div>
@@ -235,10 +236,10 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
         <button className="btn primary lg" disabled={!cart.length || busy} onClick={place}>{busy ? 'Placing…' : 'Take order'}</button>
       </div>
       {qrPay && (
-        <Modal title={`Pay for ${qrPay.order.pickup_code}`} onClose={() => { setQrPay(null); onDone(); }}>
-          <PayQr payment={qrPay.payment} amount={qrPay.order.total} onDone={(st) => { toast(st === 'paid' ? `Paid. ${qrPay.order.pickup_code} is on the queue` : 'The payment was not completed. Nothing was charged', st !== 'paid'); setQrPay(null); onDone(); }} />
-          <button className="btn ghost block" onClick={async () => { await api(`/station/orders/${qrPay.order.id}/status`, { method: 'POST', body: { status: 'cancelled', reason: 'Cancelled at the counter before paying' } }).catch(() => {}); setQrPay(null); onDone(); }}>Cancel this order</button>
-        </Modal>
+        <PayModal paymentId={qrPay.payment.payment_id} amount={qrPay.order.total}
+          onPaid={() => { toast(`Paid. ${qrPay.order.pickup_code} is on the queue`); setQrPay(null); onDone(); }}
+          onClose={() => { setQrPay(null); onDone(); }}
+          onCancel={async () => { await api(`/station/orders/${qrPay.order.id}/status`, { method: 'POST', body: { status: 'cancelled', reason: 'Cancelled at the counter before paying' } }).catch(() => {}); setQrPay(null); onDone(); }} />
       )}
       {picking && <PosItem p={picking} onClose={() => setPicking(null)} onAdd={(l: any) => { setCart([...cart, l]); setPicking(null); }} />}
     </div>

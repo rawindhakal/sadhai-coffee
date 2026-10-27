@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.0.0] - 2026-10-27
+
+### Added
+- NepalPay QR (NCHL): dynamic NepalQR for the exact amount, paid status through NCHL's WebSocket channel (`backend/src/lib/gateways/nepalpay.js`, `qr-watch.js`).
+- Fonepay Dynamic QR (`thirdPartyDynamicQrDownload` and `GetStatus`) when the QR user name and password are saved; a link QR is used until then.
+- A pay-by-QR window (`PayModal` on the web, a bottom sheet in the app) on the cart, order page, passes, counter, kiosk and the owner's Rs 10 test. No page changes.
+- Order flow (Settings, Order flow): per way of ordering (app, website, kiosk QR, kiosk, counter): on or off, ways to pay, item limit, notes, pickup later, kiosk name and phone. Enforced by the API and read from `/config`.
+- Live menu: menu, add-on, price and availability changes publish a `menu` event; the website, kiosk and app reload.
+- 3D coffee on the home page and kiosk (three.js).
+- Dashboard hierarchy: groups, pages and sub-pages with a breadcrumb; Settings, Staff, Inventory, Menu and the home page editor are separate pages.
+
+### Fixed
+- `/station/menu` returned a list, so the counter's New order screen crashed on `categories.map`.
+- The owner's Rs 10 test no longer needs the gateway to be switched on first.
+
+---
+
 ## [1.9.0] - 2026-10-24
 
 ### Added

@@ -5,7 +5,8 @@ import { wrap, bad, notFound, forbidden, HttpError } from '../lib/http.js';
 import { authenticate, requireRole, verifyAccess } from '../lib/auth.js';
 import { subscribe } from '../lib/hub.js';
 import { createOrder, quote, fullOrder, rateOrder, cancelOrder, confirmPayment, refreshPayment, buyPass } from '../lib/orders.js';
-import { PAYMENT_METHODS, GATEWAYS, payUrl, simulatorAllowed } from '../lib/payments.js';
+import { PAYMENT_METHODS, GATEWAYS, payUrl, simulatorAllowed, qrFor } from '../lib/payments.js';
+import { watchNepalpay } from '../lib/qr-watch.js';
 import { startPayment, simulate, esewaReturn, esewaFailed, fonepayReturn } from '../lib/payment-flow.js';
 import { getSettings } from '../lib/settings.js';
 import { rt } from '../lib/runtime.js';
@@ -42,7 +43,7 @@ customer.get('/events', wrap(async (req, res) => {
   const { rows } = await query('SELECT id, role, station_id FROM users WHERE id=$1 AND active', [claims.sub]);
   const u = rows[0];
   if (!u) throw new HttpError(401, 'Sign in again');
-  const chans = [`user:${u.id}`];
+  const chans = [`user:${u.id}`, 'all'];
   if (u.role === 'station' && u.station_id) chans.push(`station:${u.station_id}`);
   if (u.role === 'manager' || u.role === 'partner') (await query('SELECT station_id FROM station_managers WHERE user_id=$1', [u.id])).rows.forEach((r) => chans.push(`station:${r.station_id}`));
   if (u.role === 'owner') (await query('SELECT id FROM stations WHERE active')).rows.forEach((r) => chans.push(`station:${r.id}`));
@@ -75,7 +76,9 @@ customer.get('/payments/:id', wrap(async (req, res) => {
   const mine = first && (first.user_id === req.user.id || req.user.role !== 'customer');
   if (!mine) throw notFound('Payment not found');
   const p = first.status === 'pending' ? await refreshPayment(first.id).catch(() => first) : first;
-  res.json({ id: p.id, status: p.status, provider: p.provider, amount: p.amount, pay_url: p.status === 'pending' ? payUrl(p.id) : null, order: p.order_id ? await fullOrder(p.order_id, undefined, { reveal: p.user_id === req.user.id }) : null });
+  const qr = p.status === 'pending' ? await qrFor(p) : null;
+  if (qr && p.provider === 'nepalpay') watchNepalpay(p);
+  res.json({ id: p.id, status: p.status, provider: p.provider, amount: p.amount, pay_url: p.status === 'pending' ? payUrl(p.id) : null, qr, expires_at: new Date(new Date(p.created_at).getTime() + 15 * 60_000).toISOString(), order: p.order_id ? await fullOrder(p.order_id, undefined, { reveal: p.user_id === req.user.id }) : null });
 }));
 
 // Test sites only: mark a payment paid or failed without a gateway.

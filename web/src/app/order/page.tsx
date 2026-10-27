@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, rs, fmtTime } from '@/lib/api';
-import { useAuth } from '@/lib/auth';
+import { useAuth, useEvents } from '@/lib/auth';
 import { useCart, quickLine } from '@/lib/cart';
 import { useI18n, LangToggle } from '@/lib/i18n';
 import { Empty, ErrorNote, Loading, useData, useToast } from '@/components/ui';
@@ -88,6 +88,7 @@ function Home() {
   const toast = useToast();
   const sid = cart.station!.id;
   const home = useData<any>(`/stations/${sid}/home`, [sid]);
+  useEvents((ev) => { if (ev === 'menu') home.reload(); });
   const coupons = useData<any[]>(user ? '/coupons' : null, [user?.id]);
   const passes = useData<any[]>(user ? '/passes' : null, [user?.id]);
   const inbox = useData<any>(user ? '/notifications' : null, [user?.id]);

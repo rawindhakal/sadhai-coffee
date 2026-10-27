@@ -146,7 +146,7 @@ station.get('/summary', wrap(async (req, res) => {
   res.json({ station: st.rows[0], today: t.rows[0], queue: q.rows[0], expected_cash: c.rows[0].cash, cash_close: closed });
 }));
 
-station.get('/menu', wrap(async (req, res) => res.json(await stationMenu(await sid(req)))));
+station.get('/menu', wrap(async (req, res) => res.json({ categories: await stationMenu(await sid(req)) })));
 
 station.post('/products/:productId/availability', wrap(async (req, res) => {
   const id = await sid(req);
@@ -155,6 +155,7 @@ station.post('/products/:productId/availability', wrap(async (req, res) => {
     `INSERT INTO station_products(station_id, product_id, available) VALUES ($1,$2,$3)
      ON CONFLICT (station_id, product_id) DO UPDATE SET available=$3`, [id, req.params.productId, available],
   );
+  publish('all', 'menu', { at: Date.now() });
   await audit(req.user.id, available ? 'menu.available' : 'menu.sold_out', 'product', req.params.productId, { station_id: id });
   res.json({ ok: true });
 }));

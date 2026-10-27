@@ -38,7 +38,9 @@ export function MenuStudio() {
   const { data, error, reload } = useData<any>('/owner/menu');
   const toast = useToast();
   const { go } = useDash();
-  const [view, setView] = useState<'items' | 'stations'>('items');
+  const { sub } = useDash();
+  const [viewLocal, setView] = useState<'items' | 'stations'>('items');
+  const view = (sub === 'stations' || sub === 'items' ? sub : viewLocal) as 'items' | 'stations';
   const [cat, setCat] = useState('');
   const [status, setStatus] = useState<'all' | 'on' | 'off' | 'norecipe' | 'nophoto' | 'low'>('all');
   const [q, setQ] = useState('');
@@ -98,7 +100,7 @@ export function MenuStudio() {
 
       <div className="card col" style={{ gap: 12, padding: 16 }}>
         <div className="row between wrap" style={{ gap: 10 }}>
-          <Seg value={view} onChange={setView} options={[{ id: 'items', label: 'By item' }, { id: 'stations', label: 'By station' }]} />
+          {!sub && <Seg value={view} onChange={setView} options={[{ id: 'items', label: 'By item' }, { id: 'stations', label: 'By station' }]} />}
           <div className="row wrap" style={{ gap: 8 }}>
             <select value={cat} onChange={(e) => setCat(e.target.value)} style={{ minWidth: 150 }}>
               <option value="">All categories</option>

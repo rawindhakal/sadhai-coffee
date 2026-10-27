@@ -9,10 +9,11 @@ import { Icon } from '../icons';
 import { ErrorNote, Status, useData, useToast } from '../ui';
 import { Drawer, Seg, Skeleton } from './kit';
 
-export type Section = { key: string; label: string; icon: string; group?: string; badge?: number; keywords?: string };
+export type Tab = { id: string; label: string };
+export type Section = { key: string; label: string; icon: string; group?: string; badge?: number; keywords?: string; tabs?: Tab[] };
 type Ctx = {
   role: string; stations: any[]; stationId: string; setStationId: (s: string) => void; days: number; setDays: (n: number) => void; from: string;
-  go: (key: string) => void; section: string; openOrder: (id: string) => void; openCustomer: (id: string) => void; tick: number; live: boolean;
+  go: (key: string) => void; section: string; sub: string; openOrder: (id: string) => void; openCustomer: (id: string) => void; tick: number; live: boolean;
 };
 const DashCtx = createContext<Ctx>(null as any);
 export const useDash = () => useContext(DashCtx);
@@ -26,6 +27,8 @@ export function DashShell({ sections, role, children }: { sections: Section[]; r
   const stationsQ = useData<any[]>(isStaff ? null : '/admin/stations');
   const stations = stationsQ.data || [];
   const [section, setSection] = useState(sections[0].key);
+  const [subTab, setSubTab] = useState('');
+  const [closed, setClosed] = useState<string[]>([]);
   const [stationId, setStationId] = useState('');
   const [days, setDays] = useState(30);
   const [collapsed, setCollapsed] = useState(false);
@@ -40,12 +43,18 @@ export function DashShell({ sections, role, children }: { sections: Section[]; r
 
   // hash routing: #live, #orders ... so links, refresh and the back button all work
   useEffect(() => {
-    const read = () => { const h = location.hash.replace('#', ''); if (sections.some((s) => s.key === h)) setSection(h); };
+    const read = () => { const [h, t] = location.hash.replace('#', '').split('/'); const s = sections.find((x) => x.key === h); if (s) { setSection(h); setSubTab(s.tabs ? (s.tabs.some((x) => x.id === t) ? t : s.tabs[0].id) : ''); } };
     read(); window.addEventListener('hashchange', read);
     try { setCollapsed(localStorage.getItem('sadhai.collapsed') === '1'); const t = localStorage.getItem('sadhai.theme'); if (t) { setDark(t === 'dark'); document.documentElement.dataset.theme = t; } } catch {}
     return () => window.removeEventListener('hashchange', read);
   }, []);
-  const go = useCallback((key: string) => { location.hash = key; setSection(key); setMobileOpen(false); }, []);
+  const go = useCallback((target: string) => {
+    const [key, t] = target.split('/');
+    const s = sections.find((x) => x.key === key);
+    const next = s?.tabs ? (s.tabs.some((x) => x.id === t) ? t : s.tabs[0].id) : '';
+    location.hash = next ? `${key}/${next}` : key; setSection(key); setSubTab(next); setMobileOpen(false);
+  }, [sections]);
+  const toggleGroup = (g: string) => setClosed((c) => (c.includes(g) ? c.filter((x) => x !== g) : [...c, g]));
   const toggleTheme = () => { const n = dark ? 'light' : 'dark'; setDark(!dark); document.documentElement.dataset.theme = n; try { localStorage.setItem('sadhai.theme', n); } catch {} };
   const toggleCollapse = () => { setCollapsed(!collapsed); try { localStorage.setItem('sadhai.collapsed', collapsed ? '0' : '1'); } catch {} };
 
@@ -64,7 +73,7 @@ export function DashShell({ sections, role, children }: { sections: Section[]; r
   const alerts = useData<any[]>(isStaff ? null : '/admin/alerts' + (stationId ? `?station_id=${stationId}` : ''), [stationId, tick]);
   const urgent = (alerts.data || []).filter((a) => a.severity !== 'info').length;
 
-  const ctx: Ctx = useMemo(() => ({ role, stations, stationId, setStationId, days, setDays, from: sinceDays(days), go, section, openOrder: setOrder, openCustomer: setCustomer, tick, live }), [role, stations, stationId, days, go, section, tick, live]);
+  const ctx: Ctx = useMemo(() => ({ role, stations, stationId, setStationId, days, setDays, from: sinceDays(days), go, section, sub: subTab, openOrder: setOrder, openCustomer: setCustomer, tick, live }), [role, stations, stationId, days, go, section, subTab, tick, live]);
   const cur = sections.find((s) => s.key === section) || sections[0];
   const groups = sections.reduce<Record<string, Section[]>>((a, s) => { (a[s.group || ''] ||= []).push(s); return a; }, {});
 
@@ -74,19 +83,30 @@ export function DashShell({ sections, role, children }: { sections: Section[]; r
         <div className={`overlay-mobile ${mobileOpen ? 'show' : ''}`} onClick={() => setMobileOpen(false)} />
         <aside className={`sidebar ${mobileOpen ? 'open' : ''}`} aria-label="Sections">
           <div className="brandrow"><Logo /></div>
-          {Object.entries(groups).map(([g, items]) => (
-            <div key={g}>
-              {g && <div className="grouphead">{g}</div>}
-              {items.map((s) => {
-                const badge = s.badge ?? (s.key === 'overview' && urgent ? undefined : undefined);
-                return (
-                  <button key={s.key} className={`navitem ${section === s.key ? 'on' : ''}`} onClick={() => go(s.key)} aria-current={section === s.key ? 'page' : undefined} title={s.label}>
-                    <Icon name={s.icon} size={20} /><span className="lbl">{s.label}</span>{badge ? <span className="nb">{badge}</span> : null}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+          {Object.entries(groups).map(([g, items]) => {
+            const shut = !!g && closed.includes(g) && !items.some((s) => s.key === section);
+            return (
+              <div key={g} className="navgroup">
+                {g && <button className="grouphead" onClick={() => toggleGroup(g)} aria-expanded={!shut}><span>{g}</span><Icon name={shut ? 'chevr' : 'chevd'} size={14} /></button>}
+                {!shut && items.map((s) => {
+                  const badge = s.badge;
+                  const here = section === s.key;
+                  return (
+                    <div key={s.key}>
+                      <button className={`navitem ${here ? 'on' : ''}`} onClick={() => go(s.key)} aria-current={here && !s.tabs ? 'page' : undefined} aria-expanded={s.tabs ? here : undefined} title={s.label}>
+                        <Icon name={s.icon} size={20} /><span className="lbl">{s.label}</span>{badge ? <span className="nb">{badge}</span> : null}{s.tabs && <Icon name={here ? 'chevd' : 'chevr'} size={14} />}
+                      </button>
+                      {here && s.tabs && (
+                        <div className="subnav" role="group" aria-label={`${s.label} pages`}>
+                          {s.tabs.map((t) => <button key={t.id} className={`subitem ${subTab === t.id ? 'on' : ''}`} onClick={() => go(`${s.key}/${t.id}`)} aria-current={subTab === t.id ? 'page' : undefined}><span className="lbl">{t.label}</span></button>)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
           <div className="grow" />
           <button className="navitem" onClick={toggleCollapse} title="Collapse menu" style={{ opacity: 0.8 }}><Icon name={collapsed ? 'chevr' : 'chevl'} size={20} /><span className="lbl">Collapse</span></button>
         </aside>
@@ -95,7 +115,10 @@ export function DashShell({ sections, role, children }: { sections: Section[]; r
           <header className="dtop">
             <button className="iconbtn" style={{ display: 'none' }} id="burger" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Icon name="menu" size={20} /></button>
             <button className="iconbtn burger" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Icon name="menu" size={20} /></button>
-            <h1>{cur.label}</h1>
+            <div className="titlebox">
+              {(cur.group || cur.tabs) && <nav className="crumbs" aria-label="Breadcrumb">{cur.group && <span>{cur.group}</span>}{cur.tabs && <><span aria-hidden>›</span><button onClick={() => go(cur.key)}>{cur.label}</button></>}</nav>}
+              <h1>{cur.tabs ? cur.tabs.find((t) => t.id === subTab)?.label || cur.label : cur.label}</h1>
+            </div>
             <span className="small muted row" style={{ gap: 6 }}><span className={`livedot ${live ? '' : 'off'}`} />{live ? 'Live' : 'Connecting'}</span>
             <div className="grow" />
             {!isStaff && stations.length > 0 && (
@@ -231,7 +254,8 @@ function Palette({ sections, onClose, go, openOrder, openCustomer, stationId }: 
     const t = setTimeout(() => api(`/admin/search?q=${encodeURIComponent(q.trim())}${stationId ? `&station_id=${stationId}` : ''}`).then(setRes).catch(() => {}), 200);
     return () => clearTimeout(t);
   }, [q]);
-  const secs = sections.filter((s) => !q || `${s.label} ${s.keywords || ''}`.toLowerCase().includes(q.toLowerCase()));
+  const flat = sections.flatMap((s) => (s.tabs ? s.tabs.map((t) => ({ ...s, key: `${s.key}/${t.id}`, label: `${s.label} › ${t.label}` })) : [s]));
+  const secs = flat.filter((s) => !q || `${s.label} ${s.keywords || ''}`.toLowerCase().includes(q.toLowerCase()));
   const items: { label: string; sub?: string; icon: string; run: () => void; group: string }[] = [
     ...res.orders.map((o: any) => ({ group: 'Orders', icon: 'receipt', label: `Order ${o.pickup_code}`, sub: `${o.station_name} · ${fmtDateTime(o.created_at)} · ${rs(o.total)}`, run: () => openOrder(o.id) })),
     ...res.customers.map((c: any) => ({ group: 'Customers', icon: 'user', label: c.name, sub: c.phone, run: () => openCustomer(c.id) })),

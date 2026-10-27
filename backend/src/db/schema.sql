@@ -751,4 +751,10 @@ UPDATE site_content SET value = value - 'layers' - 'timer_cup' - 'show_timer' - 
 -- 'test' payments are the owner's Rs 10 checks of a gateway; they are not sales.
 ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_purpose_check;
 ALTER TABLE payments ADD CONSTRAINT payments_purpose_check CHECK (purpose IN ('order','pass','test'));
+
+-- ---- v2.0: NepalPay QR ----
+ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_provider_check;
+ALTER TABLE payments ADD CONSTRAINT payments_provider_check CHECK (provider IN ('cash','esewa','khalti','fonepay','nepalpay','pass'));
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_payment_method_check;
+ALTER TABLE orders ADD CONSTRAINT orders_payment_method_check CHECK (payment_method IN ('cash','esewa','khalti','fonepay','nepalpay','pass'));
 CREATE INDEX IF NOT EXISTS payments_ref_idx ON payments(provider_ref) WHERE provider_ref IS NOT NULL;

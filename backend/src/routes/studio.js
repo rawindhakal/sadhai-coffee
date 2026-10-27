@@ -10,7 +10,8 @@ import { audit } from '../lib/notify.js';
 import { DEFS, describeRuntime, setRuntime, rt } from '../lib/runtime.js';
 import { SITE_DEFAULTS, loadSite, mediaUrl } from '../lib/site.js';
 import { getSettings } from '../lib/settings.js';
-import { GATEWAYS, gateway, gatewayStatus, initiate } from '../lib/payments.js';
+import { GATEWAYS, PAYMENT_METHODS, gateway, gatewayStatus, initiate } from '../lib/payments.js';
+import { CHANNELS, CHANNEL_LABEL, flow, cleanFlow } from '../lib/order-flow.js';
 import { todayNpt, addDays } from '../lib/roster.js';
 
 /** Owner-only: integration keys, pictures and website content. */
@@ -33,13 +34,27 @@ studio.put('/integrations', wrap(async (req, res) => {
   res.json({ ok: true, changed, settings: await describeRuntime() });
 }));
 
+/* ---------------- order flow ---------------- */
+studio.get('/order-flow', wrap(async (_req, res) => res.json({ channels: CHANNELS.map((c) => ({ id: c, label: CHANNEL_LABEL[c] })), flow: flow(), payments: PAYMENT_METHODS.filter((m) => m !== 'pass').concat('pass') })));
+studio.put('/order-flow', wrap(async (req, res) => {
+  const json = cleanFlow(req.body?.flow);
+  await setRuntime('order_flow', json, req.user.id);
+  await audit(req.user.id, 'settings.order_flow', 'settings', null, {});
+  res.json({ ok: true, flow: flow() });
+}));
+studio.delete('/order-flow', wrap(async (req, res) => {
+  await setRuntime('order_flow', '', req.user.id);
+  await audit(req.user.id, 'settings.order_flow_reset', 'settings', null, {});
+  res.json({ ok: true, flow: flow() });
+}));
+
 /* ---------------- online payments ---------------- */
 studio.get('/payments', wrap(async (_req, res) => {
   const { rows } = await query(
     `SELECT p.id, p.provider, p.purpose, p.amount, p.status, p.provider_ref, p.created_at, p.settled_at, o.pickup_code, s.name AS station,
             COALESCE((p.raw->>'refund_pending_manual')::boolean, false) AS refund_due, COALESCE((p.raw->>'late_payment')::boolean, false) AS late
        FROM payments p LEFT JOIN orders o ON o.id=p.order_id LEFT JOIN stations s ON s.id=COALESCE(o.station_id, p.station_id)
-      WHERE p.provider IN ('esewa','fonepay') ORDER BY p.created_at DESC LIMIT 100`);
+      WHERE p.provider IN ('esewa','fonepay','nepalpay') ORDER BY p.created_at DESC LIMIT 100`);
   res.json({ gateways: gatewayStatus(), payments: rows });
 }));
 // A Rs 10 test payment through the real gateway page, so the owner can check the keys without placing an order.
@@ -48,7 +63,7 @@ studio.post('/payments/test', wrap(async (req, res) => {
   const missing = gateway(provider).missing();
   if (missing.length) throw bad(`Save these first: ${missing.map((k) => DEFS[k]?.label || k).join(', ')}.`);
   const { rows } = await query(`INSERT INTO payments(user_id, purpose, provider, amount, status) VALUES ($1,'test',$2,10,'pending') RETURNING *`, [req.user.id, provider]);
-  const init = initiate(provider, rows[0]);
+  const init = initiate(provider, rows[0], { test: true });
   await query('UPDATE payments SET provider_ref=$2 WHERE id=$1', [rows[0].id, init.reference]);
   await audit(req.user.id, 'payments.test', 'payment', rows[0].id, { provider });
   res.status(201).json(init);

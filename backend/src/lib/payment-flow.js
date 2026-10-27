@@ -23,8 +23,9 @@ const page = (title, body) => `<!doctype html><html><head><meta charset="utf-8">
 export async function startPayment(paymentId) {
   const { rows } = await query(`SELECT p.*, o.pickup_code FROM payments p LEFT JOIN orders o ON o.id=p.order_id WHERE p.id=$1`, [paymentId]);
   const p = rows[0];
-  if (!p || !['esewa', 'fonepay'].includes(p.provider)) return { status: 404, html: page('Not found', '<h2>That payment link is not valid.</h2>') };
+  if (!p || !['esewa', 'fonepay', 'nepalpay'].includes(p.provider)) return { status: 404, html: page('Not found', '<h2>That payment link is not valid.</h2>') };
   if (p.status !== 'pending') return { redirect: await landing(p, p.status === 'paid' ? 'ok' : 'failed') };
+  if (p.provider === 'nepalpay') return { html: page('Scan to pay', '<h2>Scan the QR with your bank or wallet app</h2><p>Use the QR on the shop screen.</p>') };
   const plan = startPlan(p, p.pickup_code ? `Sadhai ${p.pickup_code}` : 'Sadhai Coffee');
   if (plan.type === 'redirect') return { redirect: plan.url };
   if (plan.type === 'form') {
