@@ -316,9 +316,35 @@ const qrOf = async (token, paymentId) => (await call('GET', `/payments/${payment
   const kOff = { ...fl, kiosk: { ...fl.kiosk, enabled: false } };
   await call('PUT', '/owner/order-flow', { flow: kOff }, tok(owner));
   ok((await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Guest One', customer_phone: '9811111111', payment: 'counter', consent: true }, tok(tuStaff))).status === 409, 'a switched-off kiosk takes no orders');
-  ok((await call('PUT', '/owner/order-flow', { flow: { ...fl, web: { ...fl.web, payments: { cash: false, pass: false, fonepay: false } } } }, tok(owner))).status === 400, 'a way of ordering must keep at least one way to pay');
+  ok((await call('PUT', '/owner/order-flow', { flow: { ...fl, web: { ...fl.web, payments: { cash: false, pass: false, fonepay: false, qr_static: false } } } }, tok(owner))).status === 400, 'a way of ordering must keep at least one way to pay');
   await call('DELETE', '/owner/order-flow', null, tok(owner));
   ok((await call('GET', '/config')).body.order_flow.web.payment_methods.includes('cash'), 'resetting brings the built-in rules back');
+  // --- the shop's own QR: paid by scanning, checked by the barista or centrally ---
+  const cfgOff = (await call('GET', '/config')).body;
+  ok(!cfgOff.payment_methods.includes('qr_static') && cfgOff.static_qr === null && (await buy(c, 'qr_static')).status === 400, 'the shop QR is off until the owner saves it and switches it on');
+  await setCfg({ static_qr_enabled: '1', static_qr_text: '00020101021126180014shop.example.qr5204581253035245802NP5913Sadhai Coffee6009Kathmandu6304ABCD', static_qr_title: 'Sadhai Coffee' });
+  const cfgOn = (await call('GET', '/config')).body;
+  ok(cfgOn.payment_methods.includes('qr_static') && cfgOn.static_qr?.text?.startsWith('000201') && cfgOn.order_flow.kiosk.payment_methods.includes('qr_static'), 'once on, every screen is told about it, with the QR');
+  const q1 = await buy(c, 'qr_static');
+  ok(q1.status === 201 && q1.body.order.status === 'placed' && q1.body.order.payment_status === 'unpaid' && !q1.body.payment, 'a shop-QR order goes straight to the station, unpaid');
+  await setStatus(tuStaff, q1.body.order.id, 'preparing'); await setStatus(tuStaff, q1.body.order.id, 'ready');
+  const noHand = await setStatus(tuStaff, q1.body.order.id, 'picked_up');
+  ok(noHand.status === 409 && /Payment received/.test(noHand.body.error || ''), 'it cannot be handed over until the payment is checked');
+  const pend = (await call('GET', '/admin/qr-payments', null, tok(mgrCo))).body;
+  ok(pend.some((x) => x.id === q1.body.order.id && x.payment_status === 'unpaid'), 'the manager sees it waiting to be checked centrally');
+  ok((await call('GET', '/admin/alerts', null, tok(owner))).status === 200, 'alerts still load');
+  ok((await call('POST', `/admin/orders/${q1.body.order.id}/verify-payment`, {}, tok(mgrCo))).status === 200 && (await orderOf(c, q1.body.order.id)).payment_status === 'paid', 'a manager can check it centrally');
+  const hand = await setStatus(tuStaff, q1.body.order.id, 'picked_up', { code: (await orderOf(c, q1.body.order.id)).handover_code });
+  ok(hand.status === 200 && hand.body.status === 'picked_up', 'then it is handed over and counts as a sale');
+  const q2 = await buy(c, 'qr_static');
+  ok((await call('POST', `/station/orders/${q2.body.order.id}/pay`, {}, tok(tuStaff))).status === 200 && (await orderOf(c, q2.body.order.id)).payment_status === 'paid', 'the barista can check it at the station');
+  const kq = await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'QR Guest', customer_phone: '9833333333', payment: 'qr_static', consent: true }, tok(tuStaff));
+  ok(kq.status === 201 && kq.body.order.payment_status === 'unpaid', 'the kiosk takes shop-QR payments too (zod needs the method)');
+  const posq = await call('POST', '/station/orders', { items: [line(latte)], payment_method: 'qr_static' }, tok(tuStaff));
+  ok(posq.status === 201 && posq.body.order.payment_status === 'unpaid', 'and the counter, which waits for the barista to press Payment received');
+  ok((await call('GET', '/admin/qr-payments', null, tok(mgrPartner))).body.every((x) => x.station_name !== tu.name), 'a manager sees only their own stations');
+  await setCfg({ static_qr_enabled: null, static_qr_text: null, static_qr_title: null });
+
   // --- web payment: only a merchant code and secret key ---
   await setCfg({ fonepay_method: 'web', fonepay_username: null, fonepay_password: null, fonepay_api_url: null });
   ok((await call('GET', '/config')).body.payment_methods.join() === 'cash,fonepay', 'in web payment mode the merchant code and secret key are enough');

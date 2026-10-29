@@ -1,6 +1,6 @@
 {
   "name": "sadhai-coffee",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "private": true,
   "description": "Sadhai Coffee platform: API, web and mobile",
   "scripts": {

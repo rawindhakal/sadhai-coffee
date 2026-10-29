@@ -10,8 +10,9 @@ import 'cart.dart';
 import 'home.dart';
 import 'offers.dart';
 import 'pay_sheet.dart';
+import 'static_qr.dart';
 
-const payLabel = {'cash': 'Cash at counter', 'pass': '10-cup pass', 'fonepay': 'Fonepay QR', 'esewa': 'eSewa (old)', 'nepalpay': 'NepalPay (old)', 'khalti': 'Online (old)'};
+const payLabel = {'cash': 'Pay at counter', 'pass': '10-cup pass', 'fonepay': 'Fonepay QR', 'qr_static': 'Shop QR', 'esewa': 'eSewa (old)', 'nepalpay': 'NepalPay (old)', 'khalti': 'Online (old)'};
 
 void toast(BuildContext c, String m, {bool bad = false}) => ScaffoldMessenger.of(c)
   ..hideCurrentSnackBar()
@@ -68,6 +69,7 @@ class TrackingScreen extends StatefulWidget {
 
 class _TrackingScreenState extends State<TrackingScreen> {
   Json? _o;
+  Map? _staticQr;
   String? _error;
   StreamSubscription? _sub;
   Timer? _poll;
@@ -77,6 +79,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
   void initState() {
     super.initState();
     _load();
+    Api.instance.request('GET', '/config', auth: false).then((c) { if (mounted) setState(() => _staticQr = c['static_qr'] as Map?); }).catchError((_) {});
     _sub = Api.instance.events().listen((e) { if (e.$1 == 'order' && e.$2['id'] == widget.orderId) _load(); });
     // Quick checks while the order waits for its online payment, slower afterwards.
     _poll = Timer.periodic(const Duration(seconds: 4), (_) { _ticks++; if (_o?['status'] == 'awaiting_payment' || _ticks % 3 == 0) _load(); });
@@ -145,6 +148,11 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 const SizedBox(height: 6),
                 Row(children: [Text(payLabel[o['payment_method']] ?? ''), const SizedBox(width: 8), Chip2.status(o['payment_status'])]),
                 if (o['payment_method'] == 'cash' && o['payment_status'] == 'unpaid') const Text('Pay when you pick up.', style: TextStyle(color: Brand.inkMuted)),
+                if (o['payment_method'] == 'qr_static' && o['payment_status'] == 'unpaid' && !['cancelled', 'picked_up'].contains(o['status']) && _staticQr != null) ...[
+                  const SizedBox(height: 12),
+                  StaticQrView(info: _staticQr!, amount: o['total'] as num, code: o['pickup_code'] as String?),
+                  const Padding(padding: EdgeInsets.only(top: 8), child: Text('Waiting for the barista to confirm your payment.', style: TextStyle(fontWeight: FontWeight.w700))),
+                ],
               ]))),
               if (o['status'] == 'awaiting_payment' && o['payment_id'] != null) ...[
                 const SizedBox(height: 12),

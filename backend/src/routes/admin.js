@@ -7,7 +7,7 @@ import { authenticate, requireRole, scopeStations, assertStationAccess } from '.
 import { overview } from '../lib/reports.js';
 import { audit } from '../lib/notify.js';
 import { adjustInventory, inventoryFor } from './station.js';
-import { fullOrder, cancelOrder } from '../lib/orders.js';
+import { fullOrder, cancelOrder, verifyQrPayment } from '../lib/orders.js';
 import { statement, scorecard } from '../lib/partners.js';
 import { labour } from '../lib/roster.js';
 import { range as dateRange } from '../lib/reports.js';
@@ -120,6 +120,25 @@ admin.get('/orders', wrap(async (req, res) => {
       ORDER BY o.created_at DESC LIMIT $3 OFFSET $4`, [ids, status, Math.min(Number(req.query.limit) || 50, 200), Number(req.query.offset) || 0],
   );
   res.json(rows);
+}));
+
+// Shop-QR payments: the owner or a manager checks them against the bank or wallet statement. The barista can also check them at the station.
+admin.get('/qr-payments', wrap(async (req, res) => {
+  const ids = await scoped(req);
+  const { rows } = await query(
+    `SELECT o.id, o.pickup_code, o.total, o.status, o.payment_status, o.created_at, o.customer_name, u.name AS user_name, u.phone AS user_phone, s.name AS station_name,
+            p.raw->>'verified_how' AS verified_how, p.settled_at AS verified_at, vu.name AS verified_by
+       FROM orders o JOIN stations s ON s.id=o.station_id LEFT JOIN users u ON u.id=o.user_id
+       LEFT JOIN payments p ON p.order_id=o.id AND p.provider='qr_static' LEFT JOIN users vu ON vu.id=NULLIF(p.raw->>'verified_by','')::uuid
+      WHERE o.payment_method='qr_static' AND o.station_id = ANY($1) AND o.created_at > now() - interval '14 days'
+      ORDER BY (o.payment_status='unpaid' AND o.status <> 'cancelled') DESC, o.created_at DESC LIMIT 200`, [ids]);
+  res.json(rows);
+}));
+admin.post('/orders/:id/verify-payment', wrap(async (req, res) => {
+  const o = (await query('SELECT station_id FROM orders WHERE id=$1', [req.params.id])).rows[0];
+  if (!o) throw notFound('Order not found');
+  await assertStationAccess(req.user, o.station_id);
+  res.json(await verifyQrPayment(req.params.id, req.user, 'central'));
 }));
 
 admin.post('/orders/:id/refund', wrap(async (req, res) => {

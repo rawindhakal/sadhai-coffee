@@ -21,9 +21,18 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
-    version: '2.1.1',
+    version: '2.2.0',
     date: '29 October 2026',
     badge: 'Latest',
+    highlight: 'Pay at the counter, or scan the shop QR',
+    changes: [{ category: 'Added', items: [
+      { title: 'Pay at the counter', desc: 'Order now and pay when you collect, on the website, in the app, at the kiosk and at the counter.' },
+      { title: 'Shop QR', desc: 'Scan the shop QR and pay. The barista checks the payment arrived and presses Payment received before the coffee is handed over. The owner and managers can check them centrally too.' },
+    ] }],
+  },
+  {
+    version: '2.1.1',
+    date: '29 October 2026',
     highlight: 'Fonepay works with just the merchant code and secret key',
     changes: [{ category: 'Added', items: [{ title: 'Fonepay web payment', desc: 'The QR opens Fonepay’s payment page on the live server (clientapi.fonepay.com) and the order starts when Fonepay confirms. The QR service with its own login is still available.' }] }],
   },

@@ -183,6 +183,40 @@ function FonepayCard({ data, reload }: { data: any[]; reload: () => void }) {
   );
 }
 
+function ShopQrCard({ data, reload }: { data: any[]; reload: () => void }) {
+  const toast = useToast();
+  const item = (k: string) => data.find((i) => i.key === k);
+  const [edit, setEdit] = useState<Record<string, string | null>>({});
+  const val = (k: string) => (k in edit ? edit[k] : item(k)?.value ?? '') || '';
+  const enabled = val('static_qr_enabled') === '1';
+  const image = val('static_qr_image');
+  async function save(extra: Record<string, string | null> = {}) {
+    const values = { ...edit, ...extra };
+    if (!Object.keys(values).length) return;
+    try { await api('/owner/integrations', { method: 'PUT', body: { values } }); setEdit({}); reload(); toast('Saved'); } catch (e: any) { toast(e.message, true); }
+  }
+  return (
+    <div className="panel col" style={{ gap: 14, borderLeft: `5px solid ${enabled ? 'var(--hill)' : 'var(--hairline)'}` }}>
+      <div className="row between wrap">
+        <div>
+          <div className="row wrap" style={{ gap: 6 }}><h3>Shop QR (checked by the barista)</h3><span className={`chip ${enabled ? 'hill' : ''}`}>{enabled ? 'On' : 'Off'}</span></div>
+          <p className="small muted" style={{ maxWidth: 600 }}>Customers scan your printed shop QR and pay in their banking or wallet app. The order goes to the station right away, but the barista (or you, under Money, Shop QR payments) must check the money arrived and press <b>Payment received</b> before the coffee is handed over. Works at the kiosk, the counter, the website and the app.</p>
+        </div>
+        <label className="row card flat" style={{ padding: '6px 12px', cursor: 'pointer', gap: 8 }}>
+          <input type="checkbox" role="switch" style={{ width: 22, minHeight: 22 }} checked={enabled} onChange={(e) => save({ static_qr_enabled: e.target.checked ? '1' : '0' })} />
+          <strong>{enabled ? 'Customers can pay by the shop QR' : 'Turned off'}</strong>
+        </label>
+      </div>
+      <div className="grid g3">
+        <Field label="Name shown with the QR" hint="The shop name the customer should see in their banking app."><input value={val('static_qr_title')} onChange={(e) => setEdit({ ...edit, static_qr_title: e.target.value })} /></Field>
+        <Field label="QR text" hint="The text inside your printed QR (starts with 000201). Use this or a picture."><textarea rows={3} value={val('static_qr_text')} onChange={(e) => setEdit({ ...edit, static_qr_text: e.target.value })} /></Field>
+        <ImagePicker label="Or a picture of the QR" hint="Used when there is no QR text." slot={image ? { id: "qr", url: image } : null} fallback="/img/cup-hot.svg" onChange={(sl) => setEdit({ ...edit, static_qr_image: sl ? sl.url : '' })} />
+      </div>
+      <div className="row wrap"><button className="btn primary" disabled={!Object.keys(edit).length} onClick={() => save()}>{Object.keys(edit).length ? 'Save changes' : 'No changes'}</button></div>
+    </div>
+  );
+}
+
 export function PaymentsPanel() {
   const keys = useData<any[]>('/owner/integrations');
   const list = useData<any>('/owner/payments');
@@ -194,8 +228,9 @@ export function PaymentsPanel() {
   async function refunded(id: string) { try { await api(`/owner/payments/${id}/refund-done`, { method: 'POST', body: {} }); list.reload(); toast('Marked as paid back'); } catch (e: any) { toast(e.message, true); } }
   return (
     <div className="col" style={{ gap: 16 }}>
-      <div className="panel"><p className="small muted">Customers can always pay cash at the counter or with a pass. Switch on Fonepay QR once its fields are saved and Check connection says it works. Online orders reach the barista only after Fonepay confirms the payment, and an order nobody pays for is cancelled after 15 minutes.</p></div>
+      <div className="panel"><p className="small muted">Customers can always pay at the counter or with a pass. Switch on Fonepay QR once its fields are saved and Check connection says it works. Online orders reach the barista only after Fonepay confirms the payment, and an order nobody pays for is cancelled after 15 minutes.</p></div>
       <FonepayCard data={keys.data} reload={() => { keys.reload(); list.reload(); }} />
+      <ShopQrCard data={keys.data} reload={() => keys.reload()} />
       <div className="panel">
         <div className="ph"><div><h3>Online payments</h3><p className="small muted">The last 100. Online money arrives in your Fonepay merchant account, not at the counter. A refund is sent back from there, then marked here.</p></div></div>
         {due.length > 0 && <div className="card flat" style={{ borderColor: 'var(--cherry)', marginBottom: 12 }}><strong>{due.length} refund{due.length > 1 ? 's' : ''} to pay back</strong>: {rs(due.reduce((a, r) => a + r.amount, 0))}</div>}

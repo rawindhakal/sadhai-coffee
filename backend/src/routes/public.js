@@ -3,7 +3,7 @@ import { query } from '../lib/db.js';
 import { wrap, notFound } from '../lib/http.js';
 import { stationMenu, bestSellers, liveOffers, pickupWindow } from '../lib/orders.js';
 import { getSettings } from '../lib/settings.js';
-import { enabledPaymentMethods, gatewayStatus } from '../lib/payments.js';
+import { enabledPaymentMethods, gatewayStatus, staticQrInfo } from '../lib/payments.js';
 import { effectiveFlow } from '../lib/order-flow.js';
 import { rt } from '../lib/runtime.js';
 import { loadSite } from '../lib/site.js';
@@ -27,6 +27,7 @@ pub.get('/config', wrap(async (_req, res) => {
     pass: { price: s.pass_price, cups: s.pass_cups, valid_days: s.pass_valid_days },
     pricing: { hot: s.price_hot, flavored: s.price_flavored, iced: s.price_iced },
     partner_share_pct: s.partner_share_pct,
+    static_qr: staticQrInfo(), // the shop's own QR, when the owner switched on payment by it
     order_flow: effectiveFlow(), // one set of ordering rules for the website, apps, kiosk, kiosk QR and counter
     payment_methods: enabledPaymentMethods(), // cash at pickup, plus Fonepay QR when the owner has switched it on
     payment_gateways: Object.fromEntries(Object.entries(gatewayStatus()).map(([k, v]) => [k, { offered: v.offered, mode: v.mode }])),

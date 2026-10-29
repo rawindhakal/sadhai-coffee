@@ -768,3 +768,9 @@ INSERT INTO app_secrets(key, value, secret, updated_by, updated_at)
   SELECT 'fonepay_password', value, secret, updated_by, updated_at FROM app_secrets WHERE key='fonepay_qr_password'
   ON CONFLICT (key) DO NOTHING;
 DELETE FROM app_secrets WHERE key LIKE 'esewa\_%' OR key LIKE 'nepalpay\_%' OR key IN ('fonepay_qr_username','fonepay_qr_password','fonepay_qr_template','fonepay_terminal_id','fonepay_tag26_id','fonepay_merchant_name','fonepay_merchant_city','fonepay_mcc');
+
+-- ---- v2.2: pay at the counter, and the shop's static QR checked by the barista or centrally ----
+ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_provider_check;
+ALTER TABLE payments ADD CONSTRAINT payments_provider_check CHECK (provider IN ('cash','esewa','khalti','fonepay','nepalpay','qr_static','pass'));
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_payment_method_check;
+ALTER TABLE orders ADD CONSTRAINT orders_payment_method_check CHECK (payment_method IN ('cash','esewa','khalti','fonepay','nepalpay','qr_static','pass'));

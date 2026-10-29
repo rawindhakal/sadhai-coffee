@@ -19,7 +19,7 @@ const orderSchema = z.object({
   items: z.array(z.object({ product_id: z.string().uuid(), qty: z.number().int().min(1).max(10).default(1), option_ids: z.array(z.string().uuid()).default([]) })).min(1).max(20),
   customer_name: z.string().trim().max(40).default(''),
   customer_phone: z.string().default(''),
-  payment: z.enum(['counter', 'pass', ...GATEWAYS]),
+  payment: z.enum(['counter', 'pass', 'qr_static', ...GATEWAYS]),
   pass_code: z.string().trim().max(20).optional(),
   consent: z.literal(true, { errorMap: () => ({ message: 'Please accept so we can call your order' }) }),
   note: z.string().max(200).optional(),

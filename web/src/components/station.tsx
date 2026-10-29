@@ -6,6 +6,7 @@ import { Empty, ErrorNote, Field, Loading, Modal, Stat, Status, Tabs, useData, u
 import { CountPanel, TransfersPanel } from './inventory';
 import { MyShift } from './people';
 import { PayModal } from './pay-modal';
+import { StaticQr } from './static-qr';
 import { useConfig } from '@/lib/site-content';
 
 /** Station workspace. Staff are pinned to their station; managers/owners pass stationId. */
@@ -159,7 +160,7 @@ function Ticket({ o, target, move, pay, handover, bare }: any) {
       {o.status === 'ready' && o.payment_status === 'unpaid' && o.total > 0 && <p className="small err" style={{ margin: '6px 0' }}>Collect {rs(o.total)} cash at hand-over.</p>}
       <div className="row" style={{ marginTop: 10 }}>
         {next[o.status] && <button className="btn primary grow" onClick={() => (o.status === 'ready' ? handover(o) : move(o.id, next[o.status][0]))}>{next[o.status][1]}</button>}
-        {o.payment_status === 'unpaid' && o.total > 0 && o.status !== 'cancelled' && <button className="btn sm" onClick={() => pay(o.id)}>Got cash</button>}
+        {o.payment_status === 'unpaid' && o.total > 0 && o.status !== 'cancelled' && <button className={`btn sm ${o.payment_method === 'qr_static' ? 'primary' : ''}`} onClick={() => pay(o.id)}>{o.payment_method === 'qr_static' ? 'Payment received' : 'Got cash'}</button>}
         {['placed', 'preparing'].includes(o.status) && <button className="btn danger sm" onClick={() => { const r = prompt(`Why are you declining ${o.pickup_code}? The customer is told, and paid orders are refunded.`); if (r && r.trim().length >= 3) move(o.id, 'cancelled', { reason: r.trim() }); }}>{o.status === 'placed' ? 'Decline' : 'Cancel'}</button>}
       </div>
     </div>
@@ -177,6 +178,7 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
   const [method, setMethod] = useState('cash');
   useEffect(() => { if (methods.length && !methods.includes(method)) setMethod(methods[0]); }, [methods.join()]);
   const [qrPay, setQrPay] = useState<any>(null);
+  const [shopQr, setShopQr] = useState<any>(null);
   const [offer, setOffer] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<any>(null);
@@ -191,6 +193,7 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
       if (offer && offer !== 'pass') body.coupon_id = offer;
       const out = await api(`/station/orders`, { method: 'POST', body });
       setCart([]); setCust(null); setPhone('');
+      if (out.order.payment_method === 'qr_static' && out.order.payment_status === 'unpaid') { setShopQr(out.order); return; }
       if (out.payment) { setQrPay(out); return; } // online: the customer scans a QR; the order goes to the bar when it is paid
       toast(`Order ${out.order.pickup_code} · ${rs(out.order.total)}`); onDone();
     } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
@@ -228,13 +231,22 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
         )}
         {offer !== 'pass' && (
           <div className="row wrap">
-            {methods.map((m) => <button key={m} type="button" className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>{m === 'cash' ? 'Cash at counter' : 'Fonepay QR'}</button>)}
+            {methods.map((m) => <button key={m} type="button" className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>{m === 'cash' ? 'Pay at counter' : m === 'qr_static' ? 'Shop QR' : 'Fonepay QR'}</button>)}
           </div>
         )}
         <div className="row between"><strong>Total</strong><strong style={{ fontSize: 24 }}>{rs(total)}</strong></div>
-        <p className="small muted">{offer === 'pass' ? 'Pays from the pass.' : method === 'cash' ? 'Collect cash now.' : 'A QR appears for the customer to scan. The order goes to the bar only after it is paid.'}</p>
+        <p className="small muted">{offer === 'pass' ? 'Pays from the pass.' : method === 'cash' ? 'Collect the payment now.' : method === 'qr_static' ? 'Show the shop QR. Press Payment received once it has arrived in your app.' : 'A QR appears for the customer to scan. The order goes to the bar only after it is paid.'}</p>
         <button className="btn primary lg" disabled={!cart.length || busy} onClick={place}>{busy ? 'Placing…' : 'Take order'}</button>
       </div>
+      {shopQr && config?.static_qr && (
+        <Modal title={`Shop QR for ${shopQr.pickup_code}`} onClose={() => { setShopQr(null); onDone(); }}>
+          <StaticQr info={config.static_qr} amount={shopQr.total} code={shopQr.pickup_code} />
+          <div className="row" style={{ marginTop: 14 }}>
+            <button className="btn primary grow" onClick={async () => { try { await api(`/station/orders/${shopQr.id}/pay${q}`, { method: 'POST' }); toast(`Paid. ${shopQr.pickup_code} is on the queue`); } catch (e: any) { toast(e.message, true); return; } setShopQr(null); onDone(); }}>Payment received</button>
+            <button className="btn ghost" onClick={() => { setShopQr(null); onDone(); }}>Check later</button>
+          </div>
+        </Modal>
+      )}
       {qrPay && (
         <PayModal paymentId={qrPay.payment.payment_id} amount={qrPay.order.total}
           onPaid={() => { toast(`Paid. ${qrPay.order.pickup_code} is on the queue`); setQrPay(null); onDone(); }}

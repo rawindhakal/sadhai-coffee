@@ -6,6 +6,8 @@ import { useEvents, useRequireRole } from '@/lib/auth';
 import { ErrorNote, Loading, Status, useData, useToast } from '@/components/ui';
 import { CustomerShell, PAY_LABEL } from '@/components/customer';
 import { PayModal } from '@/components/pay-modal';
+import { StaticQr } from '@/components/static-qr';
+import { useConfig } from '@/lib/site-content';
 
 const STEPS = ['placed', 'preparing', 'ready', 'picked_up'];
 
@@ -16,6 +18,7 @@ export default function Tracking() {
   const { data: o, error, reload } = useData<any>(user ? `/orders/${id}` : null);
   const [rating, setRating] = useState(0);
   const [payOpen, setPayOpen] = useState(false);
+  const cfg = useConfig();
   const pay = useSearchParams().get('pay');
   useEvents((ev, d) => { if (ev === 'order' && d.id === id) reload(); });
 
@@ -59,6 +62,12 @@ export default function Tracking() {
         {['placed', 'preparing'].includes(o.status) && o.scheduled_for && !o.released_at && <p className="muted">We start making it a few minutes before your pickup time.</p>}
         {['placed', 'preparing'].includes(o.status) && !(o.scheduled_for && !o.released_at) && <p className="muted">{o.ahead > 0 ? `${o.ahead} order${o.ahead > 1 ? 's' : ''} ahead of you · about ${Math.ceil(o.eta_seconds / 60)} min` : 'Your coffee in 90 seconds.'}</p>}
         {o.status !== 'cancelled' && <div className="steps" style={{ marginTop: 20 }} aria-hidden>{STEPS.map((s, i) => <i key={s} className={i <= step ? 'on' : ''} />)}</div>}
+        {o.payment_method === 'qr_static' && o.payment_status === 'unpaid' && !['cancelled', 'picked_up'].includes(o.status) && cfg?.static_qr && (
+          <div className="card flat" style={{ marginTop: 16 }}>
+            <StaticQr info={cfg.static_qr} amount={o.total} code={o.pickup_code} />
+            <p className="small center" style={{ marginTop: 8 }}><strong>Waiting for the barista to confirm your payment.</strong> Your coffee is being made.</p>
+          </div>
+        )}
         {waiting && (
           <div className="col" style={{ alignItems: 'center', gap: 10, marginTop: 8 }}>
             <p className="muted">Pay {rs(o.total)} with {PAY_LABEL[o.payment_method] || 'your wallet'} to send this order to the barista.</p>

@@ -11,6 +11,7 @@ import { useConfig } from '@/lib/site-content';
 import { Empty, ErrorNote, Field, useData } from '@/components/ui';
 import { CustomerShell, PAY_LABEL } from '@/components/customer';
 import { PayModal } from '@/components/pay-modal';
+import { StaticQr } from '@/components/static-qr';
 import { Icon } from '@/components/icons';
 
 export default function Cart() {
@@ -66,7 +67,14 @@ export default function Cart() {
   const active = (coupons.data || []).filter((c) => c.status === 'active');
 
   const [paying, setPaying] = useState<{ id: string; amount: number; order: string } | null>(null);
-  const payWindow = paying && <PayModal paymentId={paying.id} amount={paying.amount} onPaid={() => router.push(`/order/${paying.order}`)} onClose={() => router.push(`/order/${paying.order}`)} />;
+  const [shopQr, setShopQr] = useState<any>(null);
+  const shopWindow = shopQr && config?.static_qr && (
+    <div className="modal-bg" style={{ zIndex: 80 }}><div className="modal" role="dialog" aria-modal="true" aria-label="Pay by the shop QR" style={{ maxWidth: 400 }}>
+      <StaticQr info={config.static_qr} amount={shopQr.total} code={shopQr.pickup_code} />
+      <button className="btn primary block" style={{ marginTop: 14 }} onClick={() => router.push(`/order/${shopQr.id}`)}>I have paid, show my order</button>
+    </div></div>
+  );
+  const payWindow = shopWindow || paying && <PayModal paymentId={paying.id} amount={paying.amount} onPaid={() => router.push(`/order/${paying.order}`)} onClose={() => router.push(`/order/${paying.order}`)} />;
   async function place() {
     setBusy(true); setError(null);
     try {
@@ -75,6 +83,7 @@ export default function Cart() {
       coupons.reload();
       cart.clear();
       // Online payment: the QR opens in a window on this page, so nobody is sent away.
+      if (out.order.payment_method === 'qr_static' && out.order.payment_status === 'unpaid') { setShopQr(out.order); return; }
       if (out.payment?.payment_id) { setPaying({ id: out.payment.payment_id, amount: out.order.total, order: out.order.id }); return; }
       router.push(`/order/${out.order.id}`);
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }

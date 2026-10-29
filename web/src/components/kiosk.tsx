@@ -10,6 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import { productArt } from '@/lib/art';
 import { Icon } from './icons';
 import { PayModal } from './pay-modal';
+import { StaticQr } from './static-qr';
 import dynamic from 'next/dynamic';
 const Coffee3D = dynamic(() => import('./coffee3d'), { ssr: false });
 import { useConfig } from '@/lib/site-content';
@@ -467,6 +468,7 @@ function Pay({ t, rules, total, busy, error, guest, onBack, onPlace }: any) {
         {gateways.map((g) => (
           <button key={g} className="k-opt" disabled={busy} onClick={() => onPlace(g)}><Icon name="cart" size={30} /><span><strong>Pay now with Fonepay QR</strong><small>Scan a QR with your phone, then collect your coffee</small></span></button>
         ))}
+        {ways.includes('qr_static') && <button className="k-opt" disabled={busy} onClick={() => onPlace('qr_static')}><Icon name="cart" size={30} /><span><strong>Scan our shop QR</strong><small>Pay with your phone. The barista checks it, then hands over your coffee</small></span></button>}
         {ways.includes('cash') && <button className="k-opt" disabled={busy} onClick={() => onPlace('counter')}><Icon name="coin" size={30} /><span><strong>{t('counter')}</strong><small>Pay {rs(total)} when you pick up your coffee</small></span></button>}
         {ways.includes('pass') && <button className={`k-opt ${mode === 'pass' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'pass' ? '' : 'pass')}><Icon name="ticket" size={30} /><span><strong>{t('passopt')}</strong><small>Enter your pass code (SP-XXXX-XXXX)</small></span></button>}
         {ways.includes('pass') && mode === 'pass' && (
@@ -486,11 +488,12 @@ function Pay({ t, rules, total, busy, error, guest, onBack, onPlace }: any) {
 
 function Done({ t, result, guest, onNew }: { t: (k: string) => string; result: any; guest: any; onNew: () => void }) {
   const [o, setO] = useState<any>(result.order);
+  const cfg = useConfig();
   const pay = result.payment;
   const awaiting = o.status === 'awaiting_payment' && pay;
   const refresh = () => api(`/kiosk/orders/${o.id}`).then((x) => setO({ ...o, ...x })).catch(() => {});
   const [left, setLeft] = useState(25);
-  useEffect(() => { if (awaiting) return; setLeft(25); const i = setInterval(() => setLeft((n) => { if (n <= 1) { onNew(); return 0; } return n - 1; }), 1000); return () => clearInterval(i); }, [awaiting]);
+  useEffect(() => { if (awaiting || (o.payment_method === 'qr_static' && o.payment_status === 'unpaid')) return; setLeft(25); const i = setInterval(() => setLeft((n) => { if (n <= 1) { onNew(); return 0; } return n - 1; }), 1000); return () => clearInterval(i); }, [awaiting]);
   return (
     <div className="k-card wide center">
       {o.status === 'cancelled' ? <><h2>Order cancelled</h2><p className="muted">The payment was not completed. You were not charged. Please start again.</p></> : awaiting ? (
@@ -505,12 +508,13 @@ function Done({ t, result, guest, onNew }: { t: (k: string) => string; result: a
           <p className="label">{t('done')}</p>
           <div className="pickup" style={{ fontSize: 'clamp(96px, 22vw, 200px)' }} aria-live="polite">{o.pickup_code}</div>
           <h2>Thank you, {guest.name.split(' ')[0]}.</h2>
-          <p className="muted" style={{ fontSize: 20 }}>{o.payment_status === 'unpaid' ? `Pay ${rs(o.total)} at the counter when your number is called.` : o.payment_method === 'pass' ? 'Paid with your pass.' : 'Paid. See you at the counter.'}</p>
+          {o.payment_method === 'qr_static' && o.payment_status === 'unpaid' && cfg?.static_qr && <div style={{ margin: '12px 0' }}><StaticQr big info={cfg.static_qr} amount={o.total} code={o.pickup_code} /></div>}
+          <p className="muted" style={{ fontSize: 20 }}>{o.payment_method === 'qr_static' && o.payment_status === 'unpaid' ? 'Show your payment to the barista. They confirm it, then your coffee is handed over.' : o.payment_status === 'unpaid' ? `Pay ${rs(o.total)} at the counter when your number is called.` : o.payment_method === 'pass' ? 'Paid with your pass.' : 'Paid. See you at the counter.'}</p>
           {o.handover_code && <div className="card flat" style={{ display: 'inline-block', padding: '12px 36px', margin: '12px 0' }}><p className="label">Your pickup code</p><div style={{ fontSize: 64, fontWeight: 700, letterSpacing: 12 }}>{o.handover_code}</div><p className="muted">Say it at the counter to collect your coffee.</p></div>}
           <p className="muted">Your coffee in 90 seconds.</p>
         </>
       )}
-      {!awaiting && <button className="btn primary lg" style={{ marginTop: 24 }} onClick={onNew}>{t('again')}{o.status !== 'cancelled' ? ` (${left})` : ''}</button>}
+      {!awaiting && <button className="btn primary lg" style={{ marginTop: 24 }} onClick={onNew}>{t('again')}{o.status !== 'cancelled' && !(o.payment_method === 'qr_static' && o.payment_status === 'unpaid') ? ` (${left})` : ''}</button>}
     </div>
   );
 }

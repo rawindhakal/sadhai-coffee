@@ -7,6 +7,7 @@ import '../theme.dart';
 import 'offers.dart' show PromoBox;
 import 'customer.dart';
 import 'pay_sheet.dart';
+import 'static_qr.dart';
 import 'home.dart' show Stepper2;
 
 /// Cart and checkout on one screen: change quantities, pick an offer and payment, place the order.
@@ -25,7 +26,8 @@ class _CartScreenState extends State<CartScreen> {
   String? _lastPromo;
   String _method = 'cash';
   List<String> _methods = ['cash'];
-  Map _rules = const {}; // how the owner set up ordering in the app (Settings, Order flow)
+  Map _rules = const {};
+  Map? _staticQr; // the shop's own QR, when the owner switched on payment by it // how the owner set up ordering in the app (Settings, Order flow)
   final _note = TextEditingController();
   String? _error;
   bool _busy = false;
@@ -64,7 +66,7 @@ class _CartScreenState extends State<CartScreen> {
       final rules = ((cfg['order_flow'] as Map?)?['app'] as Map?) ?? const {};
       final src = (rules['payment_methods'] ?? cfg['payment_methods']) as List;
       final m = [for (final x in src) if (x != 'pass') x as String];
-      if (mounted) setState(() { _rules = rules; _methods = m.isEmpty ? ['cash'] : m; if (!_methods.contains(_method)) _method = _methods.first; });
+      if (mounted) setState(() { _staticQr = cfg['static_qr'] as Map?; _rules = rules; _methods = m.isEmpty ? ['cash'] : m; if (!_methods.contains(_method)) _method = _methods.first; });
     } catch (_) {}
     try {
       final c = await Api.instance.get('/coupons') as List;
@@ -104,6 +106,8 @@ class _CartScreenState extends State<CartScreen> {
       cart.invalidatePasses();
       // Online payment: the QR opens as a window over this screen, then the order screen takes over.
       final pay = out['payment'] as Map?;
+      if (order['payment_method'] == 'qr_static' && order['payment_status'] == 'unpaid' && _staticQr != null) await showStaticQrSheet(context, _staticQr!, order['total'] as num, order['pickup_code'] as String?);
+      if (!mounted) return;
       if (pay != null && pay['payment_id'] != null) await showPaySheet(context, pay['payment_id'] as String, order['total'] as num);
       if (!mounted) return;
       await Navigator.push(context, MaterialPageRoute(builder: (_) => TrackingScreen(orderId: order['id'])));

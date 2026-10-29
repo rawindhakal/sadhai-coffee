@@ -72,6 +72,9 @@ export async function alerts(stationIds, isOwner) {
       WHERE si.station_id = ANY($1) AND si.reorder_level > 0 AND si.qty <= si.reorder_level ORDER BY si.qty / si.reorder_level LIMIT 8`, [stationIds]);
   for (const r of low.rows) push(r.qty <= 0 ? 'critical' : 'warning', 'stock', `${r.name} low at ${r.station}`, `${Math.round(r.qty)} ${r.unit} left. Items that need it will sell out.`, 'stock');
 
+  const qrw = await query(`SELECT count(*)::int AS n FROM orders WHERE station_id = ANY($1) AND payment_method='qr_static' AND payment_status='unpaid' AND status NOT IN ('cancelled','picked_up') AND created_at < now() - interval '10 minutes'`, [stationIds]);
+  if (qrw.rows[0].n) push('warning', 'qr', `${qrw.rows[0].n} shop-QR payment${qrw.rows[0].n > 1 ? 's' : ''} not checked yet`, 'Check the bank or wallet statement and press Payment received, or decline the order.', 'qrpay');
+
   const late = await query(
     `SELECT s.name AS station, count(*)::int AS n, max(extract(epoch FROM (now() - o.created_at)))::int AS oldest
        FROM orders o JOIN stations s ON s.id=o.station_id WHERE o.station_id = ANY($1) AND o.status IN ('placed','preparing') AND (o.scheduled_for IS NULL OR o.released_at IS NOT NULL) AND now() - COALESCE(o.released_at, o.created_at) > make_interval(secs => s.prep_target_seconds * 2)

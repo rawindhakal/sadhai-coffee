@@ -8,8 +8,10 @@ import * as fonepay from './gateways/fonepay.js';
  * online before the order goes to the barista. Coupons and promo codes only reduce the price.
  */
 export const GATEWAYS = ['fonepay'];
-export const LABEL = { fonepay: 'Fonepay QR', esewa: 'eSewa (old)', nepalpay: 'NepalPay (old)', khalti: 'Khalti (old)' };
-export const PAYMENT_METHODS = ['cash', 'pass', ...GATEWAYS];
+/** The shop's own printed QR. The customer pays any amount to it; the barista, or the owner centrally, checks the money arrived. */
+export const STATIC_QR = 'qr_static';
+export const LABEL = { cash: 'Pay at counter', qr_static: 'Shop QR', fonepay: 'Fonepay QR', esewa: 'eSewa (old)', nepalpay: 'NepalPay (old)', khalti: 'Khalti (old)' };
+export const PAYMENT_METHODS = ['cash', 'pass', ...GATEWAYS, STATIC_QR];
 const mods = { fonepay };
 export const gateway = (p) => mods[p];
 export const isGateway = (p) => GATEWAYS.includes(p);
@@ -22,7 +24,14 @@ export const payUrl = (paymentId) => `${apiBase()}/payments/${paymentId}/pay`;
 export const returnUrl = () => `${apiBase()}/payments/fonepay/return`;
 
 export const offered = (provider) => isGateway(provider) && rtBool(`${provider}_enabled`) && mods[provider].missing().length === 0;
-export const enabledPaymentMethods = () => ['cash', ...GATEWAYS.filter(offered)];
+export const staticQrOffered = () => rtBool('static_qr_enabled') && !!(rt('static_qr_text') || rt('static_qr_image'));
+export const enabledPaymentMethods = () => ['cash', ...GATEWAYS.filter(offered), ...(staticQrOffered() ? [STATIC_QR] : [])];
+/** What the screens need to show the shop QR. */
+export function staticQrInfo() {
+  if (!staticQrOffered()) return null;
+  const img = rt('static_qr_image');
+  return { title: rt('static_qr_title') || 'Sadhai Coffee', text: rt('static_qr_text') || null, image_url: img || null };
+}
 
 /** What the owner screen and the apps show about the gateway. No secrets. */
 export function gatewayStatus() {

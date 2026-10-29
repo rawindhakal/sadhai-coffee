@@ -9,6 +9,7 @@ import { CountPanel, IngredientsTab, InventoryHub, TransfersPanel, VariancePanel
 import { CustomersSection, LiveSection, OrdersSection, OverviewSection } from './sections';
 import { DashShell, Section, useDash } from './shell';
 import { OrderFlowPanel } from '../order-flow';
+import { QrVerifySection } from '../qr-verify';
 import { useAuth, useRequireRole } from '@/lib/auth';
 import { EnquiriesSection, SettingsHub, SiteEditor } from '../studio';
 import { MyShift, PeopleSection } from '../people';
@@ -47,6 +48,7 @@ function Body({ section, role }: { section: string; role: 'owner' | 'manager' | 
     case 'accountability': return <AccountabilityTab stationId={sid} isOwner={isOwner} />;
     case 'finance': return <FinanceTab />;
     case 'passes_report': return <P><PassesReportTab /></P>;
+    case 'qrpay': return <QrVerifySection />;
     case 'cash': return <P><CashTab stationId={sid} /></P>;
     case 'statement': return <PartnerStatement />;
     case 'rules': return <SettingsHub />;
@@ -63,7 +65,7 @@ const OWNER: Section[] = [
   { key: 'inventory', label: 'Inventory', icon: 'box', group: 'Costing and stock', keywords: 'stock central purchase transfer warehouse count loss', tabs: [{ id: 'network', label: 'All stations' }, { id: 'central', label: 'Central store' }, { id: 'purchases', label: 'Purchasing' }, { id: 'transfers', label: 'To stations' }, { id: 'counts', label: 'Counts and loss' }, { id: 'prices', label: 'Ingredients and prices' }] }, { key: 'recipes', label: 'Recipes and costing', icon: 'coin', group: 'Costing and stock', keywords: 'recipe cost margin food cost wastage' }, { key: 'stock', label: 'Station stock', icon: 'store', group: 'Costing and stock', keywords: 'restock station inventory' },
   { key: 'offers', label: 'Offer of the day', icon: 'tag', group: 'Marketing' }, { key: 'welcome_referrals', label: 'Welcome & referrals', icon: 'gift', group: 'Marketing', keywords: 'welcome first cup ladder referral friend coupon anti breach' }, { key: 'promos', label: 'Promo codes', icon: 'ticket', group: 'Marketing' }, { key: 'drops', label: 'Limited drops', icon: 'flame', group: 'Marketing' },
   { key: 'stations', label: 'Stations', icon: 'store', group: 'Network', keywords: 'partner cafe' }, { key: 'team', label: 'Users & Managers', icon: 'user', group: 'Network', keywords: 'users managers staff team accounts roles' }, { key: 'staff', label: 'Staff and pay', icon: 'users', group: 'Network', keywords: 'roster shift duty auto assign payroll salary attendance hourly leave', tabs: [{ id: 'roster', label: 'Roster' }, { id: 'staff', label: 'Staff' }, { id: 'attendance', label: 'Attendance' }, { id: 'off', label: 'Time off' }, { id: 'payroll', label: 'Payroll' }] }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Network', keywords: 'scorecard partner statement' },
-  { key: 'finance', label: 'Finance', icon: 'wallet', group: 'Money', keywords: 'reconcile settlements' }, { key: 'passes_report', label: 'Passes Report', icon: 'ticket', group: 'Money', keywords: 'passes wallet liability breakage redemptions' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Money' },
+  { key: 'finance', label: 'Finance', icon: 'wallet', group: 'Money', keywords: 'reconcile settlements' }, { key: 'qrpay', label: 'Shop QR payments', icon: 'wallet', group: 'Money', keywords: 'qr static verify payment received check bank statement' }, { key: 'passes_report', label: 'Passes Report', icon: 'ticket', group: 'Money', keywords: 'passes wallet liability breakage redemptions' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Money' },
   { key: 'rules', label: 'Settings', icon: 'cog', group: 'Admin', keywords: 'settings prices pass rules company app version backup order flow payments fonepay qr', tabs: [{ id: 'rules', label: 'Prices and rules' }, { id: 'flow', label: 'Order flow' }, { id: 'pay', label: 'Payments' }, { id: 'keys', label: 'App and company' }, { id: 'data', label: 'Data & backup' }] }, { key: 'site', label: 'Home page and pictures', icon: 'image', group: 'Admin', keywords: 'hero images website partners investors content', tabs: [{ id: 'hero', label: 'Hero' }, { id: 'marquee', label: 'Banner text' }, { id: 'partners', label: 'Partner page' }, { id: 'investors', label: 'Investor page' }, { id: 'menu', label: 'Menu pictures' }] }, { key: 'enquiries', label: 'Enquiries', icon: 'mail', group: 'Admin', keywords: 'partner investor leads' }, { key: 'audit', label: 'Audit log', icon: 'clock', group: 'Admin' },
 ];
 const MANAGER: Section[] = [
@@ -71,7 +73,7 @@ const MANAGER: Section[] = [
   { key: 'orders', label: 'Orders', icon: 'receipt', group: 'Operate' }, { key: 'run', label: 'Run station', icon: 'cup', group: 'Operate' }, { key: 'stock', label: 'Stock and deliveries', icon: 'box', group: 'Operate' },
   { key: 'recipes', label: 'Recipes and costing', icon: 'coin', group: 'Operate' }, { key: 'menu', label: 'Menu', icon: 'list', group: 'Operate' }, { key: 'reviews', label: 'Ratings', icon: 'star', group: 'Operate' },
   { key: 'offers', label: 'Offer of the day', icon: 'tag', group: 'Marketing' }, { key: 'welcome_referrals', label: 'Welcome & referrals', icon: 'gift', group: 'Marketing' }, { key: 'promos', label: 'Promo codes', icon: 'ticket', group: 'Marketing' }, 
-  { key: 'staff', label: 'Staff and roster', icon: 'users', group: 'Team', keywords: 'roster shift duty auto assign attendance leave' }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Team' }, { key: 'passes_report', label: 'Passes Report', icon: 'ticket', group: 'Team', keywords: 'passes redemptions' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Team' },
+  { key: 'staff', label: 'Staff and roster', icon: 'users', group: 'Team', keywords: 'roster shift duty auto assign attendance leave' }, { key: 'accountability', label: 'Accountability', icon: 'shield', group: 'Team' }, { key: 'qrpay', label: 'Shop QR payments', icon: 'wallet', group: 'Team', keywords: 'qr static verify payment received' }, { key: 'passes_report', label: 'Passes Report', icon: 'ticket', group: 'Team', keywords: 'passes redemptions' }, { key: 'cash', label: 'Cash counts', icon: 'coin', group: 'Team' },
 ];
 
 export function OwnerDashboard() {

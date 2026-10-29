@@ -17,6 +17,10 @@ export const DEFS = {
   fonepay_username: { group: 'payments', label: 'API user name', env: 'FONEPAY_USERNAME', def: '', help: 'The user name for Fonepay’s QR service (the same one the Fonepay merchant portal uses, if Fonepay says so).' },
   fonepay_password: { group: 'payments', label: 'API password', secret: true, env: 'FONEPAY_PASSWORD', def: '', help: 'Goes with the user name.' },
   fonepay_api_url: { group: 'payments', label: 'Fonepay address (leave empty)', type: 'url', env: 'FONEPAY_API_URL', def: '', help: 'Only if Fonepay gives you a different address. Empty uses Fonepay’s standard one for the environment above.' },
+  static_qr_enabled: { group: 'payments', label: 'Accept payment by the shop QR', type: 'bool', env: 'STATIC_QR_ENABLED', def: '0', help: 'Customers scan your shop QR and pay. The barista, or you from the dashboard, checks the money arrived before the coffee is handed over.' },
+  static_qr_text: { group: 'payments', label: 'Shop QR text', env: 'STATIC_QR_TEXT', def: '', help: 'The text inside your printed shop QR (starts 000201). Or upload a picture of the QR instead.' },
+  static_qr_image: { group: 'payments', label: 'Shop QR picture', type: 'url', env: 'STATIC_QR_IMAGE', def: '', help: 'An uploaded picture of your shop QR.' },
+  static_qr_title: { group: 'payments', label: 'Name shown with the QR', env: 'STATIC_QR_TITLE', def: 'Sadhai Coffee', help: 'The shop name the customer should see in their banking app.' },
   order_flow: { group: 'flow', label: 'Order flow', env: 'ORDER_FLOW', def: '', help: 'How ordering works on each way in. Edited in Settings, Order flow.' },
   // app and web addresses
   public_web_url: { group: 'app', label: 'Website address', type: 'url', env: 'PUBLIC_WEB_URL', def: 'http://localhost:3000', help: 'Where customers open the web app. Used in links.' },

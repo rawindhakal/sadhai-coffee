@@ -3,7 +3,7 @@ import { bad, conflict, forbidden, notFound } from './http.js';
 import { publish } from './hub.js';
 import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
-import { PAYMENT_METHODS, GATEWAYS, isGateway, offered, initiate, gateway } from './payments.js';
+import { PAYMENT_METHODS, GATEWAYS, STATIC_QR, staticQrOffered, isGateway, offered, initiate, gateway } from './payments.js';
 import { assertOrder } from './order-flow.js';
 import { rtBool } from './runtime.js';
 import crypto from 'node:crypto';
@@ -424,21 +424,23 @@ export async function createOrder(user, input) {
     const method = q.total === 0 ? (q.pass_id ? 'pass' : 'cash') : input.payment_method;
     if (!PAYMENT_METHODS.includes(method)) throw bad('Choose how you will pay');
     const online = isGateway(method) && q.total > 0;
+    if (method === STATIC_QR && q.total > 0 && !staticQrOffered()) throw bad('Paying by the shop QR is not available right now. Pay at the counter instead.');
     if (online && !offered(method)) throw bad('Fonepay is not available right now. Pay with cash instead.');
 
     // Prevent unpaid cash order spam that locks stock or coupons
-    if (method === 'cash' && channel !== 'counter' && user?.id) {
+    if ((method === 'cash' || method === STATIC_QR) && channel !== 'counter' && user?.id) {
       const { rows: openCash } = await db.query(
-        `SELECT count(*)::int AS n FROM orders WHERE user_id=$1 AND payment_method='cash' AND payment_status='unpaid' AND status IN ('placed','preparing','ready')`,
+        `SELECT count(*)::int AS n FROM orders WHERE user_id=$1 AND payment_method IN ('cash','qr_static') AND payment_status='unpaid' AND status IN ('placed','preparing','ready')`,
         [user.id],
       );
       if (openCash[0].n >= 2) {
-        throw conflict('You already have two unpaid cash orders waiting for pickup. Please pick them up at the counter first.', 'unpaid_limit');
+        throw conflict('You already have two unpaid orders waiting for pickup. Please pay and pick them up at the counter first.', 'unpaid_limit');
       }
     }
 
     const code = await nextPickupCode(db, q.station);
-    const paidNow = q.total === 0 || (!online && channel === 'counter' && input.paid_now !== false);
+    // Cash at the counter is taken on the spot. A shop-QR payment stays unpaid until the barista or the owner has checked that the money arrived.
+    const paidNow = q.total === 0 || (!online && channel === 'counter' && input.paid_now !== false && method !== STATIC_QR);
     const { rows } = await db.query(
       `INSERT INTO orders(station_id, user_id, customer_name, pickup_code, channel, status, subtotal, discount, total, discount_label,
          payment_method, payment_status, coupon_id, promo_code_id, pass_id, drop_id, note, scheduled_for, customer_phone, handover_code)
@@ -609,6 +611,24 @@ export async function refreshPayment(paymentId) {
   return (await query('SELECT * FROM payments WHERE id=$1', [paymentId])).rows[0];
 }
 
+/**
+ * A shop-QR payment has been checked against the bank or wallet app, by the barista at the station or by the owner or a manager centrally.
+ * Marks the order paid and records who checked it. Safe to call twice.
+ */
+export async function verifyQrPayment(orderId, actor, how) {
+  const o = (await query('SELECT id, status, payment_method, payment_status, station_id, total FROM orders WHERE id=$1', [orderId])).rows[0];
+  if (!o) throw notFound('Order not found');
+  if (o.payment_method !== STATIC_QR) throw conflict('This order is not a shop-QR payment');
+  if (o.status === 'cancelled') throw conflict('This order is cancelled');
+  if (o.payment_status === 'paid') return o;
+  await query(`UPDATE orders SET payment_status='paid' WHERE id=$1`, [orderId]);
+  await query(`UPDATE payments SET status='paid', settled_at=now(), raw = COALESCE(raw,'{}'::jsonb) || $2::jsonb WHERE order_id=$1 AND status='pending'`, [orderId, JSON.stringify({ verified_by: actor.id, verified_how: how, verified_at: new Date().toISOString() })]);
+  await audit(actor.id, 'payment.qr_verified', 'order', orderId, { how, amount: o.total });
+  const full = await fullOrder(orderId);
+  emitOrder(full, 'order');
+  return full;
+}
+
 async function cancelInTx(db, orderId, actorId, reason, { refund = true } = {}) {
   const o = (await db.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [orderId])).rows[0];
   if (!o) throw notFound('Order not found');
@@ -667,9 +687,10 @@ const FLOW = { placed: ['preparing', 'cancelled'], preparing: ['ready', 'cancell
  * Returns the override reason when one was used. Walk-in counter orders need no code.
  */
 async function checkHandover(orderId, actor, code, override) {
-  const o = (await query('SELECT status, channel, handover_code, code_attempts FROM orders WHERE id=$1', [orderId])).rows[0];
+  const o = (await query('SELECT status, channel, handover_code, code_attempts, payment_status, payment_method FROM orders WHERE id=$1', [orderId])).rows[0];
   if (!o) throw notFound('Order not found');
   if (o.status !== 'ready') throw conflict(`Cannot move an order from ${o.status} to picked_up`);
+  if (o.payment_status === 'unpaid' && o.payment_method === STATIC_QR) throw conflict('Check that the QR payment arrived and press Payment received before handing over.', 'qr_unverified');
   if (o.channel === 'counter' || !o.handover_code) return null;
   const reason = String(override || '').trim();
   const canOverride = ['manager', 'owner'].includes(actor.role) && reason.length >= 3;

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.2.0] - 2026-10-29
+
+### Added
+- **Pay at counter** is the name for paying when collecting (cash or any way the counter takes) on every screen.
+- **Shop QR** (`qr_static`): the owner saves the printed shop QR (text or picture) in Settings, Payments. Customers scan it on the website, app, kiosk or at the counter; the order goes to the station unpaid and cannot be handed over until it is checked. The barista presses *Payment received* on the ticket, or the owner or a manager does it centrally under Money, *Shop QR payments* (`/admin/qr-payments`, `/admin/orders/:id/verify-payment`). Who checked it, and where, is recorded; unchecked ones raise an alert after 10 minutes. Order flow can switch it on or off for each way of ordering.
+
+---
+
 ## [2.1.1] - 2026-10-29
 
 ### Added

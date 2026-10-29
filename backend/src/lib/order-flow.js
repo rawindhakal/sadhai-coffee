@@ -9,7 +9,7 @@ import { enabledPaymentMethods, PAYMENT_METHODS } from './payments.js';
 export const CHANNELS = ['app', 'web', 'qr', 'kiosk', 'counter'];
 export const CHANNEL_LABEL = { app: 'Mobile app', web: 'Website', qr: 'Kiosk QR (phone)', kiosk: 'Kiosk screen', counter: 'Counter (staff)' };
 
-const BASE = { enabled: true, payments: { cash: true, pass: true, fonepay: true }, pickup_later: true, notes: true, max_cups: 10, ask_name: false, ask_phone: false };
+const BASE = { enabled: true, payments: { cash: true, pass: true, fonepay: true, qr_static: true }, pickup_later: true, notes: true, max_cups: 10, ask_name: false, ask_phone: false };
 const OVERRIDE = {
   kiosk: { pickup_later: false, notes: false, ask_name: true, ask_phone: true },
   counter: { pickup_later: false, max_cups: 20 },

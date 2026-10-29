@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { query } from '../lib/db.js';
 import { wrap, bad, notFound, conflict, normalizePhone, forbidden } from '../lib/http.js';
 import { authenticate, requireRole, assertStationAccess } from '../lib/auth.js';
-import { createOrder, advanceOrder, fullOrder, stationMenu, buyPass } from '../lib/orders.js';
+import { createOrder, advanceOrder, fullOrder, stationMenu, buyPass, verifyQrPayment } from '../lib/orders.js';
 import { audit, notify } from '../lib/notify.js';
 import { publish } from '../lib/hub.js';
 
@@ -96,6 +96,8 @@ station.post('/orders/:id/pay', wrap(async (req, res) => {
   if (!o) throw notFound('Order not found');
   await assertStationAccess(req.user, o.station_id);
   if (o.status === 'cancelled') throw conflict('This order is cancelled');
+  const pm = (await query('SELECT payment_method FROM orders WHERE id=$1', [req.params.id])).rows[0].payment_method;
+  if (pm === 'qr_static') return res.json(await verifyQrPayment(req.params.id, req.user, 'station'));
   await query(`UPDATE orders SET payment_status='paid' WHERE id=$1 AND payment_status='unpaid'`, [req.params.id]);
   await query(`UPDATE payments SET status='paid', settled_at=now() WHERE order_id=$1 AND status='pending'`, [req.params.id]);
   await audit(req.user.id, 'order.cash_collected', 'order', req.params.id);
