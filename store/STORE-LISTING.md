@@ -14,7 +14,7 @@ Sadhai is Nepal’s everyday specialty coffee, grown in the hills, roasted in Ne
 
 - Find the nearest counter. Share your location if you like, or pick a station yourself. See the walking time and the wait.
 - Order in one tap. Americano, Chiya latte, Gulmi pour-over, cold brew, bites and Sadhai merch.
-- Pay your way. eSewa, Fonepay, your 10-cup pass, or cash at the counter. Every price includes VAT and service.
+- Pay your way. Fonepay QR, your 10-cup pass, or cash at the counter. Every price includes VAT and service.
 - Your first cup is free. Then three cups at 30% off.
 - 10 cups. One pass. Rs 1,200. Thirty days, any counter.
 - Give a cup. Get a cup. Share your code and you both get one.

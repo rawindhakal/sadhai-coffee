@@ -1,12 +1,11 @@
-import express, { Router } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 import { query, pool } from '../lib/db.js';
 import { wrap, bad, notFound, forbidden, HttpError } from '../lib/http.js';
 import { authenticate, requireRole, verifyAccess } from '../lib/auth.js';
 import { subscribe } from '../lib/hub.js';
-import { createOrder, quote, fullOrder, rateOrder, cancelOrder, confirmPayment, refreshPayment, buyPass } from '../lib/orders.js';
-import { PAYMENT_METHODS, GATEWAYS, payUrl, simulatorAllowed, qrFor } from '../lib/payments.js';
-import { startPayment, simulate, esewaReturn, esewaFailed, fonepayReturn, nepalpayReturn } from '../lib/payment-flow.js';
+import { createOrder, quote, fullOrder, rateOrder, cancelOrder, refreshPayment, buyPass } from '../lib/orders.js';
+import { PAYMENT_METHODS, GATEWAYS, qrFor } from '../lib/payments.js';
 import { getSettings } from '../lib/settings.js';
 import { rt } from '../lib/runtime.js';
 
@@ -50,43 +49,24 @@ customer.get('/events', wrap(async (req, res) => {
   res.write(`event: hello\ndata: ${JSON.stringify({ ok: true })}\n\n`);
 }));
 
-// --- Payment pages. These are opened in the customer's browser by the gateway, so they carry no sign-in. ---
-const send = (res, r) => {
-  if (r.redirect) return res.redirect(r.redirect);
-  if (r.csp) res.setHeader('Content-Security-Policy', r.csp);
-  res.status(r.status || 200).type('html').send(r.html);
-};
-customer.get('/payments/:id/pay', wrap(async (req, res) => {
-  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) throw notFound('Payment not found');
-  send(res, await startPayment(req.params.id));
-}));
-customer.post('/payments/:id/simulate', express.urlencoded({ extended: false }), wrap(async (req, res) => {
-  send(res, await simulate(req.params.id, req.body?.outcome === 'paid' ? 'paid' : 'failed'));
-}));
-customer.get('/payments/esewa/return', wrap(async (req, res) => send(res, await esewaReturn(String(req.query.data || '')))));
-customer.get('/payments/esewa/failed/:id', wrap(async (req, res) => send(res, await esewaFailed(req.params.id))));
-customer.get('/payments/fonepay/return', wrap(async (req, res) => send(res, await fonepayReturn(req.query))));
-customer.get('/payments/nepalpay/return', wrap(async (req, res) => send(res, await nepalpayReturn(req.query))));
-
 customer.use(authenticate);
 
-// Where a payment stands. For eSewa this also asks eSewa again, so a customer whose browser never came back still gets their order.
+// Where a payment stands, and its QR. The first look asks Fonepay for the QR. If Fonepay refuses (wrong login, wrong environment), the answer carries
+// Fonepay's own message as qr_error, and we do not ask again for 20 seconds unless the person presses Try again, so a wrong password is not hammered.
+const qrFailures = new Map();
 customer.get('/payments/:id', wrap(async (req, res) => {
   const first = (await query('SELECT * FROM payments WHERE id=$1', [req.params.id])).rows[0];
   const mine = first && (first.user_id === req.user.id || req.user.role !== 'customer');
   if (!mine) throw notFound('Payment not found');
   const p = first.status === 'pending' ? await refreshPayment(first.id).catch(() => first) : first;
-  const qr = p.status === 'pending' ? await qrFor(p) : null;
-  res.json({ id: p.id, status: p.status, provider: p.provider, amount: p.amount, pay_url: p.status === 'pending' ? payUrl(p.id) : null, qr, expires_at: new Date(new Date(p.created_at).getTime() + 15 * 60_000).toISOString(), order: p.order_id ? await fullOrder(p.order_id, undefined, { reveal: p.user_id === req.user.id }) : null });
-}));
-
-// Test sites only: mark a payment paid or failed without a gateway.
-customer.post('/payments/:id/confirm', wrap(async (req, res) => {
-  const p = (await query('SELECT * FROM payments WHERE id=$1', [req.params.id])).rows[0];
-  if (!p || (p.user_id !== req.user.id && req.user.role === 'customer')) throw notFound('Payment not found');
-  if (!simulatorAllowed(p)) throw forbidden('Payments are confirmed by the gateway on a live site');
-  const failed = req.body?.outcome === 'fail' || req.body?.outcome === 'failed';
-  res.json(await confirmPayment(p.id, failed ? { outcome: 'failed', raw: { simulated: true } } : { ref: `TEST-${Date.now()}`, raw: { simulated: true } }));
+  let qr = null, qr_error = null;
+  if (p.status === 'pending') {
+    const fail = qrFailures.get(p.id);
+    if (p.raw?.qr || req.query.retry || !fail || Date.now() - fail.at > 20_000) {
+      try { qr = await qrFor(p); qrFailures.delete(p.id); } catch (e) { qr_error = e.message; qrFailures.set(p.id, { at: Date.now(), message: e.message }); }
+    } else qr_error = fail.message;
+  }
+  res.json({ id: p.id, status: p.status, provider: p.provider, amount: p.amount, qr, qr_error, expires_at: new Date(new Date(p.created_at).getTime() + 15 * 60_000).toISOString(), order: p.order_id ? await fullOrder(p.order_id, undefined, { reveal: p.user_id === req.user.id }) : null });
 }));
 
 // A customer can stop an order that is still waiting for its online payment.
@@ -132,8 +112,7 @@ customer.get('/orders/:id', wrap(async (req, res) => {
   const ahead = ['placed', 'preparing'].includes(o.status) && !(o.scheduled_for && !o.released_at)
     ? (await query(`SELECT count(*)::int AS n FROM orders WHERE station_id=$1 AND status IN ('placed','preparing') AND (scheduled_for IS NULL OR released_at IS NOT NULL) AND created_at < $2`, [o.station_id, o.created_at])).rows[0].n
     : 0;
-  const pay_url = o.status === 'awaiting_payment' && o.payment_id ? payUrl(o.payment_id) : null;
-  res.json({ ...o, ahead, eta_seconds: (ahead + 1) * 90, pay_url });
+  res.json({ ...o, ahead, eta_seconds: (ahead + 1) * 90 });
 }));
 
 

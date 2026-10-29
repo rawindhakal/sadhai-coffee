@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.1.0] - 2026-10-29
+
+### Changed
+- Online payment rebuilt from scratch as Fonepay dynamic QR only, following Fonepay's third-party QR API: `thirdPartyDynamicQrDownload` and `thirdPartyDynamicQrGetStatus`, HMAC-SHA512 `dataValidation`, API user name and password, PRN = payment id without hyphens. Paid status is polled from the open QR window and by a server job every 10 seconds.
+- Settings, Payments has one Fonepay card (environment, merchant code, secret key, API user name, API password), **Check connection** (shows Fonepay's own answer) and the Rs 10 test.
+- If Fonepay refuses to make a QR, its message is shown with Try again, and it is not asked again for 20 seconds.
+- The QR login saved as `fonepay_qr_username` and `fonepay_qr_password` moves to `fonepay_username` and `fonepay_password` on migrate.
+
+### Removed
+- eSewa, NepalPay, Fonepay web-payment redirect and callbacks, the built-in test payment page, the QR built from merchant and terminal IDs or from a printed QR, and staff "Payment received".
+
+---
+
 ## [2.0.3] - 2026-10-29
 
 ### Added

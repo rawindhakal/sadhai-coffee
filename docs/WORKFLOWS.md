@@ -9,7 +9,7 @@ Everything below is available on the web (`/owner`, `/manager`, `/station`) and 
 
 ## Owner: first day
 
-1. **Settings**: drink prices and rules, *Order flow* (rules for each way of ordering), *Payments* (eSewa, Fonepay and NepalPay QR), then *App and company* (web addresses, oldest allowed app version, company name and emails for the legal pages). Payments has the eSewa and Fonepay keys, a Rs 10 test button and the list of online payments and refunds.
+1. **Settings**: drink prices and rules, *Order flow* (rules for each way of ordering), *Payments* (Fonepay QR), then *App and company* (web addresses, oldest allowed app version, company name and emails for the legal pages). Payments has the eSewa and Fonepay keys, a Rs 10 test button and the list of online payments and refunds.
 2. **Home page and pictures**: replace every hero layer, section picture, partner and investor page text and product picture. Anything left empty falls back to the built-in artwork.
 3. **Stations**, **Managers**, **Staff and pay**: add the cafes, their managers, and each staff member with an hourly rate.
 4. The *Get Sadhai ready* checklist on the overview tracks what is still missing.
@@ -41,14 +41,14 @@ Public pages `/partners` and `/investors` show the model, the standard prices an
 ## Closed outlets and pickup later
 
 - **Closed means closed.** A station that is switched to closed, outside its opening hours, or paused cannot take any order: the station list greys it out, its menu cannot be ordered from, the cart refuses it, and the API rejects the order and the price quote. Kiosks follow the same rule.
-- **Pickup later.** Under *Pickup time* in the cart, a customer chooses **Later today** and a time. Times start 15 minutes from now (setting) in 5-minute steps and end 5 minutes before closing. Same day only. Not offered while the station is closed or paused. Cash, pass, eSewa and Fonepay orders all work; an online one is held until it is paid.
+- **Pickup later.** Under *Pickup time* in the cart, a customer chooses **Later today** and a time. Times start 15 minutes from now (setting) in 5-minute steps and end 5 minutes before closing. Same day only. Not offered while the station is closed or paused. Cash, pass and Fonepay orders all work; an online one is held until it is paid.
 - **At the station.** A pickup-later order waits under *Later today* (staff can decline it with a reason, and paid orders are refunded). A few minutes before the pickup time (setting, 10 by default) it moves to *New* with a pickup-time badge, staff are alerted, and the customer is told it is with the barista. From there it is the normal accept, prepare, hand over with code. Once placed, the customer cannot cancel it (only the station can decline).
 - Late-order alerts and wait estimates ignore scheduled orders until they are released. Settings: *Pickup later* in Settings and keys.
 
 ## From order to cup (every channel)
 
 1. **Order.** The customer orders in the app or web (QR at the counter, or the app), at the kiosk, or the counter staff key it in.
-2. **Pay.** Cash when collecting, a 10-cup pass, or online with eSewa or Fonepay (a coupon or promo can bring the price down). An online order waits for the gateway to confirm; it is cancelled after 15 minutes if nobody pays. Cash and pass orders go straight to the station.
+2. **Pay.** Cash when collecting, a 10-cup pass, or online by scanning a Fonepay QR (a coupon or promo can bring the price down). An online order waits for the gateway to confirm; it is cancelled after 15 minutes if nobody pays. Cash and pass orders go straight to the station.
 **Cancelling.** A customer can cancel only while an order is waiting for payment. Once it is placed it goes straight to the bar and the customer cannot cancel it. Only the station (decline, with a reason) or a manager can cancel it, and a paid order is then refunded.
 3. **Accept.** The order appears on the station queue as *New*. Staff press **Accept and start**, or **Decline** with a reason (a paid order is refunded and the customer is told).
 4. **Prepare.** **Mark prepared** moves it to *Ready for pickup* and notifies the customer.
@@ -64,7 +64,7 @@ Public pages `/partners` and `/investors` show the model, the standard prices an
 | Staff screen | Queue, new order, stock, recipes, **My shift** | Queue, new order, stock, recipes |
 | Who sees it | Owner, the manager assigned to it | Owner, the manager assigned to it, **and the partner cafe owner** |
 | Partner cafe owner sign-in | not applicable | Sees sales, orders, live queue, stock, ratings, cash counts, their settlement statement; can add logins for their own counter staff, pause orders, and update their stock counts. Cannot see costs, margins, customer phone numbers, other cafes, or change prices, offers, recipes or push messages. |
-| Money | All sales belong to Sadhai | The cafe holds the cash; eSewa and Fonepay money arrives in Sadhai's account. Each period the cafe's share (a percentage of net sales) is netted against the cash it holds; the statement says who pays whom. |
+| Money | All sales belong to Sadhai | The cafe holds the cash; Fonepay money arrives in Sadhai's account. Each period the cafe's share (a percentage of net sales) is netted against the cash it holds; the statement says who pays whom. |
 | Stock | Sadhai buys centrally and dispatches; managers count and record loss | Same dispatches; the partner owner can update counts |
 
 The owner creates a partner login under *Managers > Add person > Partner cafe owner* and links it to the cafe.

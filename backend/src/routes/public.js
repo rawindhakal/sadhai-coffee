@@ -28,7 +28,7 @@ pub.get('/config', wrap(async (_req, res) => {
     pricing: { hot: s.price_hot, flavored: s.price_flavored, iced: s.price_iced },
     partner_share_pct: s.partner_share_pct,
     order_flow: effectiveFlow(), // one set of ordering rules for the website, apps, kiosk, kiosk QR and counter
-    payment_methods: enabledPaymentMethods(), // cash at pickup, plus eSewa and Fonepay when the owner has switched them on
+    payment_methods: enabledPaymentMethods(), // cash at pickup, plus Fonepay QR when the owner has switched it on
     payment_gateways: Object.fromEntries(Object.entries(gatewayStatus()).map(([k, v]) => [k, { offered: v.offered, mode: v.mode }])),
     referral: {
       enabled: !!Number(s.referral_enabled),

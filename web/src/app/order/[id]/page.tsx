@@ -22,7 +22,7 @@ export default function Tracking() {
   // Orders that arrive here still waiting for payment open the QR window by themselves once.
   useEffect(() => { if (o?.status === 'awaiting_payment' && o.payment_id && !pay) setPayOpen(true); }, [o?.status, o?.payment_id]);
 
-  // While the order waits for its payment, look again every few seconds: eSewa and Fonepay may confirm in another tab.
+  // While the order waits for its payment, look again every few seconds: Fonepay may confirm while the QR window is closed.
   const waiting = o?.status === 'awaiting_payment';
   useEffect(() => { if (!waiting) return; const t = setInterval(reload, 4000); return () => clearInterval(t); }, [waiting]);
 
@@ -78,7 +78,7 @@ export default function Tracking() {
         <hr style={{ border: 0, borderTop: '1px solid var(--hairline)', margin: '12px 0' }} />
         {o.discount > 0 && <div className="row between"><span className="muted">{o.discount_label}</span><span>− {rs(o.discount)}</span></div>}
         <div className="row between"><strong>Total</strong><strong>{rs(o.total)}</strong></div>
-        <p className="small muted" style={{ marginTop: 4 }}>{PAY_LABEL[o.payment_method] || 'Cash at counter'}{['esewa', 'fonepay', 'nepalpay'].includes(o.payment_method) && o.payment_status === 'unpaid' ? '' : <> · <Status s={o.payment_status} /></>}{o.payment_method === 'cash' && o.payment_status === 'unpaid' ? ' Pay in cash when you pick up.' : ''}</p>
+        <p className="small muted" style={{ marginTop: 4 }}>{PAY_LABEL[o.payment_method] || 'Cash at counter'}{o.payment_method === 'fonepay' && o.payment_status === 'unpaid' ? '' : <> · <Status s={o.payment_status} /></>}{o.payment_method === 'cash' && o.payment_status === 'unpaid' ? ' Pay in cash when you pick up.' : ''}</p>
       </div>
       {['placed', 'preparing', 'ready'].includes(o.status) && <p className="small muted center" style={{ marginTop: 16 }}>Your order has gone to the barista, so it cannot be cancelled. Something wrong? Ask at the counter.</p>}
       {o.status === 'picked_up' && (

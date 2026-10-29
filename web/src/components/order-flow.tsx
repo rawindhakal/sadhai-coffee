@@ -4,7 +4,7 @@ import { api } from '@/lib/api';
 import { Field, useData, useToast } from './ui';
 import { Skeleton } from './dash/kit';
 
-const WAYS: Record<string, string> = { cash: 'Cash at the counter', pass: '10-cup pass', esewa: 'eSewa', fonepay: 'Fonepay', nepalpay: 'NepalPay QR' };
+const WAYS: Record<string, string> = { cash: 'Cash at the counter', pass: '10-cup pass', fonepay: 'Fonepay QR' };
 const HELP: Record<string, string> = {
   app: 'Customers ordering in the Sadhai mobile app.', web: 'Customers ordering on sadhaicoffee.com.', qr: 'Customers who scan the QR on the kiosk and order on their own phone.',
   kiosk: 'Guests ordering on the kiosk tablet.', counter: 'Baristas taking an order at the counter.',

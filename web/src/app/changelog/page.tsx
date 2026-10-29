@@ -21,9 +21,21 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
-    version: '2.0.3',
+    version: '2.1.0',
     date: '29 October 2026',
     badge: 'Latest',
+    highlight: 'Payments rebuilt: Fonepay dynamic QR only',
+    changes: [
+      { category: 'Changed', items: [
+        { title: 'One way to pay online', desc: 'Every order gets its own Fonepay QR for the exact amount. The order starts the moment Fonepay says it is paid.' },
+        { title: 'Check connection', desc: 'Settings, Payments shows exactly what Fonepay answered, so a wrong login or environment is easy to see.' },
+      ] },
+      { category: 'Changed', items: [{ title: 'Older payment options removed', desc: 'eSewa, NepalPay, the web payment redirect and the printed-QR fallback are gone.' }] },
+    ],
+  },
+  {
+    version: '2.0.3',
+    date: '29 October 2026',
     highlight: 'Fonepay and NepalPay QR from your merchant and terminal ID',
     changes: [{ category: 'Added', items: [{ title: 'QR with no QR login', desc: 'The kiosk and counter build a Fonepay-format QR for the exact amount from the merchant ID and terminal ID. The barista presses Payment received once it is paid.' }] }],
   },

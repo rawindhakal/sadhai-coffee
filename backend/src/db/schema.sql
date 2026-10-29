@@ -758,3 +758,13 @@ ALTER TABLE payments ADD CONSTRAINT payments_provider_check CHECK (provider IN (
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_payment_method_check;
 ALTER TABLE orders ADD CONSTRAINT orders_payment_method_check CHECK (payment_method IN ('cash','esewa','khalti','fonepay','nepalpay','pass'));
 CREATE INDEX IF NOT EXISTS payments_ref_idx ON payments(provider_ref) WHERE provider_ref IS NOT NULL;
+
+-- ---- v2.1: Fonepay dynamic QR is the only online payment ----
+-- The QR login the owner already saved moves to its new name, and settings of the removed gateways are dropped. Safe to run again.
+INSERT INTO app_secrets(key, value, secret, updated_by, updated_at)
+  SELECT 'fonepay_username', value, secret, updated_by, updated_at FROM app_secrets WHERE key='fonepay_qr_username'
+  ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_secrets(key, value, secret, updated_by, updated_at)
+  SELECT 'fonepay_password', value, secret, updated_by, updated_at FROM app_secrets WHERE key='fonepay_qr_password'
+  ON CONFLICT (key) DO NOTHING;
+DELETE FROM app_secrets WHERE key LIKE 'esewa\_%' OR key LIKE 'nepalpay\_%' OR key IN ('fonepay_qr_username','fonepay_qr_password','fonepay_qr_template','fonepay_terminal_id','fonepay_tag26_id','fonepay_merchant_name','fonepay_merchant_city','fonepay_mcc');

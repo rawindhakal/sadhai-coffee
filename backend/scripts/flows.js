@@ -160,123 +160,135 @@ section('4. Things going wrong');
 }
 
 /* ---------------------------------------------------------------- 5 */
-section('5. Online payment: eSewa and Fonepay');
+section('5. Online payment: Fonepay dynamic QR');
 const setCfg = (values) => call('PUT', '/owner/integrations', { values }, tok(owner));
-const esewaSign = (d) => crypto.createHmac('sha256', '8gBm/:&EnhH.1/q').update(d.signed_field_names.split(',').map((k) => `${k}=${d[k]}`).join(',')).digest('base64');
-const esewaAnswer = (paymentId, amount, status = 'COMPLETE', tamper = false) => {
-  const d = { transaction_code: 'TEST0001', status, total_amount: String(amount), transaction_uuid: paymentId, product_code: 'EPAYTEST', signed_field_names: 'transaction_code,status,total_amount,transaction_uuid,product_code,signed_field_names' };
-  d.signature = tamper ? 'AAAA' : esewaSign(d);
-  return Buffer.from(JSON.stringify(d)).toString('base64');
-};
-const FP_SECRET = 'flow-test-secret';
-const fpAnswer = (prn, amount, { ps = 'true', rc = 'successful', pid = 'FLOWPID', tamper = false } = {}) => {
-  const v = { PRN: prn, PID: pid, PS: ps, RC: rc, UID: 'FPTRACE1', BC: 'NABIL', INI: 'tester', P_AMT: String(amount), R_AMT: String(amount) };
-  v.DV = tamper ? 'abcd' : crypto.createHmac('sha512', FP_SECRET).update(['PRN', 'PID', 'PS', 'RC', 'UID', 'BC', 'INI', 'P_AMT', 'R_AMT'].map((k) => v[k]).join(',')).digest('hex');
-  return new URLSearchParams(v).toString();
-};
-const hit = (path) => fetch(API + path, { redirect: 'manual' });
 const buy = async (c, method, extra = {}) => call('POST', '/orders', { station_id: tu.id, items: [line(ame)], payment_method: method, ...extra }, c.token);
 const orderOf = async (c, id) => (await call('GET', `/orders/${id}`, null, c.token)).body;
+const FP_SECRET = 'flow-test-secret';
+// A stand-in for Fonepay's QR service: checks the signature and the login the way Fonepay does, and says paid for the PRNs the test marks as paid.
+const mock = { paid: new Set(), failed: new Set(), calls: [], badSignature: 0 };
+const { createServer } = await import('node:http');
+const fake = createServer((req, res) => {
+  let body = '';
+  req.on('data', (d) => (body += d));
+  req.on('end', () => {
+    const j = JSON.parse(body || '{}');
+    mock.calls.push({ path: req.url, body: j });
+    const send = (o) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(o)); };
+    if (j.username !== 'goodUser' || j.password !== 'goodPass') return send({ status: 'CONFLICT', statusCode: 409, message: 'INVALID USERNAME OR PASSWORD', success: false });
+    const sig = (m) => crypto.createHmac('sha512', FP_SECRET).update(m).digest('hex');
+    if (req.url.endsWith('thirdPartyDynamicQrDownload')) {
+      if (j.dataValidation !== sig([j.amount, j.prn, j.merchantCode, j.remarks1, j.remarks2].join(','))) { mock.badSignature++; return send({ statusCode: 400, message: 'Invalid data validation', success: false }); }
+      return send({ message: 'Success', qrMessage: `000201FAKEQR|${j.prn}|${j.amount}`, status: 'CREATED', statusCode: 201, success: true, thirdpartyQrWebSocketUrl: 'wss://example.invalid/ws' });
+    }
+    if (j.dataValidation !== sig([j.prn, j.merchantCode].join(','))) { mock.badSignature++; return send({ statusCode: 400, message: 'Invalid data validation', success: false }); }
+    return send({ fonepayTraceId: 424242, merchantCode: j.merchantCode, paymentStatus: mock.paid.has(j.prn) ? 'success' : mock.failed.has(j.prn) ? 'failed' : 'pending', prn: j.prn, success: true });
+  });
+});
+await new Promise((r) => fake.listen(4799, '127.0.0.1', r));
+const qrOf = async (token, paymentId) => (await call('GET', `/payments/${paymentId}`, null, token)).body;
 {
   const c = await newCustomer();
-  // switched off until the owner turns them on
-  await setCfg({ esewa_enabled: null, fonepay_enabled: null, fonepay_merchant_code: null, fonepay_secret_key: null, esewa_mode: null, fonepay_mode: null, nepalpay_enabled: null, nepalpay_merchant_code: null, nepalpay_secret_key: null });
-  ok((await buy(c, 'esewa')).status === 400 && (await call('GET', '/config')).body.payment_methods.join() === 'cash', 'eSewa and Fonepay are off until the owner turns them on');
-  await setCfg({ esewa_enabled: '1', fonepay_enabled: '1', fonepay_merchant_code: 'FLOWPID', fonepay_secret_key: FP_SECRET });
-  const cfg = (await call('GET', '/config')).body;
-  ok(cfg.payment_methods.join() === 'cash,esewa,fonepay' && cfg.payment_gateways.esewa.mode === 'sandbox', 'once on, customers are offered cash, eSewa and Fonepay');
-  const key = (await call('GET', '/owner/integrations', null, tok(owner))).body.find((i) => i.key === 'esewa_secret_key');
-  ok(key.secret && key.value === null, 'gateway secrets are never sent to the browser');
-  await setCfg({ esewa_mode: 'live' });
-  ok((await buy(c, 'esewa')).status === 400, 'Live mode without your own eSewa code and key takes no orders');
-  await setCfg({ esewa_mode: 'sandbox' });
+  const OFF = { fonepay_enabled: null, fonepay_merchant_code: null, fonepay_secret_key: null, fonepay_username: null, fonepay_password: null, fonepay_mode: null, fonepay_api_url: null };
+  await setCfg(OFF);
+  ok((await buy(c, 'fonepay')).status === 400 && (await call('GET', '/config')).body.payment_methods.join() === 'cash', 'Fonepay is off until the owner turns it on');
+  await setCfg({ fonepay_enabled: '1', fonepay_merchant_code: 'FLOWPID', fonepay_secret_key: FP_SECRET });
+  ok((await call('GET', '/config')).body.payment_methods.join() === 'cash', 'switched on but without the API login, customers are not offered it');
+  await setCfg({ fonepay_username: 'goodUser', fonepay_password: 'goodPass', fonepay_api_url: 'http://127.0.0.1:4799' });
+  ok((await call('GET', '/config')).body.payment_methods.join() === 'cash,fonepay', 'with all four fields saved, customers are offered cash and Fonepay QR');
+  const secrets = (await call('GET', '/owner/integrations', null, tok(owner))).body.filter((i) => ['fonepay_secret_key', 'fonepay_password'].includes(i.key));
+  ok(secrets.length === 2 && secrets.every((i) => i.secret && i.value === null), 'the secret key and password are never sent to the browser');
 
-  // --- eSewa, paid ---
+  // --- paid ---
   const before = await stockOf(tuStaff, 'Coffee');
-  const e1 = await buy(c, 'esewa');
-  const id1 = e1.body.order.id, pid1 = e1.body.payment.payment_id;
-  ok(e1.status === 201 && e1.body.order.status === 'awaiting_payment' && e1.body.payment.pay_url.endsWith(`/payments/${pid1}/pay`), 'an eSewa order waits for payment and gives a pay address');
-  ok(!(await queue(tuStaff)).some((x) => x.id === id1) && (await stockOf(tuStaff, 'Coffee')) === before, 'the station does not see it and no ingredients are reserved yet');
-  const page = await (await fetch(e1.body.payment.pay_url.replace(/^https?:\/\/[^/]+/, API))).text();
-  ok(/rc-epay\.esewa\.com\.np/.test(page) && /name="signature"/.test(page) && /name="total_amount" value="100"/.test(page) && /value="EPAYTEST"/.test(page), 'the pay page posts a signed ePay v2 form to eSewa');
-  const bad1 = await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(pid1, 100, 'COMPLETE', true))}`);
-  ok(bad1.status === 302 && (await orderOf(c, id1)).status === 'awaiting_payment', 'an eSewa answer with a wrong signature does nothing');
-  const wrongAmt = await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(pid1, 5))}`);
-  ok(wrongAmt.status === 302 && (await orderOf(c, id1)).status === 'cancelled', 'an answer for the wrong amount cancels the order');
-  const e2 = await buy(c, 'esewa');
-  const pid2 = e2.body.payment.payment_id, id2 = e2.body.order.id;
-  const ok2 = await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(pid2, 100))}`);
-  ok(ok2.status === 302 && /\/order\/[^?]+\?pay=ok/.test(ok2.headers.get('location')), 'a genuine eSewa answer sends the customer back to their order');
-  const placed = await orderOf(c, id2);
-  ok(placed.status === 'placed' && placed.payment_status === 'paid' && /^\d{4}$/.test(placed.handover_code), 'the order is now placed and paid, with its pickup code');
-  ok((await queue(tuStaff)).some((x) => x.id === id2) && (await stockOf(tuStaff, 'Coffee')) < before, 'it reaches the station and ingredients are reserved');
-  await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(pid2, 100))}`);
-  ok((await call('GET', `/payments/${pid2}`, null, c.token)).body.status === 'paid' && (await queue(tuStaff)).filter((x) => x.id === id2).length === 1, 'answering twice is harmless');
-  ok([404, 409].includes((await call('POST', `/orders/${id2}/cancel`, {}, c.token)).status) && (await orderOf(c, id2)).status === 'placed', 'a paid order cannot be cancelled by the customer');
-
-  // --- eSewa, failed / cancelled by the customer ---
-  const e3 = await buy(c, 'esewa');
-  await hit(`/payments/esewa/failed/${e3.body.payment.payment_id}`);
-  ok((await orderOf(c, e3.body.order.id)).status === 'cancelled' && (await call('GET', `/payments/${e3.body.payment.payment_id}`, null, c.token)).body.status === 'failed', 'eSewa reporting a failure cancels the order and no stock was used');
-  const e4 = await buy(c, 'esewa');
-  const can = await call('POST', `/orders/${e4.body.order.id}/cancel`, {}, c.token);
-  ok(can.status === 200 && can.body.status === 'cancelled', 'the customer can cancel while the order still waits for payment');
-  const late = await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(e4.body.payment.payment_id, 100))}`);
-  const lateRow = (await call('GET', '/owner/payments', null, tok(owner))).body.payments.find((p) => p.id === e4.body.payment.payment_id);
-  ok(late.status === 302 && lateRow?.status === 'refunded' && lateRow.refund_due, 'money that arrives after a cancel is marked to be refunded, not lost');
-
-  // --- Fonepay ---
   const f1 = await buy(c, 'fonepay');
-  const fpid1 = f1.body.payment.payment_id, prn1 = f1.body.payment.reference;
-  const go = await hit(`/payments/${fpid1}/pay`);
-  const target = new URL(go.headers.get('location'));
-  const dvIn = crypto.createHmac('sha512', FP_SECRET).update(['PID', 'MD', 'PRN', 'AMT', 'CRN', 'DT', 'R1', 'R2', 'RU'].map((k) => target.searchParams.get(k)).join(',')).digest('hex');
-  ok(go.status === 302 && target.host === 'dev-clientapi.fonepay.com' && target.searchParams.get('PID') === 'FLOWPID' && target.searchParams.get('AMT') === '100' && target.searchParams.get('DV') === dvIn && /^[A-Z0-9]{1,25}$/.test(prn1), 'Fonepay: the customer is sent to Fonepay with a signed request');
-  ok(target.searchParams.get('RU').endsWith('/payments/fonepay/return') && !target.searchParams.get('RU').includes('?'), 'and the return address is a plain address Fonepay can add to');
-  await hit(`/payments/fonepay/return?${fpAnswer(prn1, 100, { tamper: true })}`);
-  ok((await orderOf(c, f1.body.order.id)).status === 'awaiting_payment', 'a Fonepay answer with a wrong signature does nothing');
-  await hit(`/payments/fonepay/return?${fpAnswer(prn1, 100, { pid: 'SOMEONEELSE' })}`);
-  ok((await orderOf(c, f1.body.order.id)).status === 'awaiting_payment', 'a Fonepay answer for another merchant does nothing');
-  const fok = await hit(`/payments/fonepay/return?${fpAnswer(prn1, 100)}`);
-  ok(fok.status === 302 && (await orderOf(c, f1.body.order.id)).status === 'placed' && (await queue(tuStaff)).some((x) => x.id === f1.body.order.id), 'a genuine Fonepay answer places the order and the station sees it');
-  const f2 = await buy(c, 'fonepay');
-  await hit(`/payments/fonepay/return?${fpAnswer(f2.body.payment.reference, 100, { ps: 'false', rc: 'cancel' })}`);
-  ok((await orderOf(c, f2.body.order.id)).status === 'cancelled', 'Fonepay reporting a cancelled payment cancels the order');
-  await setCfg({ fonepay_merchant_code: null, fonepay_secret_key: null });
-  const f3 = await buy(c, 'fonepay');
-  const simPage = await (await fetch(f3.body.payment.pay_url.replace(/^https?:\/\/[^/]+/, API))).text();
-  ok(/TEST MODE/.test(simPage), 'Fonepay in Sandbox without test details shows the built-in test page');
-  const sim = await fetch(`${API}/payments/${f3.body.payment.payment_id}/simulate`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'outcome=paid' });
-  ok(sim.status === 302 && (await orderOf(c, f3.body.order.id)).status === 'placed', 'and Pay on that page places the order');
-  await setCfg({ fonepay_merchant_code: 'FLOWPID', fonepay_secret_key: FP_SECRET });
+  const p1 = f1.body.payment, id1 = f1.body.order.id;
+  ok(f1.status === 201 && f1.body.order.status === 'awaiting_payment' && /^[0-9a-f]{32}$/.test(p1.reference), 'an order waits for payment, with a 32-character payment reference');
+  ok(!(await queue(tuStaff)).some((x) => x.id === id1) && (await stockOf(tuStaff, 'Coffee')) === before, 'the station does not see it and no ingredients are reserved yet');
+  const v1 = await qrOf(c.token, p1.payment_id);
+  const asked = mock.calls.find((x) => x.path.endsWith('thirdPartyDynamicQrDownload') && x.body.prn === p1.reference)?.body;
+  ok(v1.qr?.value === `000201FAKEQR|${p1.reference}|100` && v1.status === 'pending' && v1.expires_at && !v1.qr_error, 'the first look gets the QR from Fonepay for the exact amount');
+  ok(asked && asked.amount === '100' && asked.merchantCode === 'FLOWPID' && asked.taxAmount === '0' && asked.taxRefund === '0' && mock.badSignature === 0, 'asked the way Fonepay documents it, signed with HMAC-SHA512');
+  const n = mock.calls.length;
+  await qrOf(c.token, p1.payment_id);
+  ok(!mock.calls.slice(n).some((x) => x.path.endsWith('Download')), 'the same QR is shown on every screen, not made again');
+  mock.paid.add(p1.reference);
+  ok((await qrOf(c.token, p1.payment_id)).status === 'paid', 'when Fonepay says success the payment is paid');
+  const placed = await orderOf(c, id1);
+  ok(placed.status === 'placed' && placed.payment_status === 'paid' && /^\d{4}$/.test(placed.handover_code), 'the order is placed and paid, with its pickup code');
+  ok((await queue(tuStaff)).some((x) => x.id === id1) && (await stockOf(tuStaff, 'Coffee')) < before, 'it reaches the station and ingredients are reserved');
+  await qrOf(c.token, p1.payment_id);
+  ok((await queue(tuStaff)).filter((x) => x.id === id1).length === 1, 'looking again is harmless');
+  ok([404, 409].includes((await call('POST', `/orders/${id1}/cancel`, {}, c.token)).status), 'a paid order cannot be cancelled by the customer');
 
-  // --- the rest of the places that take payment ---
-  const k = await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Kiosk Guest', customer_phone: '9801234588', payment: 'esewa', consent: true }, tok(tuStaff));
-  ok(k.status === 201 && k.body.order.status === 'awaiting_payment' && k.body.payment.pay_url && !(await queue(tuStaff)).some((x) => x.id === k.body.order.id), 'the kiosk shows a pay address (as a QR) and the order waits');
-  await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(k.body.payment.payment_id, 100))}`);
+  // --- paid while nobody is looking: the server checks by itself ---
+  const { settleQrPayments: settleRaw, expireUnpaid } = await import('../src/lib/orders.js');
+  const { loadRuntime } = await import('../src/lib/runtime.js');
+  const settleQrPayments = async () => { await loadRuntime(); await settleRaw(); }; // this script has its own copy of the settings, so read them again first
+  const f2 = await buy(c, 'fonepay');
+  await qrOf(c.token, f2.body.payment.payment_id);
+  mock.paid.add(f2.body.payment.reference);
+  await settleQrPayments();
+  ok((await orderOf(c, f2.body.order.id)).status === 'placed', 'a payment is settled by the server even if the screen was closed');
+
+  // --- failed / cancelled ---
+  const f3 = await buy(c, 'fonepay');
+  await qrOf(c.token, f3.body.payment.payment_id);
+  mock.failed.add(f3.body.payment.reference);
+  await qrOf(c.token, f3.body.payment.payment_id);
+  ok((await orderOf(c, f3.body.order.id)).status === 'cancelled', 'when Fonepay says the payment failed the order is cancelled and nothing was used');
+  const f4 = await buy(c, 'fonepay');
+  const can = await call('POST', `/orders/${f4.body.order.id}/cancel`, {}, c.token);
+  ok(can.status === 200 && can.body.status === 'cancelled', 'the customer can cancel while the order still waits for payment');
+
+  // --- a wrong login shows Fonepay's own message and is not hammered ---
+  await setCfg({ fonepay_password: 'wrong' });
+  const f5 = await buy(c, 'fonepay');
+  const bad1 = await qrOf(c.token, f5.body.payment.payment_id);
+  ok(bad1.qr === null && /INVALID USERNAME OR PASSWORD/.test(bad1.qr_error), 'a login Fonepay rejects shows Fonepay\'s own words');
+  const m = mock.calls.length;
+  await qrOf(c.token, f5.body.payment.payment_id); await qrOf(c.token, f5.body.payment.payment_id);
+  ok(mock.calls.length === m, 'and it is not asked again for a while, so a wrong password is not repeated');
+  const diag = (await call('POST', '/owner/payments/diagnose', {}, tok(owner))).body;
+  ok(diag.ok === false && /INVALID USERNAME OR PASSWORD/.test(diag.message) && diag.environment === 'sandbox' && diag.address === 'http://127.0.0.1:4799' && !JSON.stringify(diag).includes('wrong'), 'Check connection says what Fonepay answered and where, without showing the password');
+  await setCfg({ fonepay_password: 'goodPass' });
+  ok((await call('POST', '/owner/payments/diagnose', {}, tok(owner))).body.ok === true, 'and says it works once the login is right');
+  ok((await call('POST', '/owner/payments/diagnose', {}, tok(mgrCo))).status === 403, 'only the owner can run it');
+  await call('POST', `/orders/${f5.body.order.id}/cancel`, {}, c.token);
+
+  // --- the other places that take payment ---
+  const k = await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Kiosk Guest', customer_phone: '9801234588', payment: 'fonepay', consent: true }, tok(tuStaff));
+  ok(k.status === 201 && k.body.order.status === 'awaiting_payment' && !(await queue(tuStaff)).some((x) => x.id === k.body.order.id), 'the kiosk order waits for payment');
+  ok((await qrOf(tok(tuStaff), k.body.payment.payment_id)).qr?.value.startsWith('000201FAKEQR'), 'and the kiosk gets its QR');
+  mock.paid.add(k.body.payment.reference);
+  await settleQrPayments();
   ok((await call('GET', `/kiosk/orders/${k.body.order.id}`, null, tok(tuStaff))).body.status === 'placed', 'once paid the kiosk sees it placed');
   const pos = await call('POST', '/station/orders', { items: [line(latte)], payment_method: 'fonepay' }, tok(tuStaff));
-  ok(pos.status === 201 && pos.body.order.status === 'awaiting_payment' && pos.body.payment.pay_url, 'the counter can take a Fonepay payment and gets a pay address to show');
-  ok((await call('GET', `/payments/${pos.body.payment.payment_id}`, null, tok(tuStaff))).body.status === 'pending', 'the counter can watch the payment');
-  await hit(`/payments/fonepay/return?${fpAnswer(pos.body.payment.reference, pos.body.payment.amount)}`);
-  ok((await call('GET', `/payments/${pos.body.payment.payment_id}`, null, tok(tuStaff))).body.order.status === 'placed', 'and it is placed when paid');
+  ok(pos.status === 201 && pos.body.order.status === 'awaiting_payment' && pos.body.payment.payment_id, 'the counter can take a Fonepay payment');
+  ok((await qrOf(tok(tuStaff), pos.body.payment.payment_id)).qr?.value.includes(`|${pos.body.payment.amount}`), 'and shows a QR for its amount');
+  mock.paid.add(pos.body.payment.reference);
+  ok((await qrOf(tok(tuStaff), pos.body.payment.payment_id)).order.status === 'placed', 'and it is placed when paid');
 
   // --- passes bought online ---
   const pc = await newCustomer();
-  const pass = await call('POST', '/passes', { payment_method: 'esewa' }, pc.token);
-  ok(pass.status === 201 && pass.body.payment.pay_url && !(await call('GET', '/passes', null, pc.token)).body.length, 'a pass bought online does not exist until it is paid');
-  await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(pass.body.payment.payment_id, 900))}`);
+  const pass = await call('POST', '/passes', { payment_method: 'fonepay' }, pc.token);
+  ok(pass.status === 201 && pass.body.payment.payment_id && !(await call('GET', '/passes', null, pc.token)).body.length, 'a pass bought online does not exist until it is paid');
+  await qrOf(pc.token, pass.body.payment.payment_id);
+  mock.paid.add(pass.body.payment.reference);
+  await qrOf(pc.token, pass.body.payment.payment_id);
   const mine = (await call('GET', '/passes', null, pc.token)).body;
   ok(mine.length === 1 && mine[0].status === 'active' && mine[0].remaining === 10, 'after payment the 10-cup pass is in the account');
   ok((await call('POST', '/passes', { payment_method: 'cash' }, pc.token)).status === 400, 'cash passes are only sold at a counter');
 
   // --- timing out, refunds and the owner's view ---
-  const t1 = await buy(c, 'esewa');
+  const t1 = await buy(c, 'fonepay');
+  await qrOf(c.token, t1.body.payment.payment_id);
   await sql(`UPDATE payments SET created_at = now() - interval '30 minutes' WHERE id=$1`, [t1.body.payment.payment_id]);
-  const { expireUnpaid } = await import('../src/lib/orders.js');
   ok((await expireUnpaid()) >= 1 && (await orderOf(c, t1.body.order.id)).status === 'cancelled', 'an order nobody paid for is cancelled after a while');
   const r1 = await buy(c, 'fonepay');
-  await hit(`/payments/fonepay/return?${fpAnswer(r1.body.payment.reference, 100)}`);
+  await qrOf(c.token, r1.body.payment.payment_id);
+  mock.paid.add(r1.body.payment.reference);
+  await qrOf(c.token, r1.body.payment.payment_id);
   await setStatus(tuStaff, r1.body.order.id, 'cancelled', { reason: 'Machine broke' });
   const list = (await call('GET', '/owner/payments', null, tok(owner))).body;
   const refund = list.payments.find((p) => p.id === r1.body.payment.payment_id);
@@ -284,61 +296,14 @@ const orderOf = async (c, id) => (await call('GET', `/orders/${id}`, null, c.tok
   ok((await call('GET', '/admin/alerts', null, tok(owner))).body.some((a) => a.type === 'refund'), 'and the owner is told');
   ok((await call('POST', `/owner/payments/${r1.body.payment.payment_id}/refund-done`, {}, tok(owner))).status === 200 && !(await call('GET', '/owner/payments', null, tok(owner))).body.payments.find((p) => p.id === r1.body.payment.payment_id).refund_due, 'the owner marks it paid back');
   ok((await call('GET', '/owner/payments', null, tok(mgrCo))).status === 403, 'only the owner sees payments');
-  // the owner's Rs 10 check
-  const test = await call('POST', '/owner/payments/test', { provider: 'esewa' }, tok(owner));
-  ok(test.status === 201 && test.body.pay_url, 'the owner can start a Rs 10 test payment');
-  await hit(`/payments/esewa/return?data=${encodeURIComponent(esewaAnswer(test.body.payment_id, 10))}`);
-  ok((await call('GET', `/payments/${test.body.payment_id}`, null, tok(owner))).body.status === 'paid', 'and see it come back paid');
-  // the QR a customer scans: every pending payment has one, and the status route hands it to the pay window
-  const pf = await buy(c, 'fonepay');
-  const pq = await call('GET', `/payments/${pf.body.payment.payment_id}`, null, c.token);
-  ok(pq.body.qr?.kind === 'link' && pq.body.qr.value === pf.body.payment.pay_url && pq.body.expires_at, 'a Fonepay payment without the QR service gets a link QR and an expiry time');
-  // NepalPay QR needs only a merchant code and a secret key
-  const NP_SECRET = 'np-test-secret';
-  const npAnswer = (prn, amount, { tamper = false } = {}) => {
-    const v = { PRN: prn, PID: 'NPPID', PS: 'true', RC: 'successful', UID: 'NPTRACE1', BC: 'NABIL', INI: 'tester', P_AMT: String(amount), R_AMT: String(amount) };
-    v.DV = tamper ? 'abcd' : crypto.createHmac('sha512', NP_SECRET).update(['PRN', 'PID', 'PS', 'RC', 'UID', 'BC', 'INI', 'P_AMT', 'R_AMT'].map((k) => v[k]).join(',')).digest('hex');
-    return new URLSearchParams(v).toString();
-  };
-  ok((await buy(c, 'nepalpay')).status === 400, 'NepalPay QR is refused until it is switched on');
-  await setCfg({ nepalpay_enabled: '1', nepalpay_merchant_code: 'NPPID', nepalpay_secret_key: NP_SECRET });
-  ok((await call('GET', '/config')).body.payment_methods.includes('nepalpay'), 'with only a merchant code and secret key, customers are offered NepalPay QR');
-  const n1 = await buy(c, 'nepalpay');
-  const np = n1.body.payment;
-  const nq = (await call('GET', `/payments/${np.payment_id}`, null, c.token)).body.qr;
-  ok(n1.status === 201 && nq?.kind === 'link' && nq.value === np.pay_url, 'the NepalPay QR opens our payment page');
-  const goes = await hit(`/payments/${np.payment_id}/pay`);
-  const loc = new URL(goes.headers.get('location'));
-  ok(goes.status === 302 && loc.searchParams.get('PID') === 'NPPID' && loc.searchParams.get('AMT') === '100' && loc.searchParams.get('PRN') === np.reference && loc.searchParams.get('RU').endsWith('/payments/nepalpay/return'), 'which sends the phone on with a request for the exact amount');
-  const want = crypto.createHmac('sha512', NP_SECRET).update(['PID', 'MD', 'PRN', 'AMT', 'CRN', 'DT', 'R1', 'R2', 'RU'].map((k) => loc.searchParams.get(k)).join(',')).digest('hex');
-  ok(loc.searchParams.get('DV') === want, 'signed with the secret key');
-  await hit(`/payments/nepalpay/return?${npAnswer(np.reference, 100, { tamper: true })}`);
-  ok((await orderOf(c, n1.body.order.id)).status === 'awaiting_payment', 'an answer with a wrong signature does nothing');
-  await hit(`/payments/nepalpay/return?${npAnswer(np.reference, 100)}`);
-  ok((await orderOf(c, n1.body.order.id)).status === 'placed', 'a signed answer places the order');
-  await setCfg({ nepalpay_enabled: null, nepalpay_merchant_code: null, nepalpay_secret_key: null });
-  // the shop's own printed QR text becomes a QR for the exact amount at the kiosk, confirmed by staff
-  const T = (t, v) => t + String(v.length).padStart(2, '0') + v;
-  const crc = (str) => { let x = 0xffff; for (const ch of str) { x ^= ch.charCodeAt(0) << 8; for (let i = 0; i < 8; i++) x = (x & 0x8000) ? ((x << 1) ^ 0x1021) & 0xffff : (x << 1) & 0xffff; } return x.toString(16).toUpperCase().padStart(4, '0'); };
-  const tplBody = T('00', '01') + T('01', '11') + T('26', T('00', 'FONEPAY') + T('01', 'SHOP1')) + T('52', '5812') + T('53', '524') + T('58', 'NP') + T('59', 'Sadhai Coffee') + T('60', 'Kathmandu') + '6304';
-  await setCfg({ fonepay_enabled: '1', fonepay_merchant_code: 'FLOWPID', fonepay_secret_key: FP_SECRET, fonepay_qr_template: tplBody + crc(tplBody) });
-  const kq = await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'QR Guest', customer_phone: '9822222222', payment: 'fonepay', consent: true }, tok(tuStaff));
-  const kqr = (await call('GET', `/payments/${kq.body.payment.payment_id}`, null, tok(tuStaff))).body.qr;
-  ok(kqr?.kind === 'bank' && kqr.manual && kqr.value.includes('5406100.00') && kqr.value.includes('010212') && crc(kqr.value.slice(0, -4)) === kqr.value.slice(-4), 'the kiosk shows a real QR for the exact amount made from the printed QR, with a correct checksum');
-  ok(kqr.value.includes(kq.body.payment.reference) && kqr.value.includes('FONEPAY'), 'carrying our reference and the shop details');
-  const wq = await buy(c, 'fonepay');
-  ok((await call('GET', `/payments/${wq.body.payment.payment_id}`, null, c.token)).body.qr.kind === 'link', 'the website and app still use the payment page, which confirms by itself');
-  const aw = (await call('GET', '/station/awaiting', null, tok(tuStaff))).body;
-  ok(aw.some((x) => x.id === kq.body.order.id && x.manual), 'the counter sees the guest waiting to pay');
-  ok((await call('POST', `/station/payments/${kq.body.payment.payment_id}/confirm`, {}, tok(tuStaff))).status === 200 && (await call('GET', `/kiosk/orders/${kq.body.order.id}`, null, tok(tuStaff))).body.status === 'placed', 'Payment received puts the order on the queue');
-  ok((await call('POST', `/station/payments/${wq.body.payment.payment_id}/confirm`, {}, tok(tuStaff))).status === 409, 'a gateway-confirmed payment cannot be confirmed by hand');
-  // QR built from the merchant and terminal ID (no QR login), in the format of nepali-payment-qr-generator
-  await setCfg({ fonepay_terminal_id: '497140', fonepay_mcc: '5499', fonepay_merchant_name: 'Himalaya Tea Shop', fonepay_merchant_city: 'Kathmandu' });
-  const gq = await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'QR Guest', customer_phone: '9822222222', payment: 'fonepay', consent: true }, tok(tuStaff));
-  const gqr = (await call('GET', `/payments/${gq.body.payment.payment_id}`, null, tok(tuStaff))).body.qr;
-  ok(gqr?.kind === 'bank' && gqr.manual && gqr.value.startsWith('00020101021226') && gqr.value.includes('0011fonepay.com0107FLOWPID') && gqr.value.includes('0206497140') && gqr.value.includes('5406100.00') && gqr.value.includes('5204' + '5499') && crc(gqr.value.slice(0, -4)) === gqr.value.slice(-4), 'the QR is built from the merchant ID and terminal ID, with the amount and a correct checksum');
-  await setCfg({ fonepay_terminal_id: null, fonepay_mcc: null, fonepay_merchant_name: null, fonepay_merchant_city: null });
-  await setCfg({ fonepay_qr_template: null });
+  // the owner's Rs 10 test
+  const test = await call('POST', '/owner/payments/test', { provider: 'fonepay' }, tok(owner));
+  ok(test.status === 201 && test.body.payment_id, 'the owner can start a Rs 10 test payment');
+  await qrOf(tok(owner), test.body.payment_id);
+  mock.paid.add(test.body.reference);
+  ok((await qrOf(tok(owner), test.body.payment_id)).status === 'paid', 'and see it come back paid');
+  ok((await call('POST', '/owner/payments/test', { provider: 'esewa' }, tok(owner))).status === 400, 'the removed gateways are gone');
+
   // order flow: the owner's rules apply to every way in
   const fl = (await call('GET', '/owner/order-flow', null, tok(owner))).body.flow;
   const noCash = { ...fl, web: { ...fl.web, payments: { ...fl.web.payments, cash: false }, max_cups: 1, notes: false } };
@@ -351,14 +316,16 @@ const orderOf = async (c, id) => (await call('GET', `/orders/${id}`, null, c.tok
   const kOff = { ...fl, kiosk: { ...fl.kiosk, enabled: false } };
   await call('PUT', '/owner/order-flow', { flow: kOff }, tok(owner));
   ok((await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'Guest One', customer_phone: '9811111111', payment: 'counter', consent: true }, tok(tuStaff))).status === 409, 'a switched-off kiosk takes no orders');
-  ok((await call('PUT', '/owner/order-flow', { flow: { ...fl, web: { ...fl.web, payments: { cash: false, pass: false, esewa: false, fonepay: false, nepalpay: false } } } }, tok(owner))).status === 400, 'a way of ordering must keep at least one way to pay');
+  ok((await call('PUT', '/owner/order-flow', { flow: { ...fl, web: { ...fl.web, payments: { cash: false, pass: false, fonepay: false } } } }, tok(owner))).status === 400, 'a way of ordering must keep at least one way to pay');
   await call('DELETE', '/owner/order-flow', null, tok(owner));
   ok((await call('GET', '/config')).body.order_flow.web.payment_methods.includes('cash'), 'resetting brings the built-in rules back');
   // sales: online orders are sales only when handed over
   const o5 = await ovr0();
   ok(typeof o5 === 'number', 'sales are counted from handed-over orders only');
-  await setCfg({ esewa_enabled: '0', fonepay_enabled: '0' });
-  ok((await buy(c, 'fonepay')).status === 400, 'switching a gateway off stops new orders with it');
+  await setCfg({ fonepay_enabled: '0' });
+  ok((await buy(c, 'fonepay')).status === 400, 'switching Fonepay off stops new orders with it');
+  await setCfg(OFF);
+  fake.close();
 }
 
 /* ---------------------------------------------------------------- 6 */

@@ -100,98 +100,77 @@ export function IntegrationsPanel() {
 }
 
 /* ============================================================================
-   Payments: eSewa and Fonepay settings, a Rs 10 test, and the list of online payments with refunds to pay back.
+   Payments: Fonepay dynamic QR. Four login fields, a Check connection that shows Fonepay's own answer, a Rs 10 test, and the list of online
+   payments with refunds to pay back.
    ============================================================================ */
-type GwField = { key: string; label: string; secret?: boolean; area?: boolean; hint?: string };
-const GW: Record<string, { name: string; blurb: string; fields: GwField[]; sandboxNote: string; ret: string | null; hasMode?: boolean }> = {
-  esewa: { name: 'eSewa', blurb: 'eSewa ePay v2. The customer scans a QR (or taps Open eSewa) and pays in the eSewa app.', fields: [
-    { key: 'esewa_merchant_code', label: 'Merchant (product) code' }, { key: 'esewa_secret_key', label: 'Secret key', secret: true }],
-    sandboxNote: 'In Sandbox the public test code EPAYTEST and eSewa’s test key are used, and eSewa’s test server takes the payment.', ret: '/payments/esewa/return' },
-  fonepay: { name: 'Fonepay', blurb: 'Fonepay Dynamic QR. A real QR for the exact amount that any bank or wallet app can scan. Without the QR user name and password, a link QR to Fonepay’s web page is used instead.', fields: [
-    { key: 'fonepay_merchant_code', label: 'Merchant code (PID)' }, { key: 'fonepay_secret_key', label: 'Shared secret key', secret: true },
-    { key: 'fonepay_qr_username', label: 'QR API user name', hint: 'Needed for the real dynamic QR.' }, { key: 'fonepay_qr_password', label: 'QR API password', secret: true },
-    { key: 'fonepay_terminal_id', label: 'Terminal ID', hint: 'About 6 digits, from your printed QR or Fonepay. Builds a QR for the exact amount with no QR login.' },
-    { key: 'fonepay_tag26_id', label: 'Combined ID (only if you have one)' }, { key: 'fonepay_merchant_name', label: 'Shop name on the QR' },
-    { key: 'fonepay_merchant_city', label: 'City on the QR' }, { key: 'fonepay_mcc', label: 'Business category code', hint: '5814 is coffee and fast food.' },
-    { key: 'fonepay_qr_template', label: 'Your printed QR text (optional)', area: true, hint: 'Starts with 000201. Used at the kiosk and counter when there is no QR user name and password.' }],
-    sandboxNote: 'In Sandbox, use the test merchant details Fonepay gave you.', ret: '/payments/fonepay/return' },
-  nepalpay: { name: 'NepalPay QR', blurb: 'NepalPay QR. Customers scan a QR with any NepalPay bank or wallet app and pay the exact amount. The merchant code and secret key are enough to start.', fields: [
-    { key: 'nepalpay_merchant_code', label: 'Merchant code' }, { key: 'nepalpay_secret_key', label: 'Secret key', secret: true },
-    { key: 'nepalpay_qr_username', label: 'QR API user name', hint: 'Needed for the real dynamic QR.' }, { key: 'nepalpay_qr_password', label: 'QR API password', secret: true },
-    { key: 'nepalpay_terminal_id', label: 'Terminal ID', hint: 'About 6 digits, from your printed QR or Fonepay. Builds a QR for the exact amount with no QR login.' },
-    { key: 'nepalpay_tag26_id', label: 'Combined ID (only if you have one)' }, { key: 'nepalpay_merchant_name', label: 'Shop name on the QR' },
-    { key: 'nepalpay_merchant_city', label: 'City on the QR' }, { key: 'nepalpay_mcc', label: 'Business category code', hint: '5814 is coffee and fast food.' },
-    { key: 'nepalpay_qr_template', label: 'Your printed QR text (optional)', area: true, hint: 'Starts with 000201. Used at the kiosk and counter when there is no QR user name and password.' }],
-    sandboxNote: 'Sandbox uses the test server, so no real money moves.', ret: '/payments/nepalpay/return' },
-};
+const FP_FIELDS: { key: string; label: string; secret?: boolean; hint?: string }[] = [
+  { key: 'fonepay_merchant_code', label: 'Merchant code', hint: 'From the bank.' },
+  { key: 'fonepay_secret_key', label: 'Secret key', secret: true, hint: 'From the bank. Signs every request.' },
+  { key: 'fonepay_username', label: 'API user name', hint: 'The user name Fonepay gave for its QR service.' },
+  { key: 'fonepay_password', label: 'API password', secret: true },
+];
 
-function GatewayCard({ id, data, reload }: { id: 'esewa' | 'fonepay' | 'nepalpay'; data: any[]; reload: () => void }) {
-  const g = GW[id];
+function FonepayCard({ data, reload }: { data: any[]; reload: () => void }) {
   const toast = useToast();
   const item = (k: string) => data.find((i) => i.key === k);
   const [edit, setEdit] = useState<Record<string, string | null>>({});
-  const [showSecret, setShowSecret] = useState(false);
   const [test, setTest] = useState<{ status: string; id: string } | null>(null);
+  const [check, setCheck] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
   const val = (k: string) => (k in edit ? edit[k] : item(k)?.value ?? '');
-  const enabled = val(`${id}_enabled`) === '1';
-  const mode = val(`${id}_mode`) || 'sandbox';
-    async function save(extra: Record<string, string | null> = {}) {
+  const enabled = val('fonepay_enabled') === '1';
+  const mode = val('fonepay_mode') || 'sandbox';
+  const allSet = FP_FIELDS.every((f) => (f.key in edit ? !!edit[f.key] : !!item(f.key)?.is_set));
+  async function save(extra: Record<string, string | null> = {}) {
     const values = { ...edit, ...extra };
     if (!Object.keys(values).length) return;
-    try { await api('/owner/integrations', { method: 'PUT', body: { values } }); setEdit({}); setShowSecret(false); reload(); toast('Saved'); } catch (e: any) { toast(e.message, true); }
+    try { await api('/owner/integrations', { method: 'PUT', body: { values } }); setEdit({}); setCheck(null); reload(); toast('Saved'); } catch (e: any) { toast(e.message, true); }
+  }
+  async function runCheck() {
+    setBusy(true); setCheck(null);
+    try { setCheck(await api('/owner/payments/diagnose', { method: 'POST', body: {} })); } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
   }
   async function runTest() {
-    try {
-      const out = await api('/owner/payments/test', { method: 'POST', body: { provider: id } });
-      setTest({ status: 'pending', id: out.payment_id });
-    } catch (e: any) { toast(e.message, true); }
+    try { const out = await api('/owner/payments/test', { method: 'POST', body: { provider: 'fonepay' } }); setTest({ status: 'pending', id: out.payment_id }); } catch (e: any) { toast(e.message, true); }
   }
   return (
     <div className="panel col" style={{ gap: 14, borderLeft: `5px solid ${enabled ? 'var(--hill)' : 'var(--hairline)'}` }}>
       <div className="row between wrap">
         <div>
-          <div className="row wrap" style={{ gap: 6 }}><h3>{g.name}</h3><span className={`chip ${enabled ? 'hill' : ''}`}>{enabled ? 'On' : 'Off'}</span><span className={`chip ${mode === 'live' ? 'cherry' : 'marigold'}`}>{mode === 'live' ? 'Live' : 'Sandbox'}</span></div>
-          <p className="small muted" style={{ maxWidth: 560 }}>{g.blurb}</p>
+          <div className="row wrap" style={{ gap: 6 }}><h3>Fonepay QR</h3><span className={`chip ${enabled ? 'hill' : ''}`}>{enabled ? 'On' : 'Off'}</span><span className={`chip ${mode === 'live' ? 'cherry' : 'marigold'}`}>{mode === 'live' ? 'Live' : 'Sandbox'}</span></div>
+          <p className="small muted" style={{ maxWidth: 600 }}>Every order gets its own Fonepay QR for the exact amount. Customers scan it with any bank or wallet app. Sadhai asks Fonepay every few seconds and starts the order the moment Fonepay says it is paid.</p>
         </div>
         <label className="row card flat" style={{ padding: '6px 12px', cursor: 'pointer', gap: 8 }}>
-          <input type="checkbox" role="switch" style={{ width: 22, minHeight: 22 }} checked={enabled} onChange={(e) => save({ [`${id}_enabled`]: e.target.checked ? '1' : '0' })} />
-          <strong>{enabled ? 'Customers can pay with ' + g.name : 'Turned off'}</strong>
+          <input type="checkbox" role="switch" style={{ width: 22, minHeight: 22 }} checked={enabled} onChange={(e) => save({ fonepay_enabled: e.target.checked ? '1' : '0' })} />
+          <strong>{enabled ? 'Customers can pay with Fonepay QR' : 'Turned off'}</strong>
         </label>
       </div>
       <div className="grid g3">
-        <Field label="Mode" hint={mode === 'sandbox' ? g.sandboxNote : 'Real money. Use the details from your approved merchant account.'}>
-          <select value={mode} onChange={(e) => setEdit({ ...edit, [`${id}_mode`]: e.target.value })}><option value="sandbox">Sandbox (test)</option><option value="live">Live (real money)</option></select>
+        <Field label="Environment" hint={mode === 'live' ? 'Fonepay’s real server. Use this with your real bank login.' : 'Fonepay’s test server. A real login does not work here.'}>
+          <select value={mode} onChange={(e) => setEdit({ ...edit, fonepay_mode: e.target.value })}><option value="live">Live (real money)</option><option value="sandbox">Sandbox (test)</option></select>
         </Field>
-      </div>
-      {id !== 'esewa' && (() => {
-        const set = (k: string) => !!item(`${id}_${k}`)?.is_set || (`${id}_${k}` in edit && !!edit[`${id}_${k}`]);
-        const qm = set('qr_username') && set('qr_password') && set('merchant_code') && set('secret_key') ? 'api' : set('merchant_code') && (set('terminal_id') || set('tag26_id')) ? 'generated' : set('qr_template') ? 'own' : 'link';
-        return (
-          <div className="card flat" style={{ borderColor: qm === 'api' ? 'var(--hill)' : 'var(--marigold)' }}>
-            <strong>{qm === 'api' ? 'Real dynamic QR is on' : qm === 'generated' ? 'QR built from your merchant and terminal ID' : qm === 'own' ? 'QR made from your printed QR text' : 'Not a real QR yet'}</strong>
-            <p className="small muted" style={{ margin: '4px 0 0' }}>{qm === 'api' ? `Every payment gets its own ${g.name} QR for the exact amount, and the order starts by itself when it is paid.`
-              : qm === 'generated' || qm === 'own' ? `The kiosk and counter show a QR for the exact amount${qm === 'generated' ? ' built from your merchant and terminal ID' : ' made from your printed QR'}. The gateway cannot tell us it was paid, so the barista presses Payment received. The website and app use the payment page.`
-              : `With only the merchant code and secret key the QR opens the ${g.name} payment page on the phone. For the real dynamic QR, ask ${g.name} for the QR API user name and password and save them below.`}</p>
-          </div>
-        );
-      })()}
-      <div className="grid g3">
-        {g.fields.map((f) => {
+        {FP_FIELDS.map((f) => {
           const it = item(f.key);
           const hide = f.secret && it?.is_set && !(f.key in edit);
           return (
             <Field key={f.key} label={f.label} hint={f.secret ? (it?.is_set ? `Saved: ${it.masked}` : 'Not saved yet') : f.hint}>
               {hide ? <button type="button" className="btn sm" onClick={() => setEdit({ ...edit, [f.key]: '' })}>Change</button>
-                : f.area ? <textarea rows={3} autoComplete="off" value={(edit[f.key] as string) ?? (f.secret ? '' : val(f.key) || '')} onChange={(e) => setEdit({ ...edit, [f.key]: e.target.value })} />
                 : <input type={f.secret ? 'password' : 'text'} autoComplete="off" placeholder={f.secret ? 'Paste it here' : ''} value={(edit[f.key] as string) ?? (f.secret ? '' : val(f.key) || '')} onChange={(e) => setEdit({ ...edit, [f.key]: e.target.value })} />}
             </Field>
           );
         })}
       </div>
-      <p className="small muted">Return address for the gateway: <code>{BASE}{g.ret}</code>. Sadhai sends it with every payment, so there is nothing to type into the {g.name} account for it.</p>
+      {check && (
+        <div className="card flat" role="status" style={{ borderColor: check.ok ? 'var(--hill)' : 'var(--cherry)' }}>
+          <strong>{check.ok ? 'Fonepay accepted the login' : 'Fonepay did not accept it'}</strong>
+          <p style={{ margin: '4px 0' }}>{check.message}</p>
+          <p className="small muted" style={{ margin: 0 }}>Asked {check.address} ({check.environment === 'live' ? 'Live' : 'Sandbox'}){check.status_code ? ` · Fonepay code ${check.status_code}` : ''}{check.http ? ` · HTTP ${check.http}` : ''}.{!check.ok && /INVALID USERNAME/i.test(check.message) ? ' Fonepay checks the user name and password for the environment. Try the other environment, and ask Fonepay to confirm the QR service user name and password for this merchant code.' : ''}</p>
+        </div>
+      )}
       <div className="row wrap">
         <button className="btn primary" disabled={!Object.keys(edit).length} onClick={() => save()}>{Object.keys(edit).length ? 'Save changes' : 'No changes'}</button>
-        <button className="btn" onClick={runTest}>Try a Rs 10 payment</button>
+        <button className="btn" disabled={busy || Object.keys(edit).length > 0 || !allSet} onClick={runCheck}>{busy ? 'Checking…' : 'Check connection'}</button>
+        <button className="btn" disabled={Object.keys(edit).length > 0 || !allSet} onClick={runTest}>Try a Rs 10 payment</button>
         {test?.status === 'pending' && <PayModal paymentId={test.id} amount={10} onPaid={() => { setTest({ status: 'paid', id: test.id }); reload(); }} onClose={() => { setTest(null); reload(); }} />}
         {test && test.status !== 'pending' && <span className={`chip ${test.status === 'paid' ? 'hill' : 'cherry'}`}>{test.status === 'paid' ? 'Test payment came back paid' : 'Test payment failed'}</span>}
       </div>
@@ -206,20 +185,19 @@ export function PaymentsPanel() {
   if (!keys.data) return <Skeleton h={80} n={3} />;
   const rows: any[] = list.data?.payments || [];
   const due = rows.filter((r) => r.refund_due);
+  const NAME: Record<string, string> = { fonepay: 'Fonepay QR', esewa: 'eSewa (old)', nepalpay: 'NepalPay (old)', khalti: 'Khalti (old)' };
   async function refunded(id: string) { try { await api(`/owner/payments/${id}/refund-done`, { method: 'POST', body: {} }); list.reload(); toast('Marked as paid back'); } catch (e: any) { toast(e.message, true); } }
   return (
     <div className="col" style={{ gap: 16 }}>
-      <div className="panel"><p className="small muted">Customers always can pay cash at the counter or with a pass. Switch on eSewa, Fonepay and NepalPay QR when each merchant account is ready. Online orders reach the barista only after the gateway confirms the payment, and an order nobody pays for is cancelled after 15 minutes.</p></div>
-      <GatewayCard id="esewa" data={keys.data} reload={() => { keys.reload(); list.reload(); }} />
-      <GatewayCard id="fonepay" data={keys.data} reload={() => { keys.reload(); list.reload(); }} />
-      <GatewayCard id="nepalpay" data={keys.data} reload={() => { keys.reload(); list.reload(); }} />
+      <div className="panel"><p className="small muted">Customers can always pay cash at the counter or with a pass. Switch on Fonepay QR once the four login fields are saved and Check connection says it works. Online orders reach the barista only after Fonepay confirms the payment, and an order nobody pays for is cancelled after 15 minutes.</p></div>
+      <FonepayCard data={keys.data} reload={() => { keys.reload(); list.reload(); }} />
       <div className="panel">
-        <div className="ph"><div><h3>Online payments</h3><p className="small muted">The last 100. Online money arrives in your merchant account, not at the counter. A refund is sent back from there, then marked here.</p></div></div>
+        <div className="ph"><div><h3>Online payments</h3><p className="small muted">The last 100. Online money arrives in your Fonepay merchant account, not at the counter. A refund is sent back from there, then marked here.</p></div></div>
         {due.length > 0 && <div className="card flat" style={{ borderColor: 'var(--cherry)', marginBottom: 12 }}><strong>{due.length} refund{due.length > 1 ? 's' : ''} to pay back</strong>: {rs(due.reduce((a, r) => a + r.amount, 0))}</div>}
         {!list.data ? <Skeleton h={40} n={3} /> : !rows.length ? <Empty>No online payments yet.</Empty> : (
           <div className="tablewrap"><table><thead><tr><th>When</th><th>Gateway</th><th>For</th><th className="num">Amount</th><th>Status</th><th>Reference</th><th /></tr></thead>
             <tbody>{rows.map((r) => (
-              <tr key={r.id}><td>{fmtDateTime(r.created_at)}</td><td>{GW[r.provider]?.name || r.provider}</td><td>{r.purpose === 'order' ? `Order ${r.pickup_code || ''}` : r.purpose === 'pass' ? '10-cup pass' : 'Test'}{r.station ? <span className="small muted"> · {r.station}</span> : null}</td><td className="num">{rs(r.amount)}</td>
+              <tr key={r.id}><td>{fmtDateTime(r.created_at)}</td><td>{NAME[r.provider] || r.provider}</td><td>{r.purpose === 'order' ? `Order ${r.pickup_code || ''}` : r.purpose === 'pass' ? '10-cup pass' : 'Test'}{r.station ? <span className="small muted"> · {r.station}</span> : null}</td><td className="num">{rs(r.amount)}</td>
                 <td><span className={`chip ${r.status === 'paid' ? 'hill' : r.status === 'failed' ? 'cherry' : r.status === 'refunded' ? 'marigold' : ''}`}>{r.status}</span>{r.late && <span className="small muted"> late</span>}</td><td className="small">{r.provider_ref || '–'}</td>
                 <td>{r.refund_due && <button className="btn sm" onClick={() => refunded(r.id)}>Mark paid back</button>}</td></tr>))}</tbody></table></div>
         )}

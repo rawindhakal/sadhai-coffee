@@ -20,7 +20,7 @@ export const SITE_DEFAULTS = {
     ],
     faqs: [
       { q: 'Who buys the coffee, milk and cups?', a: 'We do, centrally, and send stock to your counter. You confirm what arrives, so shortages are recorded fairly.' },
-      { q: 'Who holds the money?', a: 'You keep the cash you take at the counter. eSewa and Fonepay payments arrive in our account. Each period we net your share of sales against the cash you hold and send one clear statement, and one of us pays the difference.' },
+      { q: 'Who holds the money?', a: 'You keep the cash you take at the counter. Fonepay payments arrive in our account. Each period we net your share of sales against the cash you hold and send one clear statement, and one of us pays the difference.' },
       { q: 'Can I change the recipes or the prices?', a: 'No. Every drink is made to the Sadhai standard and sold at the Sadhai price, so customers get the same coffee wherever they order. You can still sell your own food.' },
       { q: 'What does it cost to join?', a: 'There is no franchise fee in this model. Ask us for the current terms.' },
     ],

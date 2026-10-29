@@ -84,11 +84,6 @@ function Queue({ q, target, onChange }: { q: string; target: number; onChange: (
     try { setFound(await api(`/station/orders/lookup${q ? q + '&' : '?'}code=${encodeURIComponent(find)}`)); } catch (e: any) { toast(e.message, true); }
   }
 
-  const awaiting = useData<any[]>(`/station/awaiting${q}`);
-  useEffect(() => { const t = setInterval(awaiting.reload, 5000); return () => clearInterval(t); }, []);
-  async function received(paymentId: string) {
-    try { await api(`/station/payments/${paymentId}/confirm${q}`, { method: 'POST' }); awaiting.reload(); reload(); onChange(); toast('Payment confirmed. The order is on the queue.'); } catch (e: any) { toast(e.message, true); }
-  }
   const later = useData<any[]>(`/station/orders${q ? q + '&' : '?'}view=later`);
   useEvents((ev) => { if (['order_new', 'order'].includes(ev)) later.reload(); });
   const cols = [['placed', 'New'], ['preparing', 'Making'], ['ready', 'Ready for pickup']] as const;
@@ -96,15 +91,6 @@ function Queue({ q, target, onChange }: { q: string; target: number; onChange: (
     <>
       <form className="row" onSubmit={lookup} style={{ marginBottom: 16, maxWidth: 420 }}><input placeholder="Find by pickup number, e.g. A27" value={find} onChange={(e) => setFind(e.target.value)} /><button className="btn">Find</button></form>
       <ErrorNote error={error} />
-      {(awaiting.data?.length || 0) > 0 && (
-        <div className="card" style={{ marginBottom: 16, borderColor: 'var(--marigold)' }}>
-          <div className="row between"><h4>Waiting for payment</h4><span className="chip marigold">{awaiting.data!.length}</span></div>
-          <p className="small muted">These guests are paying by QR. The order reaches the queue once the payment is confirmed. For a QR made from the shop's own QR, check your bank or wallet app, then press Payment received.</p>
-          <div className="col" style={{ gap: 8, marginTop: 8 }}>{awaiting.data!.map((o) => (
-            <div key={o.id} className="row between wrap card flat"><span><strong>{o.pickup_code}</strong> · {o.customer_name || 'Guest'} · {rs(o.total)}</span>
-              {o.manual ? <button className="btn primary sm" onClick={() => received(o.payment_id)}>Payment received</button> : <span className="small muted">Confirms by itself</span>}</div>))}</div>
-        </div>
-      )}
       <div className="kanban">
         {cols.map(([st, label]) => {
           const list = (data || []).filter((o) => o.status === st);
@@ -242,7 +228,7 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
         )}
         {offer !== 'pass' && (
           <div className="row wrap">
-            {methods.map((m) => <button key={m} type="button" className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>{m === 'cash' ? 'Cash at counter' : m === 'esewa' ? 'eSewa QR' : m === 'nepalpay' ? 'NepalPay QR' : 'Fonepay QR'}</button>)}
+            {methods.map((m) => <button key={m} type="button" className={`btn sm ${method === m ? 'primary' : 'ghost'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>{m === 'cash' ? 'Cash at counter' : 'Fonepay QR'}</button>)}
           </div>
         )}
         <div className="row between"><strong>Total</strong><strong style={{ fontSize: 24 }}>{rs(total)}</strong></div>
@@ -251,7 +237,6 @@ function Pos({ q, stationId, onDone }: { q: string; stationId?: string; onDone: 
       </div>
       {qrPay && (
         <PayModal paymentId={qrPay.payment.payment_id} amount={qrPay.order.total}
-          onManual={() => api(`/station/payments/${qrPay.payment.payment_id}/confirm${q}`, { method: 'POST' }).catch((e: any) => toast(e.message, true))}
           onPaid={() => { toast(`Paid. ${qrPay.order.pickup_code} is on the queue`); setQrPay(null); onDone(); }}
           onClose={() => { setQrPay(null); onDone(); }}
           onCancel={async () => { await api(`/station/orders/${qrPay.order.id}/status`, { method: 'POST', body: { status: 'cancelled', reason: 'Cancelled at the counter before paying' } }).catch(() => {}); setQrPay(null); onDone(); }} />

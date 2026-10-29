@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../theme.dart';
-import 'customer.dart' show payLabel;
 
-/// The pay-by-QR window. It opens over the screen the customer is on, shows the QR and what is happening, and closes itself after the
+/// The pay-by-QR window. It opens over the screen the customer is on, shows the Fonepay QR and what is happening, and closes itself after the
 /// payment arrives. Returns 'paid', 'failed' or 'closed' (the payment stays open for 15 minutes if the customer leaves).
+/// If Fonepay refuses to make the QR, its own message is shown with a Try again button.
 Future<String> showPaySheet(BuildContext context, String paymentId, num amount) async {
   final r = await showModalBottomSheet<String>(
     context: context,
@@ -48,10 +47,10 @@ class _PaySheetState extends State<_PaySheet> {
   @override
   void dispose() { _poll?.cancel(); _clock?.cancel(); super.dispose(); }
 
-  Future<void> _look() async {
+  Future<void> _look({bool retry = false}) async {
     if (_done) return;
     try {
-      final p = await Api.instance.get('/payments/${widget.paymentId}') as Map;
+      final p = await Api.instance.get('/payments/${widget.paymentId}${retry ? '?retry=1' : ''}') as Map;
       if (!mounted) return;
       setState(() { _p = p; _err = null; });
       if (p['status'] == 'paid') {
@@ -67,8 +66,7 @@ class _PaySheetState extends State<_PaySheet> {
     final p = _p;
     final status = p == null ? 'loading' : p['status'] == 'paid' ? 'paid' : p['status'] == 'pending' ? 'waiting' : 'failed';
     final qr = p?['qr'] as Map?;
-    final label = payLabel[p?['provider']] ?? 'your wallet';
-    final bank = qr?['kind'] == 'bank';
+    final qrError = p?['qr_error'] as String?;
     final mmss = '${_left ~/ 60}:${(_left % 60).toString().padLeft(2, '0')}';
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
@@ -86,26 +84,26 @@ class _PaySheetState extends State<_PaySheet> {
           const Padding(padding: EdgeInsets.all(8), child: Text('Nothing was charged. You can try again or pay with cash.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted))),
           FilledButton(onPressed: () => Navigator.pop(context, 'failed'), child: const Text('Close')),
         ] else ...[
-          Text(bank ? 'Scan with any bank or wallet app' : 'Pay with $label', style: display(22)),
+          Text('Scan with any bank or wallet app', style: display(22)),
           Text(rs(widget.amount), style: display(30)),
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), boxShadow: const [BoxShadow(color: Color(0x1F2A1810), blurRadius: 24, offset: Offset(0, 6))]),
             child: SizedBox(width: 220, height: 220, child: qr == null
-                ? Center(child: Text(_err ?? 'Making your QR…', textAlign: TextAlign.center, style: const TextStyle(color: Brand.inkMuted)))
+                ? Center(child: Text(qrError ?? _err ?? 'Making your QR…', textAlign: TextAlign.center, style: TextStyle(color: qrError != null ? Brand.cherry : Brand.inkMuted)))
                 : QrImageView(data: qr['value'] as String, size: 220, backgroundColor: Colors.white, errorCorrectionLevel: QrErrorCorrectLevel.M)),
           ),
           const SizedBox(height: 12),
-          Text('Waiting for your payment… $mmss', style: const TextStyle(color: Brand.inkMuted, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          Text(bank ? 'Open your banking or wallet app, scan, and confirm.' : 'Tap Open $label to pay on this phone.', textAlign: TextAlign.center, style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
-          const SizedBox(height: 12),
-          if (qr?['kind'] == 'link') FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-            onPressed: () => launchUrl(Uri.parse(qr!['value'] as String), mode: LaunchMode.externalApplication),
-            child: Text('Open $label'),
-          ),
+          if (qr != null) ...[
+            Text('Waiting for your payment… $mmss', style: const TextStyle(color: Brand.inkMuted, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            const Text('Open your banking or wallet app, scan, and confirm. This closes by itself once you have paid.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted, fontSize: 13)),
+          ] else if (qrError != null) ...[
+            const Text('The QR could not be made. Try again, or pay with cash instead.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted, fontSize: 13)),
+            const SizedBox(height: 8),
+            FilledButton(onPressed: () => _look(retry: true), child: const Text('Try again')),
+          ],
           TextButton(onPressed: () => Navigator.pop(context, 'closed'), child: const Text('Close')),
         ],
       ])),

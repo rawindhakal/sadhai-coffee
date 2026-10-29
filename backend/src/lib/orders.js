@@ -3,8 +3,7 @@ import { bad, conflict, forbidden, notFound } from './http.js';
 import { publish } from './hub.js';
 import { notify, audit } from './notify.js';
 import { getSettings } from './settings.js';
-import { PAYMENT_METHODS, isGateway, offered, initiate, gateway } from './payments.js';
-import * as esewaGw from './gateways/esewa.js';
+import { PAYMENT_METHODS, GATEWAYS, isGateway, offered, initiate, gateway } from './payments.js';
 import { assertOrder } from './order-flow.js';
 import { rtBool } from './runtime.js';
 import crypto from 'node:crypto';
@@ -425,7 +424,7 @@ export async function createOrder(user, input) {
     const method = q.total === 0 ? (q.pass_id ? 'pass' : 'cash') : input.payment_method;
     if (!PAYMENT_METHODS.includes(method)) throw bad('Choose how you will pay');
     const online = isGateway(method) && q.total > 0;
-    if (online && !offered(method)) throw bad(`${method === 'esewa' ? 'eSewa' : 'Fonepay'} is not available right now. Pay with cash instead.`);
+    if (online && !offered(method)) throw bad('Fonepay is not available right now. Pay with cash instead.');
 
     // Prevent unpaid cash order spam that locks stock or coupons
     if (method === 'cash' && channel !== 'counter' && user?.id) {
@@ -504,7 +503,7 @@ export async function createOrder(user, input) {
 }
 
 /**
- * Called when a gateway has told us the outcome (the customer came back from eSewa or Fonepay, the status check said so, or the owner's test button).
+ * Called when a gateway has told us the outcome (the Fonepay status check said so).
  * Safe to call twice. A paid order is placed and sent to the station; a failed one is cancelled and everything it used is given back.
  */
 export async function confirmPayment(paymentId, { ref, raw, outcome = 'paid', reason } = {}) {
@@ -568,24 +567,32 @@ export async function confirmPayment(paymentId, { ref, raw, outcome = 'paid', re
   return res;
 }
 
+/** Asks Fonepay about one pending QR payment and settles it when Fonepay says paid or failed. A network or login problem leaves it pending. */
+async function checkWithGateway(p) {
+  if (!isGateway(p.provider) || !p.raw?.qr) return false;
+  const gw = gateway(p.provider);
+  const st = await gw.qrStatus({ prn: p.provider_ref || gw.reference(p.id) });
+  if (st.state === 'paid') { await confirmPayment(p.id, { ref: st.ref, raw: { qr_status: st.raw } }); return true; }
+  if (st.state === 'failed') { await confirmPayment(p.id, { outcome: 'failed', raw: { qr_status: st.raw } }); return true; }
+  return false;
+}
+
+/** Every few seconds: ask Fonepay about QR payments that are still waiting, so an order starts even if the screen that showed the QR was closed. */
+export async function settleQrPayments() {
+  const { rows } = await query(`SELECT * FROM payments WHERE status='pending' AND provider = ANY($1) AND raw ? 'qr' AND created_at > now() - interval '15 minutes' ORDER BY created_at LIMIT 30`, [GATEWAYS]);
+  for (const p of rows) await checkWithGateway(p).catch((e) => console.error('settle', p.id, e.message));
+}
+
 /**
- * Orders and passes still waiting for a gateway after 15 minutes: ask the gateway once more (eSewa can be asked), and if there is no payment,
- * cancel them so the coupon, pass cups and offer are free again. Run every minute.
+ * Orders and passes still waiting for Fonepay after 15 minutes: ask Fonepay one last time, and if there is no payment, cancel them so the
+ * coupon, pass cups and offer are free again. Run every minute.
  */
 export async function expireUnpaid() {
-  const { rows } = await query(`SELECT * FROM payments WHERE status='pending' AND provider IN ('esewa','fonepay','nepalpay') AND created_at < now() - interval '15 minutes' LIMIT 50`);
+  const { rows } = await query(`SELECT * FROM payments WHERE status='pending' AND provider = ANY($1) AND created_at < now() - interval '15 minutes' LIMIT 50`, [GATEWAYS]);
   let n = 0;
   for (const p of rows) {
     try {
-      if (isGateway(p.provider) && p.raw?.qr?.kind === 'bank' && !p.raw.qr.manual) {
-        const gw = gateway(p.provider);
-        const st = await gw.qrStatus({ prn: p.provider_ref || gw.reference(p.id) });
-        if (st.state === 'paid') { await confirmPayment(p.id, { ref: st.ref, raw: { qr_status: st.raw } }); continue; }
-      }
-      if (p.provider === 'esewa') {
-        const st = await esewaGw.checkStatus({ uuid: p.provider_ref || p.id, amount: p.amount });
-        if (st?.state === 'COMPLETE') { await confirmPayment(p.id, { ref: st.ref, raw: { status_check: st.raw } }); continue; }
-      }
+      if (await checkWithGateway(p).catch(() => false)) continue;
       await confirmPayment(p.id, { outcome: 'failed', reason: 'The payment was not completed in time', raw: { expired: true } });
       n++;
     } catch (e) { console.error('expire payment', p.id, e.message); }
@@ -593,21 +600,12 @@ export async function expireUnpaid() {
   return n;
 }
 
-/** Re-checks a pending eSewa payment with eSewa itself (used when the customer's browser never came back). */
+/** Looks at a pending QR payment with Fonepay itself, so a customer whose screen missed the news still gets their order. */
 export async function refreshPayment(paymentId) {
   const { rows } = await query('SELECT * FROM payments WHERE id=$1', [paymentId]);
   const p = rows[0];
   if (!p || p.status !== 'pending') return p;
-  if (p.provider === 'esewa') {
-    const st = await esewaGw.checkStatus({ uuid: p.provider_ref || p.id, amount: p.amount });
-    if (st?.state === 'COMPLETE') await confirmPayment(p.id, { ref: st.ref, raw: { status_check: st.raw } });
-    else if (['CANCELED', 'FULL_REFUND'].includes(st?.state || '')) await confirmPayment(p.id, { outcome: 'failed', raw: { status_check: st.raw } });
-  } else if (isGateway(p.provider) && p.raw?.qr?.kind === 'bank' && !p.raw.qr.manual) {
-    const gw = gateway(p.provider);
-    const st = await gw.qrStatus({ prn: p.provider_ref || gw.reference(p.id) });
-    if (st.state === 'paid') await confirmPayment(p.id, { ref: st.ref, raw: { qr_status: st.raw } });
-    else if (st.state === 'failed') await confirmPayment(p.id, { outcome: 'failed', raw: { qr_status: st.raw } });
-  }
+  await checkWithGateway(p).catch((e) => console.error('status', p.id, e.message));
   return (await query('SELECT * FROM payments WHERE id=$1', [paymentId])).rows[0];
 }
 
@@ -875,7 +873,7 @@ export async function buyPass(user, method, { stationId = null, soldBy = null } 
   }
 
   if (isGateway(method)) {
-    if (!offered(method)) throw bad(`${method === 'esewa' ? 'eSewa' : 'Fonepay'} is not available right now. Buy the pass at a counter in cash.`);
+    if (!offered(method)) throw bad('Fonepay is not available right now. Buy the pass at a counter in cash.');
     const { pass, payment } = await tx(async (db) => {
       let rows;
       for (let i = 0; ; i++) {

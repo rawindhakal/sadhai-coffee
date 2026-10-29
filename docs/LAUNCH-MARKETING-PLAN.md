@@ -7,7 +7,7 @@ Prepared 27 Oct 2026. Month 1 = the month the first outlet opens. Every number m
 
 ## 1. Where we start
 
-**Product (already built):** order-ahead app and web, 90-second pickup, kiosk for counter tablets, eSewa / Fonepay / NepalPay QR, 10-cup pass (Rs 1,200, 30 days), free first cup then 3 cups at 30% off, referral (give a cup, get a cup), offer of the day, monthly limited drop, English and Nepali, station and manager dashboards with win-back lists.
+**Product (already built):** order-ahead app and web, 90-second pickup, kiosk for counter tablets, Fonepay QR, 10-cup pass (Rs 1,200, 30 days), free first cup then 3 cups at 30% off, referral (give a cup, get a cup), offer of the day, monthly limited drop, English and Nepali, station and manager dashboards with win-back lists.
 
 **Menu and price ladder (VAT and service included):**
 
@@ -302,7 +302,7 @@ Marketing fails if service fails. Before the first sales push:
 - **Marketing owner:** one person (can be part-time at start) responsible for content, WhatsApp, and Google profile. Plus a freelance photographer 1 day a month.
 - **Cleanliness and look:** the first photo of the outlet on Google must be clean, bright and full of customers. Schedule a photo shoot at the busiest hour.
 - **Stock discipline:** a stocked-out cold brew on a launch weekend is a lost customer. Use the central inventory and transfer screens to keep both outlets supplied; set reorder levels before launch.
-- **Payment flow:** test eSewa, Fonepay and NepalPay QR in each outlet before opening; have a printed-QR fallback with staff confirmation (already built).
+- **Payment flow:** test Fonepay QR in each outlet before opening; keep cash as the fallback (already built).
 - **Complaint loop:** respond to any public complaint within 24 hours, offer a fix, then follow up.
 
 ---

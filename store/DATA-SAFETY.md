@@ -29,6 +29,6 @@ Use these to fill in Google Play Console (App content, Data safety) and App Stor
 
 ## Play Console declarations
 
-- Ads: No. News app: No. COVID-19 app: No. Government app: No. Financial features: none of our own: online payments for goods run on eSewa's and Fonepay's pages and we receive only a reference and the amount.
+- Ads: No. News app: No. COVID-19 app: No. Government app: No. Financial features: none of our own: online payments for goods run on Fonepay's pages and we receive only a reference and the amount.
 - Target audience: 16 and over. Not designed for children.
 - App access: provide the review account from `store/RELEASE.md`.

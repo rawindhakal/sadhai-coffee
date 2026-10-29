@@ -43,7 +43,7 @@ export function PassTab() {
   const [buying, setBuying] = useState(false);
   const [buyErr, setBuyErr] = useState<string | null>(null);
   const [passPay, setPassPay] = useState<{ id: string; amount: number } | null>(null);
-  const online: string[] = (cfg.data?.payment_methods || []).filter((m: string) => ['esewa', 'fonepay', 'nepalpay'].includes(m));
+  const online: string[] = (cfg.data?.payment_methods || []).filter((m: string) => m === 'fonepay');
   const list = passes.data || [];
   const live = list.filter((p) => p.status === 'active' && p.remaining > 0).sort((a, b) => a.queue_position - b.queue_position);
   const past = list.filter((p) => !live.includes(p));

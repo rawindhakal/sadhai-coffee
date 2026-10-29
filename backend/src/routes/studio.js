@@ -11,6 +11,7 @@ import { DEFS, describeRuntime, setRuntime, rt } from '../lib/runtime.js';
 import { SITE_DEFAULTS, loadSite, mediaUrl } from '../lib/site.js';
 import { getSettings } from '../lib/settings.js';
 import { GATEWAYS, PAYMENT_METHODS, gateway, gatewayStatus, initiate } from '../lib/payments.js';
+import { diagnose } from '../lib/gateways/fonepay.js';
 import { CHANNELS, CHANNEL_LABEL, flow, cleanFlow } from '../lib/order-flow.js';
 import { todayNpt, addDays } from '../lib/roster.js';
 
@@ -54,10 +55,16 @@ studio.get('/payments', wrap(async (_req, res) => {
     `SELECT p.id, p.provider, p.purpose, p.amount, p.status, p.provider_ref, p.created_at, p.settled_at, o.pickup_code, s.name AS station,
             COALESCE((p.raw->>'refund_pending_manual')::boolean, false) AS refund_due, COALESCE((p.raw->>'late_payment')::boolean, false) AS late
        FROM payments p LEFT JOIN orders o ON o.id=p.order_id LEFT JOIN stations s ON s.id=COALESCE(o.station_id, p.station_id)
-      WHERE p.provider IN ('esewa','fonepay','nepalpay') ORDER BY p.created_at DESC LIMIT 100`);
+      WHERE p.provider NOT IN ('cash','pass') ORDER BY p.created_at DESC LIMIT 100`);
   res.json({ gateways: gatewayStatus(), payments: rows });
 }));
-// A Rs 10 test payment through the real gateway page, so the owner can check the keys without placing an order.
+// Asks Fonepay for a Rs 10 QR and reports exactly what Fonepay answered (nothing is charged), so a wrong login or environment shows its real cause.
+studio.post('/payments/diagnose', wrap(async (req, res) => {
+  const out = await diagnose();
+  await audit(req.user.id, 'payments.diagnose', 'settings', null, { ok: out.ok, address: out.address });
+  res.json(out);
+}));
+// A Rs 10 test payment with a real QR, so the owner can pay it from a banking app and see the whole path work.
 studio.post('/payments/test', wrap(async (req, res) => {
   const { provider } = z.object({ provider: z.enum(GATEWAYS) }).parse(req.body);
   const missing = gateway(provider).missing();
@@ -68,7 +75,7 @@ studio.post('/payments/test', wrap(async (req, res) => {
   await audit(req.user.id, 'payments.test', 'payment', rows[0].id, { provider });
   res.status(201).json(init);
 }));
-// The owner has paid a customer back outside the system (from the eSewa or Fonepay merchant account).
+// The owner has paid a customer back outside the system (from the Fonepay merchant account).
 studio.post('/payments/:id/refund-done', wrap(async (req, res) => {
   const r = await query(`UPDATE payments SET raw = (raw - 'refund_pending_manual') || '{"refund_done": true}'::jsonb WHERE id=$1 AND status='refunded' RETURNING id`, [req.params.id]);
   if (!r.rowCount) throw notFound('No refund waiting for that payment');
@@ -164,7 +171,7 @@ studio.get('/setup', wrap(async (req, res) => {
     { key: 'ingredients', title: 'Enter ingredient prices and suppliers', done: ing.unpriced === 0 && ing.no_supplier === 0, detail: ing.unpriced || ing.no_supplier ? `${ing.unpriced} without a price, ${ing.no_supplier} without a supplier` : 'All priced', section: 'inventory' },
     { key: 'team', title: 'Add your team and their hourly rates', done: team.n > 0 && team.unpaid === 0, detail: team.n ? (team.unpaid ? `${team.unpaid} of ${team.n} have no hourly rate` : `${team.n} staff with rates`) : 'No staff yet', section: 'staff' },
     { key: 'roster', title: 'Fill and publish this week’s roster', done: ros.n > 0 && ros.open === 0 && ros.unpublished === 0, detail: ros.n ? `${ros.open} open slots, ${ros.unpublished} not published` : 'No shifts planned for the next 7 days', section: 'staff' },
-    { key: 'payments', title: 'Turn on eSewa or Fonepay (optional)', done: Object.values(gatewayStatus()).some((g) => g.enabled && g.mode === 'live' && g.ready), detail: Object.values(gatewayStatus()).some((g) => g.enabled) ? 'A gateway is switched on' : 'Customers can pay cash or with a pass. Add eSewa or Fonepay in Settings, Payments.', section: 'rules' },
+    { key: 'payments', title: 'Turn on Fonepay QR (optional)', done: Object.values(gatewayStatus()).some((g) => g.enabled && g.mode === 'live' && g.ready), detail: Object.values(gatewayStatus()).some((g) => g.enabled) ? 'A gateway is switched on' : 'Customers can pay cash or with a pass. Add Fonepay in Settings, Payments.', section: 'rules' },
     { key: 'company', title: 'Add your company details for the legal pages', done: companyDone, detail: companyDone ? 'Saved' : 'Still showing the placeholder name and email', section: 'rules' },
     { key: 'site', title: 'Make the home page yours', done: site.n > 0, detail: site.n ? 'Customised' : 'Using the built-in hero artwork', section: 'site' },
   ];

@@ -451,7 +451,7 @@ function KItem({ p, onClose, onAdd }: { p: any; onClose: () => void; onAdd: (l: 
 
 function Pay({ t, rules, total, busy, error, guest, onBack, onPlace }: any) {
   const ways: string[] = rules?.payment_methods || ['cash'];
-  const gateways: string[] = ways.filter((m: string) => ['esewa', 'fonepay', 'nepalpay'].includes(m));
+  const gateways: string[] = ways.filter((m: string) => m === 'fonepay');
   const [mode, setMode] = useState<'' | 'pass'>('');
   const [code, setCode] = useState('');
   const [check, setCheck] = useState<any>(null);
@@ -465,7 +465,7 @@ function Pay({ t, rules, total, busy, error, guest, onBack, onPlace }: any) {
       <h2>{t('pay')}</h2>
       <div className="col" style={{ marginTop: 16 }}>
         {gateways.map((g) => (
-          <button key={g} className="k-opt" disabled={busy} onClick={() => onPlace(g)}><Icon name="cart" size={30} /><span><strong>Pay now with {g === 'esewa' ? 'eSewa' : g === 'nepalpay' ? 'NepalPay QR' : 'Fonepay'}</strong><small>Scan a QR with your phone, then collect your coffee</small></span></button>
+          <button key={g} className="k-opt" disabled={busy} onClick={() => onPlace(g)}><Icon name="cart" size={30} /><span><strong>Pay now with Fonepay QR</strong><small>Scan a QR with your phone, then collect your coffee</small></span></button>
         ))}
         {ways.includes('cash') && <button className="k-opt" disabled={busy} onClick={() => onPlace('counter')}><Icon name="coin" size={30} /><span><strong>{t('counter')}</strong><small>Pay {rs(total)} when you pick up your coffee</small></span></button>}
         {ways.includes('pass') && <button className={`k-opt ${mode === 'pass' ? 'on' : ''}`} disabled={busy} onClick={() => setMode(mode === 'pass' ? '' : 'pass')}><Icon name="ticket" size={30} /><span><strong>{t('passopt')}</strong><small>Enter your pass code (SP-XXXX-XXXX)</small></span></button>}

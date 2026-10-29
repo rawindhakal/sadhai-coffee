@@ -64,7 +64,7 @@ class _PassPanelState extends State<PassPanel> {
       try {
         final c = await Api.instance.request('GET', '/config', auth: false);
         _pass = Map<String, dynamic>.from(c['pass'] as Map);
-        _online = [for (final x in (c['payment_methods'] as List)) if (x == 'esewa' || x == 'fonepay' || x == 'nepalpay') x as String];
+        _online = [for (final x in (c['payment_methods'] as List)) if (x == 'fonepay') x as String];
       } catch (_) {}
       if (mounted) setState(() { _passes = p.cast<Map>(); _loaded = true; });
     } catch (_) {}
