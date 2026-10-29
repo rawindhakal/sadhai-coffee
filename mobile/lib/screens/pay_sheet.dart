@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../theme.dart';
 
@@ -84,7 +85,7 @@ class _PaySheetState extends State<_PaySheet> {
           const Padding(padding: EdgeInsets.all(8), child: Text('Nothing was charged. You can try again or pay with cash.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted))),
           FilledButton(onPressed: () => Navigator.pop(context, 'failed'), child: const Text('Close')),
         ] else ...[
-          Text('Scan with any bank or wallet app', style: display(22)),
+          Text(qr?['kind'] == 'link' ? 'Pay with Fonepay' : 'Scan with any bank or wallet app', style: display(22)),
           Text(rs(widget.amount), style: display(30)),
           const SizedBox(height: 12),
           Container(
@@ -98,7 +99,8 @@ class _PaySheetState extends State<_PaySheet> {
           if (qr != null) ...[
             Text('Waiting for your payment… $mmss', style: const TextStyle(color: Brand.inkMuted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 4),
-            const Text('Open your banking or wallet app, scan, and confirm. This closes by itself once you have paid.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted, fontSize: 13)),
+            Text(qr['kind'] == 'link' ? 'Tap Open Fonepay to pay on this phone, or scan this QR from another phone. This closes by itself once you have paid.' : 'Open your banking or wallet app, scan, and confirm. This closes by itself once you have paid.', textAlign: TextAlign.center, style: const TextStyle(color: Brand.inkMuted, fontSize: 13)),
+            if (qr['kind'] == 'link') Padding(padding: const EdgeInsets.only(top: 8), child: FilledButton(style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)), onPressed: () => launchUrl(Uri.parse(qr['value'] as String), mode: LaunchMode.externalApplication), child: const Text('Open Fonepay'))),
           ] else if (qrError != null) ...[
             const Text('The QR could not be made. Try again, or pay with cash instead.', textAlign: TextAlign.center, style: TextStyle(color: Brand.inkMuted, fontSize: 13)),
             const SizedBox(height: 8),

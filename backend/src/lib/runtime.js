@@ -10,7 +10,8 @@ import { config } from './config.js';
 export const DEFS = {
   // online payments: Fonepay Dynamic QR. Starts switched off; the owner turns it on once the four login fields below are saved.
   fonepay_enabled: { group: 'payments', label: 'Accept Fonepay QR', type: 'bool', env: 'FONEPAY_ENABLED', def: '0', help: 'Customers pay by scanning a Fonepay QR on the website, app, kiosk and counter.' },
-  fonepay_mode: { group: 'payments', label: 'Fonepay environment', type: 'enum', options: ['sandbox', 'live'], env: 'FONEPAY_MODE', def: 'sandbox', help: 'Live is Fonepay’s real server (merchantapi.fonepay.com). Sandbox is the test server. Your login only works on the one it was made for.' },
+  fonepay_method: { group: 'payments', label: 'How to connect to Fonepay', type: 'enum', options: ['web', 'qr'], env: 'FONEPAY_METHOD', def: 'web', help: 'web: Fonepay’s web payment page, needs only the merchant code and secret key. qr: Fonepay’s QR service, also needs its API user name and password.' },
+  fonepay_mode: { group: 'payments', label: 'Fonepay environment', type: 'enum', options: ['sandbox', 'live'], env: 'FONEPAY_MODE', def: 'sandbox', help: 'Live is Fonepay’s real server. Sandbox is the test server. Your details only work on the one they were made for.' },
   fonepay_merchant_code: { group: 'payments', label: 'Merchant code', env: 'FONEPAY_MERCHANT_CODE', def: '', help: 'The merchant code the bank gave you.' },
   fonepay_secret_key: { group: 'payments', label: 'Secret key', secret: true, env: 'FONEPAY_SECRET_KEY', def: '', help: 'Signs every request to Fonepay.' },
   fonepay_username: { group: 'payments', label: 'API user name', env: 'FONEPAY_USERNAME', def: '', help: 'The user name for Fonepay’s QR service (the same one the Fonepay merchant portal uses, if Fonepay says so).' },

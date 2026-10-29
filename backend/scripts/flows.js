@@ -192,8 +192,8 @@ const qrOf = async (token, paymentId) => (await call('GET', `/payments/${payment
   const OFF = { fonepay_enabled: null, fonepay_merchant_code: null, fonepay_secret_key: null, fonepay_username: null, fonepay_password: null, fonepay_mode: null, fonepay_api_url: null };
   await setCfg(OFF);
   ok((await buy(c, 'fonepay')).status === 400 && (await call('GET', '/config')).body.payment_methods.join() === 'cash', 'Fonepay is off until the owner turns it on');
-  await setCfg({ fonepay_enabled: '1', fonepay_merchant_code: 'FLOWPID', fonepay_secret_key: FP_SECRET });
-  ok((await call('GET', '/config')).body.payment_methods.join() === 'cash', 'switched on but without the API login, customers are not offered it');
+  await setCfg({ fonepay_enabled: '1', fonepay_method: 'qr', fonepay_merchant_code: 'FLOWPID', fonepay_secret_key: FP_SECRET });
+  ok((await call('GET', '/config')).body.payment_methods.join() === 'cash', 'QR service switched on but without the API login, customers are not offered it');
   await setCfg({ fonepay_username: 'goodUser', fonepay_password: 'goodPass', fonepay_api_url: 'http://127.0.0.1:4799' });
   ok((await call('GET', '/config')).body.payment_methods.join() === 'cash,fonepay', 'with all four fields saved, customers are offered cash and Fonepay QR');
   const secrets = (await call('GET', '/owner/integrations', null, tok(owner))).body.filter((i) => ['fonepay_secret_key', 'fonepay_password'].includes(i.key));
@@ -319,6 +319,37 @@ const qrOf = async (token, paymentId) => (await call('GET', `/payments/${payment
   ok((await call('PUT', '/owner/order-flow', { flow: { ...fl, web: { ...fl.web, payments: { cash: false, pass: false, fonepay: false } } } }, tok(owner))).status === 400, 'a way of ordering must keep at least one way to pay');
   await call('DELETE', '/owner/order-flow', null, tok(owner));
   ok((await call('GET', '/config')).body.order_flow.web.payment_methods.includes('cash'), 'resetting brings the built-in rules back');
+  // --- web payment: only a merchant code and secret key ---
+  await setCfg({ fonepay_method: 'web', fonepay_username: null, fonepay_password: null, fonepay_api_url: null });
+  ok((await call('GET', '/config')).body.payment_methods.join() === 'cash,fonepay', 'in web payment mode the merchant code and secret key are enough');
+  const fpAnswer = (prn, amount, { ps = 'true', rc = 'successful', pid = 'FLOWPID', tamper = false } = {}) => {
+    const v = { PRN: prn, PID: pid, PS: ps, RC: rc, UID: 'FPTRACE1', BC: 'NABIL', INI: 'tester', P_AMT: String(amount), R_AMT: String(amount) };
+    v.DV = tamper ? 'abcd' : crypto.createHmac('sha512', FP_SECRET).update(['PRN', 'PID', 'PS', 'RC', 'UID', 'BC', 'INI', 'P_AMT', 'R_AMT'].map((k) => v[k]).join(',')).digest('hex');
+    return new URLSearchParams(v).toString();
+  };
+  const hit = (path) => fetch(API + path, { redirect: 'manual' });
+  const w1 = await buy(c, 'fonepay');
+  const wp = w1.body.payment;
+  const wqr = (await qrOf(c.token, wp.payment_id)).qr;
+  ok(/^[A-Z0-9]{1,25}$/.test(wp.reference) && wqr.kind === 'link' && wqr.value.endsWith(`/payments/${wp.payment_id}/pay`), 'the QR holds our payment page, and the PRN fits Fonepay\'s 25 characters');
+  const go = await hit(`/payments/${wp.payment_id}/pay`);
+  const target = new URL(go.headers.get('location'));
+  const dvIn = crypto.createHmac('sha512', FP_SECRET).update(['PID', 'MD', 'PRN', 'AMT', 'CRN', 'DT', 'R1', 'R2', 'RU'].map((k) => target.searchParams.get(k)).join(',')).digest('hex');
+  ok(go.status === 302 && target.host === 'dev-clientapi.fonepay.com' && target.searchParams.get('PID') === 'FLOWPID' && target.searchParams.get('AMT') === '100' && target.searchParams.get('PRN') === wp.reference && target.searchParams.get('DV') === dvIn, 'the page sends the phone to Fonepay with a signed request');
+  await setCfg({ fonepay_mode: 'live' });
+  ok(new URL((await hit(`/payments/${wp.payment_id}/pay`)).headers.get('location')).host === 'clientapi.fonepay.com', 'in Live it goes to clientapi.fonepay.com');
+  await setCfg({ fonepay_mode: 'sandbox' });
+  await hit(`/payments/fonepay/return?${fpAnswer(wp.reference, 100, { tamper: true })}`);
+  await hit(`/payments/fonepay/return?${fpAnswer(wp.reference, 100, { pid: 'SOMEONEELSE' })}`);
+  ok((await orderOf(c, w1.body.order.id)).status === 'awaiting_payment', 'an answer with a wrong signature or another merchant does nothing');
+  await hit(`/payments/fonepay/return?${fpAnswer(wp.reference, 100)}`);
+  ok((await orderOf(c, w1.body.order.id)).status === 'placed' && (await queue(tuStaff)).some((x) => x.id === w1.body.order.id), 'a genuine answer places the order and the station sees it');
+  const w2 = await buy(c, 'fonepay');
+  await hit(`/payments/fonepay/return?${fpAnswer(w2.body.payment.reference, 5)}`);
+  ok((await orderOf(c, w2.body.order.id)).status === 'cancelled', 'an answer for the wrong amount cancels the order');
+  const w3 = await buy(c, 'fonepay');
+  await hit(`/payments/fonepay/return?${fpAnswer(w3.body.payment.reference, 100, { ps: 'false', rc: 'cancel' })}`);
+  ok((await orderOf(c, w3.body.order.id)).status === 'cancelled', 'Fonepay reporting a cancelled payment cancels the order');
   // sales: online orders are sales only when handed over
   const o5 = await ovr0();
   ok(typeof o5 === 'number', 'sales are counted from handed-over orders only');

@@ -120,7 +120,9 @@ function FonepayCard({ data, reload }: { data: any[]; reload: () => void }) {
   const val = (k: string) => (k in edit ? edit[k] : item(k)?.value ?? '');
   const enabled = val('fonepay_enabled') === '1';
   const mode = val('fonepay_mode') || 'sandbox';
-  const allSet = FP_FIELDS.every((f) => (f.key in edit ? !!edit[f.key] : !!item(f.key)?.is_set));
+  const method = val('fonepay_method') || 'web';
+  const fields = method === 'qr' ? FP_FIELDS : FP_FIELDS.slice(0, 2);
+  const allSet = fields.every((f) => (f.key in edit ? !!edit[f.key] : !!item(f.key)?.is_set));
   async function save(extra: Record<string, string | null> = {}) {
     const values = { ...edit, ...extra };
     if (!Object.keys(values).length) return;
@@ -138,7 +140,7 @@ function FonepayCard({ data, reload }: { data: any[]; reload: () => void }) {
       <div className="row between wrap">
         <div>
           <div className="row wrap" style={{ gap: 6 }}><h3>Fonepay QR</h3><span className={`chip ${enabled ? 'hill' : ''}`}>{enabled ? 'On' : 'Off'}</span><span className={`chip ${mode === 'live' ? 'cherry' : 'marigold'}`}>{mode === 'live' ? 'Live' : 'Sandbox'}</span></div>
-          <p className="small muted" style={{ maxWidth: 600 }}>Every order gets its own Fonepay QR for the exact amount. Customers scan it with any bank or wallet app. Sadhai asks Fonepay every few seconds and starts the order the moment Fonepay says it is paid.</p>
+          <p className="small muted" style={{ maxWidth: 600 }}>Every order gets a Fonepay payment for the exact amount. The customer scans the QR and pays in their bank or wallet app. The order starts the moment Fonepay confirms it.</p>
         </div>
         <label className="row card flat" style={{ padding: '6px 12px', cursor: 'pointer', gap: 8 }}>
           <input type="checkbox" role="switch" style={{ width: 22, minHeight: 22 }} checked={enabled} onChange={(e) => save({ fonepay_enabled: e.target.checked ? '1' : '0' })} />
@@ -146,10 +148,13 @@ function FonepayCard({ data, reload }: { data: any[]; reload: () => void }) {
         </label>
       </div>
       <div className="grid g3">
-        <Field label="Environment" hint={mode === 'live' ? 'Fonepay’s real server. Use this with your real bank login.' : 'Fonepay’s test server. A real login does not work here.'}>
+        <Field label="How to connect" hint={method === 'web' ? 'Fonepay’s web payment page. Needs only the merchant code and secret key.' : 'Fonepay’s QR service. Also needs its API user name and password.'}>
+          <select value={method} onChange={(e) => setEdit({ ...edit, fonepay_method: e.target.value })}><option value="web">Web payment (merchant code and secret key)</option><option value="qr">QR service (also user name and password)</option></select>
+        </Field>
+        <Field label="Environment" hint={mode === 'live' ? 'Fonepay’s real server (clientapi.fonepay.com for web payment). Use this with your real bank details.' : 'Fonepay’s test server. Real details do not work here.'}>
           <select value={mode} onChange={(e) => setEdit({ ...edit, fonepay_mode: e.target.value })}><option value="live">Live (real money)</option><option value="sandbox">Sandbox (test)</option></select>
         </Field>
-        {FP_FIELDS.map((f) => {
+        {fields.map((f) => {
           const it = item(f.key);
           const hide = f.secret && it?.is_set && !(f.key in edit);
           return (
@@ -162,7 +167,7 @@ function FonepayCard({ data, reload }: { data: any[]; reload: () => void }) {
       </div>
       {check && (
         <div className="card flat" role="status" style={{ borderColor: check.ok ? 'var(--hill)' : 'var(--cherry)' }}>
-          <strong>{check.ok ? 'Fonepay accepted the login' : 'Fonepay did not accept it'}</strong>
+          <strong>{check.ok ? 'Fonepay accepted it' : 'Fonepay did not accept it'}</strong>
           <p style={{ margin: '4px 0' }}>{check.message}</p>
           <p className="small muted" style={{ margin: 0 }}>Asked {check.address} ({check.environment === 'live' ? 'Live' : 'Sandbox'}){check.status_code ? ` · Fonepay code ${check.status_code}` : ''}{check.http ? ` · HTTP ${check.http}` : ''}.{!check.ok && /INVALID USERNAME/i.test(check.message) ? ' Fonepay checks the user name and password for the environment. Try the other environment, and ask Fonepay to confirm the QR service user name and password for this merchant code.' : ''}</p>
         </div>
@@ -189,7 +194,7 @@ export function PaymentsPanel() {
   async function refunded(id: string) { try { await api(`/owner/payments/${id}/refund-done`, { method: 'POST', body: {} }); list.reload(); toast('Marked as paid back'); } catch (e: any) { toast(e.message, true); } }
   return (
     <div className="col" style={{ gap: 16 }}>
-      <div className="panel"><p className="small muted">Customers can always pay cash at the counter or with a pass. Switch on Fonepay QR once the four login fields are saved and Check connection says it works. Online orders reach the barista only after Fonepay confirms the payment, and an order nobody pays for is cancelled after 15 minutes.</p></div>
+      <div className="panel"><p className="small muted">Customers can always pay cash at the counter or with a pass. Switch on Fonepay QR once its fields are saved and Check connection says it works. Online orders reach the barista only after Fonepay confirms the payment, and an order nobody pays for is cancelled after 15 minutes.</p></div>
       <FonepayCard data={keys.data} reload={() => { keys.reload(); list.reload(); }} />
       <div className="panel">
         <div className="ph"><div><h3>Online payments</h3><p className="small muted">The last 100. Online money arrives in your Fonepay merchant account, not at the counter. A refund is sent back from there, then marked here.</p></div></div>

@@ -10,6 +10,7 @@ import { rt } from '../runtime.js';
  *   QR:     amount,prn,merchantCode,remarks1,remarks2        Status: prn,merchantCode
  * The amount always comes from our own database, never from a screen.
  */
+const WEB = { live: 'https://clientapi.fonepay.com/api/merchantRequest', sandbox: 'https://dev-clientapi.fonepay.com/api/merchantRequest' };
 const BASES = { live: 'https://merchantapi.fonepay.com/api', sandbox: 'https://dev-merchantapi.fonepay.com/api' };
 const QR_PATH = '/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrDownload';
 const STATUS_PATH = '/merchant/merchantDetailsForThirdParty/thirdPartyDynamicQrGetStatus';
@@ -22,18 +23,50 @@ const username = () => (rt('fonepay_username') || '').trim();
 const password = () => rt('fonepay_password') || '';
 const secret = () => (rt('fonepay_secret_key') || '').trim();
 
+/**
+ * How we connect. 'web': Fonepay's web payment page (merchantRequest), which needs only the merchant code and secret key; the page shows
+ * Fonepay's QR and our server learns the result from Fonepay's signed answer. 'qr': Fonepay's QR service, which also needs the API login.
+ */
+export const method = () => (rt('fonepay_method') === 'qr' ? 'qr' : 'web');
+export const webUrl = () => WEB[mode()];
+
 export function missing() {
   const out = [];
   if (!merchantCode()) out.push('fonepay_merchant_code');
   if (!secret()) out.push('fonepay_secret_key');
-  if (!username()) out.push('fonepay_username');
-  if (!password()) out.push('fonepay_password');
+  if (method() === 'qr') {
+    if (!username()) out.push('fonepay_username');
+    if (!password()) out.push('fonepay_password');
+  }
   return out;
+}
+
+const fmtDate = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+
+/** Web payment: the signed address to send the customer to. PRN is at most 25 letters and digits. DV = HMAC-SHA512 over PID,MD,PRN,AMT,CRN,DT,R1,R2,RU. */
+export function requestUrl({ amount, prn, returnUrl, note }) {
+  const clean = (v) => String(v).replace(/[^\w .-]/g, '').slice(0, 50) || 'Sadhai Coffee';
+  const p = { PID: merchantCode(), MD: 'P', PRN: prn, AMT: String(Math.round(Number(amount))), CRN: 'NPR', DT: fmtDate(new Date()), R1: clean(note || 'Sadhai Coffee'), R2: 'N/A', RU: returnUrl };
+  p.DV = crypto.createHmac('sha512', secret()).update([p.PID, p.MD, p.PRN, p.AMT, p.CRN, p.DT, p.R1, p.R2, p.RU].join(',')).digest('hex');
+  return `${webUrl()}?${new URLSearchParams(p)}`;
+}
+
+/** Web payment: checks the answer Fonepay sends back (signed over PRN,PID,PS,RC,UID,BC,INI,P_AMT,R_AMT). Throws when it is not genuine. */
+export function readCallback(q) {
+  const names = ['PRN', 'PID', 'PS', 'RC', 'UID', 'BC', 'INI', 'P_AMT', 'R_AMT'];
+  const v = Object.fromEntries(names.map((n) => [n, String(q[n] ?? '')]));
+  if (!q.DV) throw new Error('That answer is not signed');
+  const want = crypto.createHmac('sha512', secret()).update(names.map((n) => v[n]).join(',')).digest('hex');
+  const a = Buffer.from(want), b = Buffer.from(String(q.DV).toLowerCase());
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new Error('That answer has a wrong signature');
+  if (v.PID !== merchantCode()) throw new Error('That answer is for a different merchant');
+  const ok = v.PS === 'true' && /^success/i.test(v.RC);
+  return { ok, ref: v.UID || null, amount: Math.round(Number(v.P_AMT || 0)), prn: v.PRN, raw: v };
 }
 
 const sign = (...fields) => crypto.createHmac('sha512', secret()).update(fields.join(',')).digest('hex');
 /** Our payment id without hyphens: 32 letters and digits, unique for every payment (the PRN Fonepay knows it by). */
-export const reference = (id) => String(id).replace(/-/g, '');
+export const reference = (id) => (method() === 'web' ? String(id).replace(/-/g, '').slice(0, 24).toUpperCase() : String(id).replace(/-/g, ''));
 
 export class FonepayError extends Error {
   constructor(message, { statusCode, http } = {}) { super(message); this.statusCode = statusCode ?? null; this.http = http ?? null; }
@@ -80,8 +113,17 @@ export async function qrStatus({ prn }) {
 
 /** For the owner's "Check connection": asks Fonepay for a Rs 10 QR and says exactly what came back. Nothing is charged. */
 export async function diagnose() {
-  const out = { environment: mode(), address: baseUrl(), missing: missing() };
+  const out = { environment: mode(), address: method() === 'web' ? webUrl() : baseUrl(), missing: missing(), method: method() };
   if (out.missing.length) return { ...out, ok: false, message: 'Save every Fonepay field first.' };
+  if (method() === 'web') {
+    // Web payment has no login to test. Ask Fonepay's page for a signed Rs 10 request and report how it answers.
+    try {
+      const r = await fetch(requestUrl({ amount: 10, prn: reference(crypto.randomUUID()), returnUrl: 'https://sadhaicoffee.com/api/payments/fonepay/return', note: 'Connection check' }), { redirect: 'manual', signal: AbortSignal.timeout(15000) });
+      const text = (await r.text()).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+      const bad = /invalid|error|not found|unauthor|failed/i.test(text);
+      return { ...out, ok: r.status < 400 && !bad, http: r.status, message: bad || r.status >= 400 ? `Fonepay answered: ${text || `HTTP ${r.status}`}` : 'Fonepay accepted the signed request and opened its payment page.' };
+    } catch (e) { return { ...out, ok: false, message: `Fonepay could not be reached (${e.message})` }; }
+  }
   try {
     const q = await createQr({ amount: 10, prn: reference(crypto.randomUUID()), remarks1: 'Connection check' });
     return { ...out, ok: true, message: 'Fonepay accepted the login and gave a QR code.', qr_length: q.qr.length };

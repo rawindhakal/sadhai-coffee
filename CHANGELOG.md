@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.1.1] - 2026-10-29
+
+### Added
+- Settings, Payments: **How to connect**. *Web payment* (default) needs only the merchant code and secret key and uses Fonepay's `merchantRequest` page (Live `https://clientapi.fonepay.com/api/merchantRequest`, Sandbox `dev-clientapi`): the QR holds our `/payments/:id/pay` page, which redirects the phone to Fonepay with an HMAC-SHA512 signed request; Fonepay's signed answer at `/payments/fonepay/return` pays the order. *QR service* keeps the API login flow from 2.1.0.
+
+---
+
 ## [2.1.0] - 2026-10-29
 
 ### Changed

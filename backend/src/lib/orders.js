@@ -569,7 +569,7 @@ export async function confirmPayment(paymentId, { ref, raw, outcome = 'paid', re
 
 /** Asks Fonepay about one pending QR payment and settles it when Fonepay says paid or failed. A network or login problem leaves it pending. */
 async function checkWithGateway(p) {
-  if (!isGateway(p.provider) || !p.raw?.qr) return false;
+  if (!isGateway(p.provider) || p.raw?.qr?.kind !== 'bank') return false; // web payments are settled by Fonepay's signed answer, not asked about
   const gw = gateway(p.provider);
   const st = await gw.qrStatus({ prn: p.provider_ref || gw.reference(p.id) });
   if (st.state === 'paid') { await confirmPayment(p.id, { ref: st.ref, raw: { qr_status: st.raw } }); return true; }

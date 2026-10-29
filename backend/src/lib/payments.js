@@ -15,13 +15,19 @@ export const gateway = (p) => mods[p];
 export const isGateway = (p) => GATEWAYS.includes(p);
 
 /** A customer sees Fonepay only when the owner switched it on and every Fonepay field is saved. */
+const apiBase = () => (rt('public_api_url') || '').replace(/\/$/, '');
+export const webBase = () => (rt('public_web_url') || '').replace(/\/$/, '');
+/** The address the QR holds in web mode: our page that sends the phone on to Fonepay with a signed request. */
+export const payUrl = (paymentId) => `${apiBase()}/payments/${paymentId}/pay`;
+export const returnUrl = () => `${apiBase()}/payments/fonepay/return`;
+
 export const offered = (provider) => isGateway(provider) && rtBool(`${provider}_enabled`) && mods[provider].missing().length === 0;
 export const enabledPaymentMethods = () => ['cash', ...GATEWAYS.filter(offered)];
 
 /** What the owner screen and the apps show about the gateway. No secrets. */
 export function gatewayStatus() {
   const g = fonepay;
-  return { fonepay: { enabled: rtBool('fonepay_enabled'), mode: g.mode(), address: g.baseUrl(), missing: g.missing(), ready: g.missing().length === 0, offered: offered('fonepay') } };
+  return { fonepay: { enabled: rtBool('fonepay_enabled'), mode: g.mode(), method: g.method(), address: g.method() === 'web' ? g.webUrl() : g.baseUrl(), missing: g.missing(), ready: g.missing().length === 0, offered: offered('fonepay') } };
 }
 
 /** Details to hand to the client after a payment row has been made. */
@@ -38,6 +44,11 @@ export function initiate(provider, payment, { test = false } = {}) {
 export async function qrFor(payment) {
   if (payment.raw?.qr) return payment.raw.qr;
   const ref = payment.provider_ref || fonepay.reference(payment.id);
+  if (fonepay.method() === 'web') {
+    const qr = { kind: 'link', value: payUrl(payment.id), open: true };
+    await query(`UPDATE payments SET provider_ref=$2, raw = COALESCE(raw,'{}'::jsonb) || $3::jsonb WHERE id=$1`, [payment.id, ref, JSON.stringify({ qr })]);
+    return qr;
+  }
   const q = await fonepay.createQr({ amount: payment.amount, prn: ref, remarks1: 'Sadhai Coffee' });
   const qr = { kind: 'bank', value: q.qr };
   await query(`UPDATE payments SET provider_ref=$2, raw = COALESCE(raw,'{}'::jsonb) || $3::jsonb WHERE id=$1`, [payment.id, ref, JSON.stringify({ qr, socket: q.websocket })]);

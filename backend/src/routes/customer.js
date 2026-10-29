@@ -6,6 +6,7 @@ import { authenticate, requireRole, verifyAccess } from '../lib/auth.js';
 import { subscribe } from '../lib/hub.js';
 import { createOrder, quote, fullOrder, rateOrder, cancelOrder, refreshPayment, buyPass } from '../lib/orders.js';
 import { PAYMENT_METHODS, GATEWAYS, qrFor } from '../lib/payments.js';
+import { startPayment, fonepayReturn } from '../lib/payment-flow.js';
 import { getSettings } from '../lib/settings.js';
 import { rt } from '../lib/runtime.js';
 
@@ -47,6 +48,17 @@ customer.get('/events', wrap(async (req, res) => {
   if (u.role === 'owner') (await query('SELECT id FROM stations WHERE active')).rows.forEach((r) => chans.push(`station:${r.id}`));
   subscribe(res, chans);
   res.write(`event: hello\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+}));
+
+// --- Fonepay web payment pages. The phone opens these straight from the QR, and Fonepay sends the browser back, so they carry no sign-in. ---
+const send = (res, r) => {
+  if (r.redirect) return res.redirect(r.redirect);
+  res.status(r.status || 200).type('html').send(r.html);
+};
+customer.get('/payments/fonepay/return', wrap(async (req, res) => send(res, await fonepayReturn(req.query))));
+customer.get('/payments/:id/pay', wrap(async (req, res) => {
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) throw notFound('Payment not found');
+  send(res, await startPayment(req.params.id));
 }));
 
 customer.use(authenticate);

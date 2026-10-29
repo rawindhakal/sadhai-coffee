@@ -67,7 +67,7 @@ export function PayModal({ paymentId, amount, onPaid, onClose, onCancel, big = f
           </div>
         ) : (
           <>
-            <h3 style={{ margin: '4px 0 2px' }}>Scan with any bank or wallet app</h3>
+            <h3 style={{ margin: '4px 0 2px' }}>{p?.qr?.kind === 'link' ? 'Scan with your phone camera' : 'Scan with any bank or wallet app'}</h3>
             <strong style={{ fontSize: big ? 34 : 24 }}>{rs(amount)}</strong>
             <div style={{ background: '#fff', padding: 12, borderRadius: 18, display: 'inline-block', margin: '12px 0', minWidth: size + 24, minHeight: size + 24, boxShadow: '0 6px 24px rgba(42,24,16,.12)' }}>
               {p?.qr ? <canvas ref={canvas} aria-label={`QR code to pay ${rs(amount)}`} />
@@ -76,11 +76,12 @@ export function PayModal({ paymentId, amount, onPaid, onClose, onCancel, big = f
             {p?.qr ? (
               <>
                 <p className="pulse muted" style={{ fontSize: big ? 20 : undefined, margin: '0 0 4px' }} aria-live="polite">Waiting for your payment… <b>{mmss}</b></p>
-                <p className="small muted" style={{ margin: 0 }}>Open your banking or wallet app, scan, and confirm. This window closes by itself once you have paid.</p>
+                <p className="small muted" style={{ margin: 0 }}>{p.qr.kind === 'link' ? 'Your phone opens Fonepay. Pay there with your bank or wallet app. ' : 'Open your banking or wallet app, scan, and confirm. '}This window closes by itself once you have paid.</p>
               </>
             ) : p?.qr_error ? <p className="small muted" style={{ margin: 0 }}>The QR could not be made. You can try again, or pay with cash instead.</p> : null}
             {err && p && <p className="small err">{err}</p>}
             <div className="row" style={{ justifyContent: 'center', marginTop: 14, gap: 8 }}>
+              {p?.qr?.kind === 'link' && <button className="btn primary" onClick={() => window.open(p.qr.value, 'fonepay', 'width=480,height=760')}>Open Fonepay here</button>}
               {p?.qr_error && <button className="btn primary" onClick={() => look(true)}>Try again</button>}
               <button className="btn ghost" onClick={onCancel || onClose}>{onCancel ? 'Cancel order' : 'Close'}</button>
             </div>

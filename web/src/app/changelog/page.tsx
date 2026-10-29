@@ -21,9 +21,15 @@ interface Release {
 
 const RELEASES: Release[] = [
   {
-    version: '2.1.0',
+    version: '2.1.1',
     date: '29 October 2026',
     badge: 'Latest',
+    highlight: 'Fonepay works with just the merchant code and secret key',
+    changes: [{ category: 'Added', items: [{ title: 'Fonepay web payment', desc: 'The QR opens Fonepay’s payment page on the live server (clientapi.fonepay.com) and the order starts when Fonepay confirms. The QR service with its own login is still available.' }] }],
+  },
+  {
+    version: '2.1.0',
+    date: '29 October 2026',
     highlight: 'Payments rebuilt: Fonepay dynamic QR only',
     changes: [
       { category: 'Changed', items: [
