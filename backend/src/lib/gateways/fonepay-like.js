@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { rt } from '../runtime.js';
-import { dynamicQr } from './emvqr.js';
+import { dynamicQr, fonepayQr } from './emvqr.js';
 
 /**
  * Fonepay and NepalPay QR are the same kind of merchant account, so one implementation serves both; `prefix` picks which saved settings it reads.
@@ -29,8 +29,9 @@ export function make(prefix) {
   const missing = () => [...(merchantCode() ? [] : [`${prefix}_merchant_code`]), ...(secret() ? [] : [`${prefix}_secret_key`])];
   const qrApiReady = () => missing().length === 0 && !!get('qr_username') && !!get('qr_password');
   const qrTemplate = () => (get('qr_template') || '').trim();
-  /** 'api' (real Fonepay-made QR, paid status known), 'own' (our QR from the merchant's printed text) or 'link' (web payment page). */
-  const qrMode = () => (qrApiReady() ? 'api' : qrTemplate() ? 'own' : 'link');
+  const generatedReady = () => !!merchantCode() && (!!(get('terminal_id') || '').trim() || !!(get('tag26_id') || '').trim());
+  /** 'api' (the gateway's own QR, paid status known), 'generated' (built here from the merchant and terminal ids), 'own' (from the printed QR text) or 'link' (payment page). */
+  const qrMode = () => (qrApiReady() ? 'api' : generatedReady() ? 'generated' : qrTemplate() ? 'own' : 'link');
 
   const reference = (id) => String(id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 24).toUpperCase();
 
@@ -77,7 +78,13 @@ export function make(prefix) {
     return { state: 'pending', raw: j };
   }
 
-  const ownQr = ({ amount, ref }) => dynamicQr({ template: qrTemplate(), amount, ref });
+  const ownQr = ({ amount, ref }) => (generatedReady()
+    ? fonepayQr({
+      amount, fonepayId: merchantCode(), terminalId: (get('terminal_id') || '').trim() || merchantCode(), tag26Id: (get('tag26_id') || '').trim() || undefined,
+      mcc: (get('mcc') || '5814').trim(), name: (get('merchant_name') || 'Sadhai Coffee').trim().slice(0, 25), city: (get('merchant_city') || 'Kathmandu').trim().slice(0, 15),
+      txnId: ref.slice(0, 20), remarks: 'Sadhai Coffee',
+    })
+    : dynamicQr({ template: qrTemplate(), amount, ref }));
 
   return { mode, merchantCode, missing, reference, requestUrl, readCallback, qrApiReady, qrReady: qrApiReady, qrMode, qrTemplate, createQr, qrStatus, ownQr };
 }

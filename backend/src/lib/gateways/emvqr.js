@@ -35,3 +35,17 @@ export function dynamicQr({ template, amount, ref }) {
   const body = rest.map(([t, v]) => tlv(t, v)).join('') + '6304';
   return body + crc16(body);
 }
+
+/**
+ * A Fonepay QR built from the merchant's own details, with no API login. Ported from akashpoudelnp/nepali-payment-qr-generator (FonepayQrGenerator).
+ * Tag 26 is either separate ids (fonepay.com, merchant id, terminal id) or one combined identifier (sub-tag 07). Tag 62 holds terminal, txn id, remarks.
+ */
+export function fonepayQr({ amount, fonepayId, terminalId, tag26Id, mcc = '5814', name = 'Sadhai Coffee', city = 'Kathmandu', txnId, remarks = 'Payment', country = 'NP' }) {
+  const l = (v) => String(v.length).padStart(2, '0');
+  const fp = tag26Id ? `0011fonepay.com07${l(tag26Id)}${tag26Id}` : `0011fonepay.com01${l(fonepayId)}${fonepayId}02${l(terminalId)}${terminalId}`;
+  const amountStr = Number(amount).toFixed(2);
+  const add = `07${l(terminalId)}${terminalId}02${l(txnId)}${txnId}08${l(remarks)}${remarks}`;
+  const body = '000201' + '010212' + `26${l(fp)}${fp}` + `5204${mcc}` + '5303524' + `54${l(amountStr)}${amountStr}` + `5802${country}`
+    + `59${l(name)}${name}` + `60${l(city)}${city}` + `62${l(add)}${add}` + '6304';
+  return body + crc16(body);
+}

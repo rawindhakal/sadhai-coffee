@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.0.3] - 2026-10-29
+
+### Added
+- A QR built from the merchant ID and terminal ID (or a combined ID), with shop name, city and category code, for Fonepay and NepalPay. Ported from `akashpoudelnp/nepali-payment-qr-generator` (`emvqr.js: fonepayQr`). No QR API login needed; staff confirm the payment. Order of preference: gateway QR service, built from IDs, printed QR text, payment page.
+
+---
+
 ## [2.0.2] - 2026-10-27
 
 ### Added

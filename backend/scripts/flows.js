@@ -332,6 +332,12 @@ const orderOf = async (c, id) => (await call('GET', `/orders/${id}`, null, c.tok
   ok(aw.some((x) => x.id === kq.body.order.id && x.manual), 'the counter sees the guest waiting to pay');
   ok((await call('POST', `/station/payments/${kq.body.payment.payment_id}/confirm`, {}, tok(tuStaff))).status === 200 && (await call('GET', `/kiosk/orders/${kq.body.order.id}`, null, tok(tuStaff))).body.status === 'placed', 'Payment received puts the order on the queue');
   ok((await call('POST', `/station/payments/${wq.body.payment.payment_id}/confirm`, {}, tok(tuStaff))).status === 409, 'a gateway-confirmed payment cannot be confirmed by hand');
+  // QR built from the merchant and terminal ID (no QR login), in the format of nepali-payment-qr-generator
+  await setCfg({ fonepay_terminal_id: '497140', fonepay_mcc: '5499', fonepay_merchant_name: 'Himalaya Tea Shop', fonepay_merchant_city: 'Kathmandu' });
+  const gq = await call('POST', '/kiosk/orders', { items: [line(ame)], customer_name: 'QR Guest', customer_phone: '9822222222', payment: 'fonepay', consent: true }, tok(tuStaff));
+  const gqr = (await call('GET', `/payments/${gq.body.payment.payment_id}`, null, tok(tuStaff))).body.qr;
+  ok(gqr?.kind === 'bank' && gqr.manual && gqr.value.startsWith('00020101021226') && gqr.value.includes('0011fonepay.com0107FLOWPID') && gqr.value.includes('0206497140') && gqr.value.includes('5406100.00') && gqr.value.includes('5204' + '5499') && crc(gqr.value.slice(0, -4)) === gqr.value.slice(-4), 'the QR is built from the merchant ID and terminal ID, with the amount and a correct checksum');
+  await setCfg({ fonepay_terminal_id: null, fonepay_mcc: null, fonepay_merchant_name: null, fonepay_merchant_city: null });
   await setCfg({ fonepay_qr_template: null });
   // order flow: the owner's rules apply to every way in
   const fl = (await call('GET', '/owner/order-flow', null, tok(owner))).body.flow;

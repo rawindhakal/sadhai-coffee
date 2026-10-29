@@ -95,7 +95,7 @@ export async function qrFor(payment) {
     try {
       if (g.qrMode() === 'api') qr = { kind: 'bank', value: (await g.createQr({ amount: payment.amount, prn: ref, note: 'Sadhai Coffee' })).qr };
       // The shop's own printed QR text, made into a QR for this amount. Only the kiosk and counter use it, because staff confirm it by hand.
-      else if (g.qrMode() === 'own' && ['kiosk', 'counter'].includes(channel)) qr = { kind: 'bank', manual: true, value: g.ownQr({ amount: payment.amount, ref }) };
+      else if (['generated', 'own'].includes(g.qrMode()) && ['kiosk', 'counter'].includes(channel)) qr = { kind: 'bank', manual: true, value: g.ownQr({ amount: payment.amount, ref }) };
     } catch (e) { note = e.message; console.error('qr', payment.provider, e.message); }
   }
   if (!qr) return { kind: 'link', value: payUrl(payment.id), ...(note ? { note } : {}) }; // not kept, so the next look tries the QR service again

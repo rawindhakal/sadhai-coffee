@@ -110,11 +110,17 @@ const GW: Record<string, { name: string; blurb: string; fields: GwField[]; sandb
   fonepay: { name: 'Fonepay', blurb: 'Fonepay Dynamic QR. A real QR for the exact amount that any bank or wallet app can scan. Without the QR user name and password, a link QR to Fonepay’s web page is used instead.', fields: [
     { key: 'fonepay_merchant_code', label: 'Merchant code (PID)' }, { key: 'fonepay_secret_key', label: 'Shared secret key', secret: true },
     { key: 'fonepay_qr_username', label: 'QR API user name', hint: 'Needed for the real dynamic QR.' }, { key: 'fonepay_qr_password', label: 'QR API password', secret: true },
+    { key: 'fonepay_terminal_id', label: 'Terminal ID', hint: 'About 6 digits, from your printed QR or Fonepay. Builds a QR for the exact amount with no QR login.' },
+    { key: 'fonepay_tag26_id', label: 'Combined ID (only if you have one)' }, { key: 'fonepay_merchant_name', label: 'Shop name on the QR' },
+    { key: 'fonepay_merchant_city', label: 'City on the QR' }, { key: 'fonepay_mcc', label: 'Business category code', hint: '5814 is coffee and fast food.' },
     { key: 'fonepay_qr_template', label: 'Your printed QR text (optional)', area: true, hint: 'Starts with 000201. Used at the kiosk and counter when there is no QR user name and password.' }],
     sandboxNote: 'In Sandbox, use the test merchant details Fonepay gave you.', ret: '/payments/fonepay/return' },
   nepalpay: { name: 'NepalPay QR', blurb: 'NepalPay QR. Customers scan a QR with any NepalPay bank or wallet app and pay the exact amount. The merchant code and secret key are enough to start.', fields: [
     { key: 'nepalpay_merchant_code', label: 'Merchant code' }, { key: 'nepalpay_secret_key', label: 'Secret key', secret: true },
     { key: 'nepalpay_qr_username', label: 'QR API user name', hint: 'Needed for the real dynamic QR.' }, { key: 'nepalpay_qr_password', label: 'QR API password', secret: true },
+    { key: 'nepalpay_terminal_id', label: 'Terminal ID', hint: 'About 6 digits, from your printed QR or Fonepay. Builds a QR for the exact amount with no QR login.' },
+    { key: 'nepalpay_tag26_id', label: 'Combined ID (only if you have one)' }, { key: 'nepalpay_merchant_name', label: 'Shop name on the QR' },
+    { key: 'nepalpay_merchant_city', label: 'City on the QR' }, { key: 'nepalpay_mcc', label: 'Business category code', hint: '5814 is coffee and fast food.' },
     { key: 'nepalpay_qr_template', label: 'Your printed QR text (optional)', area: true, hint: 'Starts with 000201. Used at the kiosk and counter when there is no QR user name and password.' }],
     sandboxNote: 'Sandbox uses the test server, so no real money moves.', ret: '/payments/nepalpay/return' },
 };
@@ -159,12 +165,12 @@ function GatewayCard({ id, data, reload }: { id: 'esewa' | 'fonepay' | 'nepalpay
       </div>
       {id !== 'esewa' && (() => {
         const set = (k: string) => !!item(`${id}_${k}`)?.is_set || (`${id}_${k}` in edit && !!edit[`${id}_${k}`]);
-        const qm = set('qr_username') && set('qr_password') && set('merchant_code') && set('secret_key') ? 'api' : set('qr_template') ? 'own' : 'link';
+        const qm = set('qr_username') && set('qr_password') && set('merchant_code') && set('secret_key') ? 'api' : set('merchant_code') && (set('terminal_id') || set('tag26_id')) ? 'generated' : set('qr_template') ? 'own' : 'link';
         return (
           <div className="card flat" style={{ borderColor: qm === 'api' ? 'var(--hill)' : 'var(--marigold)' }}>
-            <strong>{qm === 'api' ? 'Real dynamic QR is on' : qm === 'own' ? 'QR made from your printed QR text' : 'Not a real QR yet'}</strong>
+            <strong>{qm === 'api' ? 'Real dynamic QR is on' : qm === 'generated' ? 'QR built from your merchant and terminal ID' : qm === 'own' ? 'QR made from your printed QR text' : 'Not a real QR yet'}</strong>
             <p className="small muted" style={{ margin: '4px 0 0' }}>{qm === 'api' ? `Every payment gets its own ${g.name} QR for the exact amount, and the order starts by itself when it is paid.`
-              : qm === 'own' ? 'The kiosk and counter show a QR for the exact amount made from your printed QR. The gateway cannot tell us it was paid, so the barista presses Payment received. The website and app use the payment page.'
+              : qm === 'generated' || qm === 'own' ? `The kiosk and counter show a QR for the exact amount${qm === 'generated' ? ' built from your merchant and terminal ID' : ' made from your printed QR'}. The gateway cannot tell us it was paid, so the barista presses Payment received. The website and app use the payment page.`
               : `With only the merchant code and secret key the QR opens the ${g.name} payment page on the phone. For the real dynamic QR, ask ${g.name} for the QR API user name and password and save them below.`}</p>
           </div>
         );

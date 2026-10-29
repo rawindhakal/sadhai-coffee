@@ -1,2 +1,2 @@
 // Keep in sync with /VERSION. scripts/release.mjs updates this file.
-export const APP_VERSION = '2.0.2';
+export const APP_VERSION = '2.0.3';
